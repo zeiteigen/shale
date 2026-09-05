@@ -2,6 +2,50 @@ import { describe, expect, it } from "bun:test";
 import { QueueManager } from "./queue";
 
 describe("QueueManager", () => {
+  it("calls the before handler before each handler", async () => {
+    const events: string[] = [];
+    const queue = new QueueManager<number>((item) => {
+      events.push(`before:${item}`);
+    });
+
+    queue.addHandler((item) => {
+      events.push(`handle:${item}`);
+    });
+
+    queue.push(1);
+    queue.push(2);
+    await queue.idle();
+
+    expect(events).toEqual(["before:1", "handle:1", "before:2", "handle:2"]);
+  });
+
+  it("reports before handler errors through the handler error callback", async () => {
+    const processed: number[] = [];
+    const errors: number[] = [];
+    const queue = new QueueManager<number>((item) => {
+      if (item === 2) {
+        throw new Error("Invalid item");
+      }
+    });
+
+    queue.addHandler(
+      (item) => {
+        processed.push(item);
+      },
+      {
+        onError: (_error, item) => {
+          errors.push(item);
+        },
+      }
+    );
+
+    queue.pushMany([1, 2, 3]);
+    await queue.idle();
+
+    expect(processed).toEqual([1, 3]);
+    expect(errors).toEqual([2]);
+  });
+
   it("processes items sequentially per handler and broadcasts to all handlers", async () => {
     const queue = new QueueManager<number>();
 

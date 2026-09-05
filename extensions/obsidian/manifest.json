@@ -1,0 +1,13 @@
+{
+    "name": "obsidian parser",
+    "version": "0.0.1",
+    "description": "A parser for Obsidian markdown files.",
+    "crons": [
+        {
+            "name": "obsidian-parser-cron",
+            "script": "index.ts",
+            "schedule": "* * * * *"
+        }
+    ]
+    
+}

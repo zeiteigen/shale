@@ -1,4 +1,5 @@
 export type QueueHandler<T> = (item: T) => Promise<void> | void;
+export type QueueBeforeHandler<T> = (item: T) => Promise<void> | void;
 
 export interface HandlerOptions<T> {
   onError?: (error: unknown, item: T) => void | Promise<void>;
@@ -13,6 +14,8 @@ interface WorkerState<T> {
 
 export class QueueManager<T = unknown> {
   private workers: Set<WorkerState<T>> = new Set();
+
+  constructor(private readonly beforeHandler?: QueueBeforeHandler<T>) {}
 
   /**
    * Registers a handler to process items added to the queue.
@@ -93,6 +96,7 @@ export class QueueManager<T = unknown> {
       while (worker.queue.length > 0 && this.workers.has(worker)) {
         const item = worker.queue.shift()!;
         try {
+          await this.beforeHandler?.(item);
           await worker.handler(item);
         } catch (error) {
           if (worker.onError) {
