@@ -47,6 +47,8 @@ for await (const file of glob.scan(extensionsDir)) {
       if (manifest.crons) {
         for (const cron of manifest.crons) {
           cron.script = join(extensionFolder, cron.script);
+          cron.extensionId = manifest.name;
+          cron.namespace = manifest.namespace || manifest.name;
           crons.push(cron);
         }
       }

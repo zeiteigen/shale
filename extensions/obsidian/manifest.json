@@ -2,12 +2,12 @@
     "name": "obsidian parser",
     "version": "0.0.1",
     "description": "A parser for Obsidian markdown files.",
+    "namespace": "obsidian",
     "crons": [
         {
             "name": "obsidian-parser-cron",
             "script": "index.ts",
-            "schedule": "* * * * *"
+            "schedule": "0 0 * * *"
         }
     ]
-    
 }

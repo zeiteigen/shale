@@ -77,14 +77,40 @@ db.run(`
   END;
 `);
 
+// Vector virtual table triggers to prevent orphan embeddings on chunk delete or ID change
+db.run(`
+  CREATE TRIGGER IF NOT EXISTS chunks_vector_ad AFTER DELETE ON chunks BEGIN
+    DELETE FROM vector_index WHERE rowid = old.id;
+  END;
+`);
+
+db.run(`
+  CREATE TRIGGER IF NOT EXISTS chunks_vector_au AFTER UPDATE ON chunks BEGIN
+    DELETE FROM vector_index WHERE rowid = old.id AND old.id != new.id;
+  END;
+`);
+
+// Extension State Table (key-value store for watermarks, cursors, and persistent extension metadata)
+db.run(`
+  CREATE TABLE IF NOT EXISTS extension_state (
+    extension_id TEXT NOT NULL,
+    state_key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (extension_id, state_key)
+  ) STRICT;
+`);
+
 // Graph
 
-// 1. Entities Table (Nodes)
+// 1. Entities Table (Nodes with namespacing)
 db.run(`
   CREATE TABLE IF NOT EXISTS entities (
     id INTEGER PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
-    type TEXT NOT NULL
+    namespace TEXT NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    UNIQUE (namespace, name)
   ) STRICT;
 `);
 

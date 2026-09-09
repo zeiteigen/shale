@@ -1,5 +1,12 @@
 {
+  "name": "shale",
+  "version": "0.1.0",
+  "exports": {
+    "./sdk": "./sdk/index.ts",
+    "./sdk/*": "./sdk/*"
+  },
   "dependencies": {
+    "openai": "^7.12.1",
     "sqlite-vec": "^0.1.9"
   },
   "devDependencies": {

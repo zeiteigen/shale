@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { QueueManager } from "./queue";
+import { QueueManager } from "../lib/queue";
 
 describe("QueueManager", () => {
   it("calls the before handler before each handler", async () => {
@@ -36,7 +36,7 @@ describe("QueueManager", () => {
         onError: (_error, item) => {
           errors.push(item);
         },
-      }
+      },
     );
 
     queue.pushMany([1, 2, 3]);
@@ -104,7 +104,7 @@ describe("QueueManager", () => {
         onError: (_err, item) => {
           errors.push(item);
         },
-      }
+      },
     );
 
     queue.push("first");

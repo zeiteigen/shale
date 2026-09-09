@@ -1,5 +1,9 @@
 {
   "compilerOptions": {
-    "types": ["bun"]
+    "types": ["bun"],
+    "paths": {
+      "@shale/sdk": ["./sdk/index.ts"],
+      "@shale/sdk/*": ["./sdk/*"]
+    }
   }
 }
