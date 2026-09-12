@@ -3,7 +3,7 @@ import * as sqliteVec from "sqlite-vec";
 
 import { join } from "node:path";
 
-const db = new Database(join(import.meta.dir, "/production.db"));
+const db = new Database(join(import.meta.dir, "../production.db"));
 
 db.run("PRAGMA journal_mode = WAL;");
 db.run("PRAGMA foreign_keys = ON;");

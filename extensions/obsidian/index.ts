@@ -4,19 +4,31 @@ import { discoverVaults } from "./vault-finder";
 import {
   processVault,
   ingestFile,
+  ingestImageFile,
   parseFile,
+  parseImageFile,
+  findImageFiles,
+  findMarkdownFiles,
   type ProcessVaultResult,
   type IngestFileResult,
+  type IngestImageResult,
   type ParsedFile,
+  type ParsedImage,
 } from "./process-vaults";
 
 export {
   processVault,
   ingestFile,
+  ingestImageFile,
   parseFile,
+  parseImageFile,
+  findImageFiles,
+  findMarkdownFiles,
   type ProcessVaultResult,
   type IngestFileResult,
+  type IngestImageResult,
   type ParsedFile,
+  type ParsedImage,
 };
 
 /**

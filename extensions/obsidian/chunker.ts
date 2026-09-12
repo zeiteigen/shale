@@ -124,16 +124,17 @@ export function dynamicChunkNote(
     return [];
   }
 
+  // Whole note representation (Chunk 0)
+  const wholeNoteChunk: MarkdownChunk = {
+    heading: noteTitle,
+    level: 0,
+    chunk_index: 0,
+    text_content: trimmed,
+  };
+
   // 1. Atomic Notes (< 600 chars)
   if (len < 600) {
-    return [
-      {
-        heading: noteTitle,
-        level: 0,
-        chunk_index: 0,
-        text_content: trimmed,
-      },
-    ];
+    return [wholeNoteChunk];
   }
 
   // 2. Moderate Length Notes (600 - 2500 chars)
@@ -143,28 +144,31 @@ export function dynamicChunkNote(
 
     if (hasH1) {
       const sections = splitByHeadingRegex(trimmed, /^#\s+/, 1, noteTitle);
-      return sections.map((s, idx) => ({
+      const sectionChunks = sections.map((s, idx) => ({
         heading: s.heading,
         level: 1,
-        chunk_index: idx,
+        chunk_index: idx + 1,
         text_content: s.text,
       }));
+      return [wholeNoteChunk, ...sectionChunks];
     } else if (hasH2) {
       const sections = splitByHeadingRegex(trimmed, /^##\s+/, 2, noteTitle);
-      return sections.map((s, idx) => ({
+      const sectionChunks = sections.map((s, idx) => ({
         heading: s.heading,
         level: 2,
-        chunk_index: idx,
+        chunk_index: idx + 1,
         text_content: s.text,
       }));
+      return [wholeNoteChunk, ...sectionChunks];
     } else {
       const snippets = splitIntoSnippets(trimmed, 900);
-      return snippets.map((snip, idx) => ({
+      const snippetChunks = snippets.map((snip, idx) => ({
         heading: `${noteTitle} (Section ${idx + 1})`,
         level: 0,
-        chunk_index: idx,
+        chunk_index: idx + 1,
         text_content: snip,
       }));
+      return [wholeNoteChunk, ...snippetChunks];
     }
   }
 
@@ -179,8 +183,8 @@ export function dynamicChunkNote(
       ? splitByHeadingRegex(trimmed, /^#\s+/, 1, noteTitle)
       : [{ heading: noteTitle, text: trimmed, level: 0 }];
 
-  const chunks: MarkdownChunk[] = [];
-  let chunkIndex = 0;
+  const chunks: MarkdownChunk[] = [wholeNoteChunk];
+  let chunkIndex = 1;
 
   for (const sec of topSections) {
     // If section is long and contains H3 headings, subdivide by H3

@@ -20,6 +20,7 @@ import {
   type LLMOptions,
   type LLMResponse,
   type LLMQueryInput,
+  type LLMReasoningEffort,
 } from "./llm";
 import { ChunkSearcher, extractKeywords } from "./search";
 import type {
@@ -43,7 +44,13 @@ export { ContextHydrator } from "./context";
 export { GraphIngestor } from "./graph";
 export { UnifiedIngestor } from "./ingest";
 export { EmbedderClient, getEmbedding, getEmbeddings } from "./embed";
-export { LLMClient } from "./llm";
+export {
+  LLMClient,
+  type LLMOptions,
+  type LLMResponse,
+  type LLMQueryInput,
+  type LLMReasoningEffort,
+} from "./llm";
 export { ChunkSearcher, extractKeywords } from "./search";
 
 export class ShaleSDK {
@@ -76,9 +83,10 @@ export class ShaleSDK {
     this.embedder = new EmbedderClient(defaultEmbedderOptions);
     this.search = new ChunkSearcher(this.database, this.embedder);
 
-    const sharedLLMOptions: LLMOptions | undefined =
-      defaultLLMOptions ??
-      (defaultEmbedderOptions
+    const sharedLLMOptions: LLMOptions = {
+      reasoning_effort: "low",
+      max_thinking_tokens: 512,
+      ...(defaultEmbedderOptions
         ? {
             apiKey: defaultEmbedderOptions.apiKey,
             baseUrl: defaultEmbedderOptions.baseUrl,
@@ -88,7 +96,9 @@ export class ShaleSDK {
             maxRetries: defaultEmbedderOptions.maxRetries,
             client: defaultEmbedderOptions.client,
           }
-        : undefined);
+        : {}),
+      ...defaultLLMOptions,
+    };
     this.llm = new LLMClient(sharedLLMOptions);
   }
 

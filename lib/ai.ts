@@ -43,6 +43,16 @@ export interface LLMQueryInput {
   messages?: Array<OpenAI.Chat.Completions.ChatCompletionMessageParam>;
 }
 
+export type LLMReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | null;
+
 export interface LLMOptions extends AIClientOptions {
   model?: string;
   system?: string;
@@ -53,10 +63,17 @@ export interface LLMOptions extends AIClientOptions {
   detailed?: boolean;
   messages?: Array<OpenAI.Chat.Completions.ChatCompletionMessageParam>;
   responseFormat?: OpenAI.Chat.Completions.ChatCompletionCreateParams["response_format"];
+  reasoningEffort?: LLMReasoningEffort | string;
+  reasoning_effort?: LLMReasoningEffort | string;
+  maxThinkingTokens?: number | null;
+  max_thinking_tokens?: number | null;
+  thinkingBudget?: number | null;
+  thinking_budget?: number | null;
 }
 
 export interface LLMResponse {
   content: string;
+  reasoningContent?: string;
   model: string;
   finishReason?: string | null;
   usage?: {
@@ -231,6 +248,75 @@ export function normalizeVectorDimensions(
 }
 
 /**
+ * Detects whether an endpoint URL points to a local host (e.g. localhost, 127.0.0.1, Ollama, vLLM).
+ */
+export function isLocalEndpoint(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const raw =
+      url.startsWith("http://") || url.startsWith("https://")
+        ? url
+        : `http://${url}`;
+    const parsed = new URL(raw);
+    return (
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "0.0.0.0" ||
+      parsed.hostname === "::1" ||
+      parsed.hostname.endsWith(".local") ||
+      parsed.hostname === "host.docker.internal"
+    );
+  } catch {
+    return url.includes("localhost") || url.includes("127.0.0.1");
+  }
+}
+
+/**
+ * Resolves the request timeout in milliseconds.
+ *
+ * Local model servers (vLLM, Ollama, llama.cpp, LocalAI) must cold-load multi-gigabyte
+ * model weights from disk to GPU VRAM on the first request, which can take 15-45 seconds.
+ * To prevent premature "Request timed out" errors for local users without requiring artificial
+ * "warm-up" requests, local endpoints receive an automatic 300,000ms (5-minute) timeout.
+ * Cloud APIs (e.g. api.openai.com) default to 60,000ms.
+ * Explicit overrides via options or environment variables take highest priority.
+ */
+export function resolveTimeout(
+  options?: AIClientOptions,
+  type: "chat" | "embedding" = "chat",
+): number {
+  if (options?.timeoutMs !== undefined) {
+    return options.timeoutMs;
+  }
+
+  const envTimeout =
+    Number(process.env.MODEL_TIMEOUT_MS) ||
+    Number(process.env.OPENAI_TIMEOUT_MS) ||
+    (type === "chat"
+      ? Number(process.env.CHAT_TIMEOUT_MS) ||
+        Number(process.env.OPENAI_CHAT_TIMEOUT_MS)
+      : Number(process.env.EMBEDDING_TIMEOUT_MS) ||
+        Number(process.env.OPENAI_EMBEDDING_TIMEOUT_MS));
+
+  if (envTimeout && !isNaN(envTimeout) && envTimeout > 0) {
+    return envTimeout;
+  }
+
+  const rawBase =
+    options?.baseUrl ??
+    process.env.OPENAI_BASE_URL ??
+    (type === "chat"
+      ? process.env.OPENAI_CHAT_ENDPOINT
+      : process.env.EMBEDDING_BASE_URL);
+
+  if (isLocalEndpoint(rawBase)) {
+    return 300000; // 5 minutes for local model loading
+  }
+
+  return 60000; // 1 minute default for cloud APIs
+}
+
+/**
  * Instantiates an OpenAI SDK client configured with the provided options or environment settings.
  */
 export function createOpenAIClient(options?: AIClientOptions): OpenAI {
@@ -271,18 +357,23 @@ export function createOpenAIClient(options?: AIClientOptions): OpenAI {
     });
   };
 
-  const timeout =
-    options?.timeoutMs ?? (Number(process.env.EMBEDDING_TIMEOUT_MS) || 60000);
+  const rawBase =
+    options?.baseUrl ??
+    process.env.OPENAI_BASE_URL ??
+    process.env.EMBEDDING_BASE_URL;
+
+  const timeout = resolveTimeout(options);
+  const maxRetries =
+    options?.maxRetries ??
+    (Number(process.env.OPENAI_MAX_RETRIES) ||
+      (isLocalEndpoint(rawBase) ? 2 : 0));
 
   return new OpenAI({
     apiKey,
-    baseURL:
-      options?.baseUrl ??
-      process.env.OPENAI_BASE_URL ??
-      process.env.EMBEDDING_BASE_URL,
+    baseURL: rawBase,
     fetch: wrappedFetch as any,
     timeout,
-    maxRetries: options?.maxRetries ?? 0,
+    maxRetries,
   });
 }
 
@@ -326,10 +417,8 @@ export async function fetchOpenAIEmbeddings(
 
   const requestOptions: any = {
     path: endpoint,
+    timeout: resolveTimeout(options, "embedding"),
   };
-  if (options?.timeoutMs !== undefined) {
-    requestOptions.timeout = options.timeoutMs;
-  }
 
   let response: OpenAI.CreateEmbeddingResponse;
   try {
@@ -478,12 +567,51 @@ export async function fetchOpenAIChatCompletion(
     body.response_format = options.responseFormat;
   }
 
+  const envEffort = process.env.OPENAI_REASONING_EFFORT;
+  const defaultEffort =
+    envEffort !== undefined ? envEffort || undefined : "low";
+  const reasoningEffort =
+    options?.reasoningEffort !== undefined
+      ? options.reasoningEffort
+      : options?.reasoning_effort !== undefined
+        ? options.reasoning_effort
+        : defaultEffort;
+
+  if (reasoningEffort !== undefined && reasoningEffort !== null) {
+    body.reasoning_effort = reasoningEffort as any;
+  }
+
+  const envThinking =
+    process.env.OPENAI_MAX_THINKING_TOKENS ??
+    process.env.MAX_THINKING_TOKENS ??
+    process.env.OPENAI_THINKING_BUDGET;
+  const defaultThinkingTokens =
+    envThinking !== undefined
+      ? envThinking === ""
+        ? undefined
+        : Number(envThinking)
+      : 512;
+
+  const maxThinkingTokens =
+    options?.maxThinkingTokens !== undefined
+      ? options.maxThinkingTokens
+      : options?.max_thinking_tokens !== undefined
+        ? options.max_thinking_tokens
+        : options?.thinkingBudget !== undefined
+          ? options.thinkingBudget
+          : options?.thinking_budget !== undefined
+            ? options.thinking_budget
+            : defaultThinkingTokens;
+
+  if (maxThinkingTokens !== undefined && maxThinkingTokens !== null) {
+    (body as any).max_thinking_tokens = maxThinkingTokens;
+    (body as any).thinking_budget = maxThinkingTokens;
+  }
+
   const requestOptions: any = {
     path: endpoint,
+    timeout: resolveTimeout(options, "chat"),
   };
-  if (options?.timeoutMs !== undefined) {
-    requestOptions.timeout = options.timeoutMs;
-  }
 
   let completion: OpenAI.Chat.Completions.ChatCompletion;
   try {
@@ -518,10 +646,15 @@ export async function fetchOpenAIChatCompletion(
   }
 
   const choice = completion.choices?.[0];
-  const content = choice?.message?.content || "";
+  const message = choice?.message as any;
+  const rawContent = message?.content || "";
+  const reasoningContent =
+    message?.reasoning_content || (message as any)?.reasoning || undefined;
+  const content = rawContent || reasoningContent || "";
 
   return {
     content,
+    reasoningContent,
     model: completion.model || model,
     finishReason: choice?.finish_reason,
     usage: completion.usage
@@ -568,4 +701,6 @@ export default {
   fetchOpenAIEmbeddings,
   fetchOpenAIChatCompletion,
   queryLLM,
+  isLocalEndpoint,
+  resolveTimeout,
 };

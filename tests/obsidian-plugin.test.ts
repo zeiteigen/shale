@@ -18,7 +18,12 @@ import { dynamicChunkNote } from "../extensions/obsidian/chunker";
 import {
   processVault,
   ingestFile,
+  ingestImageFile,
   parseFile,
+  parseImageFile,
+  findImageFiles,
+  describeImageWithChatModel,
+  expandNoteWithChatModel,
 } from "../extensions/obsidian/index";
 
 function createTestDb(): Database {
@@ -228,10 +233,17 @@ Liberal internationalism suggests that constitutional democracies rarely go to w
 We conclude with a synthesis of modern governance frameworks and multilateral treaties.`;
 
       const chunks = dynamicChunkNote(moderateNote, "Liberalism");
-      expect(chunks.length).toBe(3);
-      expect(chunks[0].heading).toContain("Section 1");
-      expect(chunks[1].heading).toContain("Section 2");
-      expect(chunks[2].heading).toContain("Section 3");
+      // Requirement 1: Chunking should also chunk the entire note as Chunk 0
+      expect(chunks.length).toBe(4);
+      expect(chunks[0].chunk_index).toBe(0);
+      expect(chunks[0].heading).toBe("Liberalism");
+      expect(chunks[0].text_content).toBe(moderateNote.trim());
+      expect(chunks[1].chunk_index).toBe(1);
+      expect(chunks[1].heading).toContain("Section 1");
+      expect(chunks[2].chunk_index).toBe(2);
+      expect(chunks[2].heading).toContain("Section 2");
+      expect(chunks[3].chunk_index).toBe(3);
+      expect(chunks[3].heading).toContain("Section 3");
     });
 
     it("chunks large notes hierarchically by H2 and H3", () => {
@@ -618,6 +630,372 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       );
       expect(blankResult.chunksCreated).toBe(1);
       expect(blankResult.noteTitle).toBe("Blank");
+    });
+  });
+
+  describe("6. Whole Note Chunking (Requirement 1)", () => {
+    it("chunks entire note as Chunk 0 for both moderate and large notes", () => {
+      const noteTitle = "Distributed Systems";
+      const sampleText = `# Introduction
+Distributed systems consist of autonomous nodes communicating via network protocols.
+They solve fundamental challenges of scalability, fault tolerance, and geographic distribution across modern cloud infrastructure.
+Decentralized nodes coordinate without a global shared clock.
+
+# Consensus Algorithms
+Raft and Paxos ensure agreement across nodes despite network partitions and arbitrary node crashes.
+Leader election, log replication, and safety invariants form the core architectural mechanism.
+State machine replication guarantees that all replicas execute state transitions in identical order.
+
+# Data Replication
+Eventual consistency allows high availability while sacrificing immediate linearizability.
+Vector clocks and conflict-free replicated data types track causality across asynchronous concurrent events.`;
+
+      const chunks = dynamicChunkNote(sampleText, noteTitle);
+
+      // Chunk 0 must represent the entire note
+      expect(chunks.length).toBe(4);
+      expect(chunks[0].chunk_index).toBe(0);
+      expect(chunks[0].heading).toBe(noteTitle);
+      expect(chunks[0].level).toBe(0);
+      expect(chunks[0].text_content).toBe(sampleText.trim());
+
+      // Subsequent chunks represent the sections with contiguous indices
+      expect(chunks[1].chunk_index).toBe(1);
+      expect(chunks[1].heading).toContain("Introduction");
+      expect(chunks[2].chunk_index).toBe(2);
+      expect(chunks[2].heading).toContain("Consensus Algorithms");
+      expect(chunks[3].chunk_index).toBe(3);
+      expect(chunks[3].heading).toContain("Data Replication");
+    });
+
+    it("ensures atomic notes have Chunk 0 as the whole note without duplicates", () => {
+      const atomicText =
+        "CAP theorem states consistency, availability, partition tolerance trade-offs.";
+      const chunks = dynamicChunkNote(atomicText, "CAP");
+      expect(chunks.length).toBe(1);
+      expect(chunks[0].chunk_index).toBe(0);
+      expect(chunks[0].heading).toBe("CAP");
+      expect(chunks[0].text_content).toBe(atomicText);
+    });
+  });
+
+  describe("7. Multimodal Image Text Descriptions & Graph Edges (Requirement 2)", () => {
+    it("generates detailed layout and conceptual descriptions using Chat model and embeds image", async () => {
+      const db = createTestDb();
+      let capturedChatPrompt = "";
+      let capturedImageInput: any = null;
+
+      const dualMockFetch: typeof fetch = async (url: any, init: any) => {
+        const urlStr = String(url);
+        const body = init?.body ? JSON.parse(init.body) : {};
+
+        if (urlStr.includes("/chat/completions") || body.messages) {
+          const userMsg = body.messages.find((m: any) => m.role === "user");
+          if (Array.isArray(userMsg?.content)) {
+            const textPart = userMsg.content.find(
+              (p: any) => p.type === "text",
+            );
+            const imgPart = userMsg.content.find(
+              (p: any) => p.type === "image_url",
+            );
+            capturedChatPrompt = textPart?.text ?? "";
+            capturedImageInput = imgPart?.image_url?.url ?? "";
+          } else {
+            capturedChatPrompt = userMsg?.content ?? "";
+          }
+
+          return new Response(
+            JSON.stringify({
+              id: "chatcmpl-mock",
+              object: "chat.completion",
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content:
+                      "Physical Layout: Central node A with bidirectional links to nodes B and C. Legend in bottom right. Underlying Meaning: Depicts Byzantine fault tolerance voting architecture.",
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        // Embeddings endpoint
+        const inputCount = Array.isArray(body.input) ? body.input.length : 1;
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: Array.from({ length: inputCount }, (_, i) => ({
+              object: "embedding",
+              index: i,
+              embedding: new Array(1536).fill(0.04),
+            })),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
+        fetchFn: dualMockFetch,
+        timeoutMs: 2000,
+      });
+
+      const tempDir = mkdtempSync(join(tmpdir(), "img-test-"));
+      const imgPath = join(tempDir, "architecture.png");
+      writeFileSync(imgPath, "FAKE_IMAGE_BYTES_12345");
+
+      const imgResult = await ingestImageFile(
+        imgPath,
+        "Vault: CloudVault",
+        sdk,
+      );
+      expect(imgResult.imageTitle).toBe("architecture.png");
+      expect(imgResult.chunksCreated).toBe(1);
+
+      // Verify Chat model prompt covered both physical layout and underlying explanation/meaning
+      expect(capturedChatPrompt).toContain(
+        "Physical layout and visual elements",
+      );
+      expect(capturedChatPrompt).toContain(
+        "Underlying explanation and meaning",
+      );
+      expect(capturedImageInput).toContain("data:image/png;base64,");
+
+      // Verify Image entity and IN_SAME_VAULT edge
+      expect(
+        imgResult.entities.some(
+          (e) => e.name === "architecture.png" && e.type === "Image",
+        ),
+      ).toBe(true);
+      expect(
+        imgResult.edges.some(
+          (e) =>
+            e.source === "architecture.png" &&
+            e.target === "Vault: CloudVault" &&
+            e.relation === "IN_SAME_VAULT",
+        ),
+      ).toBe(true);
+
+      // Verify in SQLite database
+      const source = db
+        .query<{
+          type: string;
+          title: string;
+        }>("SELECT type, title FROM sources WHERE title = 'architecture.png'")
+        .get();
+      expect(source?.type).toBe("image");
+
+      const chunk = db
+        .query<{
+          text_content: string;
+        }>("SELECT text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'architecture.png')")
+        .get();
+      expect(chunk?.text_content).toContain("Physical Layout: Central node A");
+      expect(chunk?.text_content).toContain("Byzantine fault tolerance");
+    });
+
+    it("connects notes to images with FEATURES_IMAGE edge when referenced in notes", async () => {
+      const db = createTestDb();
+      const mockFetch: typeof fetch = async (url: any, init: any) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        const inputCount = Array.isArray(body.input) ? body.input.length : 1;
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: Array.from({ length: inputCount }, (_, i) => ({
+              object: "embedding",
+              index: i,
+              embedding: new Array(1536).fill(0.01),
+            })),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
+        fetchFn: mockFetch,
+        timeoutMs: 1000,
+      });
+
+      const tempDir = mkdtempSync(join(tmpdir(), "feat-img-test-"));
+      const notePath = join(tempDir, "Overview.md");
+      writeFileSync(
+        notePath,
+        `# Architecture Overview\nThis system diagram is shown below:\n![[system_flow.png]]\n`,
+      );
+
+      const result = await ingestFile(notePath, "Vault: MainVault", sdk);
+      expect(
+        result.entities.some(
+          (e) => e.name === "system_flow.png" && e.type === "Image",
+        ),
+      ).toBe(true);
+      expect(
+        result.edges.some(
+          (e) =>
+            e.source === "Overview" &&
+            e.target === "system_flow.png" &&
+            e.relation === "FEATURES_IMAGE",
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe("8. Chat Model Note Content Expansion (Requirement 3)", () => {
+    it("expands atomic notes with Chat model and adds an expanded context chunk", async () => {
+      const db = createTestDb();
+      let capturedPrompt = "";
+
+      const mockFetch: typeof fetch = async (url: any, init: any) => {
+        const urlStr = String(url);
+        const body = init?.body ? JSON.parse(init.body) : {};
+
+        if (urlStr.includes("/chat/completions") || body.messages) {
+          capturedPrompt = body.messages[0]?.content || "";
+          return new Response(
+            JSON.stringify({
+              id: "chatcmpl-exp",
+              object: "chat.completion",
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content:
+                      "Semantic Elaboration: Legitimacy defines why citizens voluntarily adhere to state directives without coercion. Related to Max Weber's authority types: rational-legal, traditional, and charismatic.",
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        const inputCount = Array.isArray(body.input) ? body.input.length : 1;
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: Array.from({ length: inputCount }, (_, i) => ({
+              object: "embedding",
+              index: i,
+              embedding: new Array(1536).fill(0.02),
+            })),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
+        fetchFn: mockFetch,
+        timeoutMs: 1500,
+      });
+
+      const tempDir = mkdtempSync(join(tmpdir(), "expand-test-"));
+      const notePath = join(tempDir, "Legitimacy.md");
+      writeFileSync(
+        notePath,
+        `Legitimacy is the popular acceptance of an authority, governing regime, or law.`,
+      );
+
+      const parsed = await parseFile(notePath, sdk, {
+        expandAtomicNotes: true,
+      });
+      expect(parsed.chunks.length).toBe(2);
+      expect(parsed.chunks[0].chunk_index).toBe(0);
+      expect(parsed.chunks[0].text_content).toContain(
+        "Legitimacy is the popular acceptance",
+      );
+      expect(parsed.chunks[1].chunk_index).toBe(1);
+      expect(parsed.chunks[1].heading).toBe("Legitimacy (Expanded Context)");
+      expect(parsed.chunks[1].text_content).toContain(
+        "Max Weber's authority types",
+      );
+
+      // Ingest note and check both chunks are embedded
+      const ingestRes = await ingestFile(notePath, "Vault: PolSci", sdk, {
+        expandAtomicNotes: true,
+      });
+      expect(ingestRes.chunksCreated).toBe(2);
+
+      const storedChunks = db
+        .query<{
+          text_content: string;
+        }>("SELECT text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'Legitimacy')")
+        .all();
+      expect(storedChunks.length).toBe(2);
+      expect(storedChunks[0].text_content).toContain(
+        "Legitimacy is the popular acceptance",
+      );
+      expect(storedChunks[1].text_content).toContain(
+        "Max Weber's authority types",
+      );
+    });
+  });
+
+  describe("9. Decoupled Embedding Architecture (Requirement 4)", () => {
+    it("allows note chunking/parsing to execute with zero embedding calls", async () => {
+      let embeddingCallsMade = 0;
+
+      const mockFetch: typeof fetch = async (url: any) => {
+        if (String(url).includes("/embeddings")) {
+          embeddingCallsMade++;
+        }
+        return new Response(JSON.stringify({ object: "list", data: [] }), {
+          status: 200,
+        });
+      };
+
+      const tempDir = mkdtempSync(join(tmpdir(), "decouple-test-"));
+      const notePath = join(tempDir, "DecoupledNote.md");
+      const noteContent = `# Decoupled Note
+This note is parsed and chunked without any embedding calls during the note chunking/parsing phase.
+This architecture guarantees that note chunking and parsing remains completely decoupled from embedding.
+When running embedding models locally, separating text preparation from model execution is critical.
+
+# Subtopic
+The local embedding model is executed in a dedicated phase outside of note chunking and parsing.
+This avoids constant model swapping between chat models and embedding models on local GPU memory.
+Furthermore, batches of chunks can be embedded together rather than one note at a time.`;
+
+      writeFileSync(notePath, noteContent);
+
+      // parseFile performs parsing and chunking with ZERO embedding calls
+      const parsed = await parseFile(notePath);
+      // Chunk 0 is the whole note, Chunk 1 is Section 1, Chunk 2 is Section 2
+      expect(parsed.chunks.length).toBe(3);
+      expect(parsed.contextualChunks.length).toBe(3);
+      expect(embeddingCallsMade).toBe(0);
+    });
+
+    it("supports passing precomputed embeddings into ingestFile to bypass embedder", async () => {
+      const db = createTestDb();
+      let embeddingCalls = 0;
+
+      const mockFetch: typeof fetch = async () => {
+        embeddingCalls++;
+        return new Response(JSON.stringify({ object: "list", data: [] }), {
+          status: 200,
+        });
+      };
+
+      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
+        fetchFn: mockFetch,
+      });
+
+      const tempDir = mkdtempSync(join(tmpdir(), "precomputed-test-"));
+      const notePath = join(tempDir, "Precomputed.md");
+      writeFileSync(notePath, `# Precomputed Note\nUsing precomputed vectors.`);
+
+      const customEmbedding = [new Array(4096).fill(0.123)];
+      const result = await ingestFile(notePath, "Vault: TestVault", sdk, {
+        embeddings: customEmbedding,
+        expandAtomicNotes: false,
+      });
+
+      expect(result.chunksCreated).toBe(1);
+      // No calls should have hit the mock embedding endpoint because precomputed embeddings were supplied
+      expect(embeddingCalls).toBe(0);
     });
   });
 });

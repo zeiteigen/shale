@@ -8,7 +8,7 @@ export interface ParsedNote {
   frontmatter: Record<string, unknown>;
 }
 
-const IMAGE_EXTENSIONS = new Set([
+export const IMAGE_EXTENSIONS = new Set([
   "png",
   "jpg",
   "jpeg",

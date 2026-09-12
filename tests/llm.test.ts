@@ -6,6 +6,8 @@ import {
   queryLLM,
   createOpenAIClient,
   resolveChatEndpoint,
+  isLocalEndpoint,
+  resolveTimeout,
   type FetchFn,
   type LLMOptions,
 } from "../lib/ai";
@@ -59,6 +61,44 @@ describe("LLM Querying & Multimodal Integration", () => {
       expect(resolveChatEndpoint()).toBe(
         "https://custom-gateway.local/v1/chat/completions",
       );
+    });
+  });
+
+  describe("Timeout & Local Model Cold-Load Resolution", () => {
+    it("identifies localhost and local IPs as local endpoints", () => {
+      expect(isLocalEndpoint("http://localhost:8080/v1")).toBe(true);
+      expect(isLocalEndpoint("http://127.0.0.1:11434/v1")).toBe(true);
+      expect(isLocalEndpoint("http://0.0.0.0:8000/v1")).toBe(true);
+      expect(isLocalEndpoint("https://api.openai.com/v1")).toBe(false);
+      expect(isLocalEndpoint("https://openrouter.ai/api/v1")).toBe(false);
+    });
+
+    it("allocates 300,000ms (5 mins) default timeout for local endpoints to allow cold model weight loading", () => {
+      delete process.env.MODEL_TIMEOUT_MS;
+      delete process.env.OPENAI_TIMEOUT_MS;
+      delete process.env.CHAT_TIMEOUT_MS;
+      process.env.OPENAI_BASE_URL = "http://localhost:8080/v1";
+
+      const timeout = resolveTimeout(undefined, "chat");
+      expect(timeout).toBe(300000);
+    });
+
+    it("uses 60,000ms default for cloud endpoints", () => {
+      delete process.env.MODEL_TIMEOUT_MS;
+      delete process.env.OPENAI_TIMEOUT_MS;
+      delete process.env.CHAT_TIMEOUT_MS;
+      process.env.OPENAI_BASE_URL = "https://api.openai.com/v1";
+
+      const timeout = resolveTimeout(undefined, "chat");
+      expect(timeout).toBe(60000);
+    });
+
+    it("respects explicit environment variable and options timeout overrides", () => {
+      process.env.MODEL_TIMEOUT_MS = "450000";
+      expect(resolveTimeout(undefined, "chat")).toBe(450000);
+
+      // Explicit options override takes highest priority
+      expect(resolveTimeout({ timeoutMs: 15000 }, "chat")).toBe(15000);
     });
   });
 
@@ -373,6 +413,332 @@ describe("LLM Querying & Multimodal Integration", () => {
           apiKey: "sk-key",
         }),
       ).rejects.toThrow(/OpenAI Chat API error \(HTTP 503/);
+    });
+  });
+
+  describe("Reasoning Effort Configuration", () => {
+    it("defaults reasoning_effort to 'low' in chat completions payload", async () => {
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      await queryLLM("Explain concept", {
+        fetchFn: mockFetch,
+        apiKey: "sk-key",
+      });
+
+      expect(interceptedBody.reasoning_effort).toBe("low");
+    });
+
+    it("defaults reasoning_effort to 'low' at SDK level via sdk.queryLLM and sdk.llm.complete", async () => {
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "sdk ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const sdk = createExtensionSDK(
+        "reasoning-test-ext",
+        undefined,
+        undefined,
+        {
+          apiKey: "sk-key",
+          fetchFn: mockFetch,
+        },
+      );
+
+      await sdk.queryLLM("Query test");
+      expect(interceptedBody.reasoning_effort).toBe("low");
+
+      await sdk.llm.complete("Complete test");
+      expect(interceptedBody.reasoning_effort).toBe("low");
+    });
+
+    it("respects explicit reasoningEffort and reasoning_effort query overrides", async () => {
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      // camelCase override
+      await queryLLM("Test medium", {
+        fetchFn: mockFetch,
+        reasoningEffort: "medium",
+      });
+      expect(interceptedBody.reasoning_effort).toBe("medium");
+
+      // snake_case override
+      await queryLLM("Test high", {
+        fetchFn: mockFetch,
+        reasoning_effort: "high",
+      });
+      expect(interceptedBody.reasoning_effort).toBe("high");
+    });
+
+    it("omits reasoning_effort when explicitly set to null", async () => {
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      await queryLLM("Test disabled", {
+        fetchFn: mockFetch,
+        reasoningEffort: null,
+      });
+      expect("reasoning_effort" in interceptedBody).toBe(false);
+
+      await queryLLM("Test disabled snake", {
+        fetchFn: mockFetch,
+        reasoning_effort: null,
+      });
+      expect("reasoning_effort" in interceptedBody).toBe(false);
+    });
+
+    it("respects OPENAI_REASONING_EFFORT environment variable default", async () => {
+      process.env.OPENAI_REASONING_EFFORT = "minimal";
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      await queryLLM("Test env", {
+        fetchFn: mockFetch,
+      });
+      expect(interceptedBody.reasoning_effort).toBe("minimal");
+    });
+
+    it("allows LLMClient to override default reasoning effort and merge per-query", async () => {
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const client = new LLMClient({
+        fetchFn: mockFetch,
+        apiKey: "key",
+        reasoning_effort: "high",
+      });
+
+      await client.query("Default high");
+      expect(interceptedBody.reasoning_effort).toBe("high");
+
+      await client.query("Override low", { reasoningEffort: "low" });
+      expect(interceptedBody.reasoning_effort).toBe("low");
+    });
+  });
+
+  describe("Thinking Tokens & Reasoning Budget Configuration", () => {
+    it("defaults max_thinking_tokens and thinking_budget to 512 in chat completions payload", async () => {
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      await queryLLM("Thinking test", {
+        fetchFn: mockFetch,
+        apiKey: "sk-key",
+      });
+
+      expect(interceptedBody.max_thinking_tokens).toBe(512);
+      expect(interceptedBody.thinking_budget).toBe(512);
+    });
+
+    it("defaults max_thinking_tokens to 512 at SDK level via sdk.queryLLM and sdk.llm.complete", async () => {
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "sdk ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const sdk = createExtensionSDK(
+        "thinking-test-ext",
+        undefined,
+        undefined,
+        {
+          apiKey: "sk-key",
+          fetchFn: mockFetch,
+        },
+      );
+
+      await sdk.queryLLM("Query test");
+      expect(interceptedBody.max_thinking_tokens).toBe(512);
+
+      await sdk.llm.complete("Complete test");
+      expect(interceptedBody.max_thinking_tokens).toBe(512);
+    });
+
+    it("respects explicit maxThinkingTokens, max_thinking_tokens, and thinkingBudget query overrides", async () => {
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      // camelCase
+      await queryLLM("Test 256", {
+        fetchFn: mockFetch,
+        maxThinkingTokens: 256,
+      });
+      expect(interceptedBody.max_thinking_tokens).toBe(256);
+      expect(interceptedBody.thinking_budget).toBe(256);
+
+      // snake_case
+      await queryLLM("Test 1024", {
+        fetchFn: mockFetch,
+        max_thinking_tokens: 1024,
+      });
+      expect(interceptedBody.max_thinking_tokens).toBe(1024);
+
+      // thinkingBudget
+      await queryLLM("Test budget", {
+        fetchFn: mockFetch,
+        thinkingBudget: 128,
+      });
+      expect(interceptedBody.max_thinking_tokens).toBe(128);
+    });
+
+    it("omits max_thinking_tokens and thinking_budget when explicitly set to null", async () => {
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      await queryLLM("Test disabled", {
+        fetchFn: mockFetch,
+        maxThinkingTokens: null,
+      });
+      expect("max_thinking_tokens" in interceptedBody).toBe(false);
+      expect("thinking_budget" in interceptedBody).toBe(false);
+    });
+
+    it("respects OPENAI_MAX_THINKING_TOKENS environment variable default", async () => {
+      process.env.OPENAI_MAX_THINKING_TOKENS = "768";
+      let interceptedBody: any = null;
+      const mockFetch: FetchFn = async (_url, init) => {
+        interceptedBody = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      await queryLLM("Test env", {
+        fetchFn: mockFetch,
+      });
+      expect(interceptedBody.max_thinking_tokens).toBe(768);
+    });
+
+    it("extracts reasoningContent in detailed response and handles reasoning-only responses", async () => {
+      const mockFetch: FetchFn = async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "Final answer",
+                  reasoning_content: "Step 1, Step 2",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const detailed = await queryLLM("Reasoning test", {
+        fetchFn: mockFetch,
+        detailed: true,
+      });
+
+      expect(detailed.content).toBe("Final answer");
+      expect(detailed.reasoningContent).toBe("Step 1, Step 2");
+
+      // Test fallback when content is empty but reasoning_content exists
+      const mockReasoningOnlyFetch: FetchFn = async () => {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  reasoning_content:
+                    "Only thoughts generated before token limit",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const contentFallback = await queryLLM("Fallback test", {
+        fetchFn: mockReasoningOnlyFetch,
+      });
+      expect(contentFallback).toBe(
+        "Only thoughts generated before token limit",
+      );
     });
   });
 });
