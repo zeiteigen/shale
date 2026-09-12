@@ -6,6 +6,7 @@ import defaultDb from "../lib/db-init";
 import type { ExtensionManifest } from "../lib/extension";
 import { StateManager } from "./state";
 import { ContextHydrator } from "./context";
+import { CheckpointManager } from "./checkpoint";
 import { GraphIngestor } from "./graph";
 import { UnifiedIngestor } from "./ingest";
 import {
@@ -23,8 +24,19 @@ import {
   type LLMReasoningEffort,
 } from "./llm";
 import { ChunkSearcher, extractKeywords } from "./search";
+import {
+  Logger,
+  createLoggerProxy,
+  type LogLevel,
+  type LoggerOptions,
+  type LoggerProxy,
+} from "./logger";
 import type {
   ExtensionStateRecord,
+  CheckpointRecord,
+  CheckpointItem,
+  CheckpointContext,
+  SaveCheckpointOptions,
   HydratedChunk,
   HydratedContext,
   IngestGraphOptions,
@@ -41,6 +53,7 @@ import type {
 export * from "./types";
 export { StateManager } from "./state";
 export { ContextHydrator } from "./context";
+export { CheckpointManager } from "./checkpoint";
 export { GraphIngestor } from "./graph";
 export { UnifiedIngestor } from "./ingest";
 export { EmbedderClient, getEmbedding, getEmbeddings } from "./embed";
@@ -52,16 +65,26 @@ export {
   type LLMReasoningEffort,
 } from "./llm";
 export { ChunkSearcher, extractKeywords } from "./search";
+export {
+  Logger,
+  createLoggerProxy,
+  type LogLevel,
+  type LoggerOptions,
+  type LoggerProxy,
+} from "./logger";
 
 export class ShaleSDK {
   readonly state: StateManager;
   readonly context: ContextHydrator;
+  readonly checkpoint: CheckpointManager;
   readonly graph: GraphIngestor;
   readonly ingest: UnifiedIngestor;
   readonly embedder: EmbedderClient;
   readonly llm: LLMClient;
   readonly search: ChunkSearcher;
+  readonly logger: Logger;
   readonly extensionId: string;
+  readonly extensionName: string;
   readonly namespace: string;
   readonly database: Database;
 
@@ -71,13 +94,17 @@ export class ShaleSDK {
     database?: Database,
     defaultEmbedderOptions?: EmbedderOptions,
     defaultLLMOptions?: LLMOptions,
+    extensionName?: string,
   ) {
     this.extensionId = extensionId;
+    this.extensionName = extensionName || extensionId;
     this.namespace = namespace || extensionId;
     this.database = database ?? defaultDb;
 
+    this.logger = new Logger(this.extensionName);
     this.state = new StateManager(this.extensionId, this.database);
     this.context = new ContextHydrator(this.database);
+    this.checkpoint = new CheckpointManager(this.extensionId, this.database);
     this.graph = new GraphIngestor(this.namespace, this.database);
     this.ingest = new UnifiedIngestor(this.namespace, this.database);
     this.embedder = new EmbedderClient(defaultEmbedderOptions);
@@ -134,6 +161,58 @@ export class ShaleSDK {
   ): Promise<string | LLMResponse> {
     return this.llm.query(input, options as any);
   }
+
+  /**
+   * Saves a temporary checkpoint for crash recovery.
+   */
+  saveCheckpoint<T = any>(
+    data: T,
+    optionsOrKey: string | SaveCheckpointOptions = "default",
+  ): CheckpointItem<T> {
+    return this.checkpoint.save<T>(data, optionsOrKey);
+  }
+
+  /**
+   * Retrieves queued checkpoints for this extension in FIFO order.
+   */
+  getCheckpoints<T = any>(): CheckpointItem<T>[] {
+    return this.checkpoint.getQueue<T>();
+  }
+
+  /**
+   * Alias for getCheckpoints().
+   */
+  getQueuedCheckpoints<T = any>(): CheckpointItem<T>[] {
+    return this.checkpoint.getQueue<T>();
+  }
+
+  /**
+   * Returns context object containing queued checkpoints and recovery helper methods.
+   */
+  getCheckpointContext<T = any>(): CheckpointContext<T> {
+    return this.checkpoint.getContext<T>();
+  }
+
+  /**
+   * Returns whether this extension has any checkpoints currently queued.
+   */
+  hasCheckpoints(): boolean {
+    return this.checkpoint.hasQueued();
+  }
+
+  /**
+   * Clears all queued checkpoints for this extension.
+   */
+  clearCheckpoints(): number {
+    return this.checkpoint.clear();
+  }
+
+  /**
+   * Deletes a checkpoint by ID.
+   */
+  deleteCheckpoint(id: string): boolean {
+    return this.checkpoint.delete(id);
+  }
 }
 
 /**
@@ -151,6 +230,7 @@ export function createExtensionSDK(
   database?: Database,
   defaultEmbedderOptions?: EmbedderOptions,
   defaultLLMOptions?: LLMOptions,
+  extensionName?: string,
 ): ShaleSDK {
   return new ShaleSDK(
     extensionId,
@@ -158,6 +238,7 @@ export function createExtensionSDK(
     database,
     defaultEmbedderOptions,
     defaultLLMOptions,
+    extensionName,
   );
 }
 
@@ -349,6 +430,18 @@ export const context: ContextHydrator = new Proxy({} as ContextHydrator, {
 });
 
 /**
+ * Dynamic proxy to the active extension's CheckpointManager.
+ * Automatically resolves to the ambient or discovered extension scope.
+ */
+export const checkpoint: CheckpointManager = new Proxy({} as CheckpointManager, {
+  get(_target, prop, receiver) {
+    const active = getActiveSDK().checkpoint;
+    const val = Reflect.get(active, prop, receiver);
+    return typeof val === "function" ? val.bind(active) : val;
+  },
+});
+
+/**
  * Dynamic proxy to the active extension's GraphIngestor.
  * Automatically resolves to the ambient or discovered extension scope.
  */
@@ -383,6 +476,12 @@ export const search: ChunkSearcher = new Proxy({} as ChunkSearcher, {
     return typeof val === "function" ? val.bind(active) : val;
   },
 });
+
+/**
+ * Dynamic proxy to the active extension's Logger.
+ * Automatically resolves to the ambient or discovered extension scope and prepends the extension name.
+ */
+export const logger: LoggerProxy = createLoggerProxy(() => getActiveSDK().logger);
 
 // ---------------------------------------------------------------------------
 // Individual Convenience Functions
@@ -430,6 +529,30 @@ export const getRecentChunks = (
   limit: number = 20,
 ): HydratedChunk[] =>
   getActiveSDK().context.getRecentChunks(sourceIdOrUri, limit);
+
+// Checkpoint functions
+export const saveCheckpoint = <T = any>(
+  data: T,
+  optionsOrKey: string | SaveCheckpointOptions = "default",
+): CheckpointItem<T> => getActiveSDK().saveCheckpoint(data, optionsOrKey);
+
+export const getCheckpoints = <T = any>(): CheckpointItem<T>[] =>
+  getActiveSDK().getCheckpoints<T>();
+
+export const getQueuedCheckpoints = <T = any>(): CheckpointItem<T>[] =>
+  getActiveSDK().getQueuedCheckpoints<T>();
+
+export const getCheckpointContext = <T = any>(): CheckpointContext<T> =>
+  getActiveSDK().getCheckpointContext<T>();
+
+export const hasCheckpoints = (): boolean =>
+  getActiveSDK().hasCheckpoints();
+
+export const clearCheckpoints = (): number =>
+  getActiveSDK().clearCheckpoints();
+
+export const deleteCheckpoint = (id: string): boolean =>
+  getActiveSDK().deleteCheckpoint(id);
 
 // Graph functions
 export const ingestGraph = (options: IngestGraphOptions): IngestGraphResult =>
@@ -488,5 +611,12 @@ export async function queryLLM(
 ): Promise<string | LLMResponse> {
   return getActiveSDK().queryLLM(input, options as any);
 }
+
+// Logger functions (delegating to active SDK instance)
+export const log = (...args: any[]): void => getActiveSDK().logger.log(...args);
+export const info = (...args: any[]): void => getActiveSDK().logger.info(...args);
+export const warn = (...args: any[]): void => getActiveSDK().logger.warn(...args);
+export const error = (...args: any[]): void => getActiveSDK().logger.error(...args);
+export const debug = (...args: any[]): void => getActiveSDK().logger.debug(...args);
 
 export default ShaleSDK;

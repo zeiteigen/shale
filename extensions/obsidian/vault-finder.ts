@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import { logger } from "@shale/sdk";
 
 export interface VaultInfo {
   id: string;
@@ -69,8 +70,8 @@ export function discoverVaults(configPath?: string): VaultInfo[] {
 
     return vaults;
   } catch (err) {
-    console.warn(
-      `[Obsidian] Failed to parse obsidian.json at ${targetPath}:`,
+    logger.warn(
+      `Failed to parse obsidian.json at ${targetPath}:`,
       err,
     );
     return [];

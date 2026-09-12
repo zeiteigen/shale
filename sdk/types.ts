@@ -5,6 +5,41 @@ export interface ExtensionStateRecord {
   updated_at: number;
 }
 
+export interface CheckpointRecord {
+  id: string;
+  extension_id: string;
+  checkpoint_key: string;
+  data: string;
+  created_at: number;
+  status: string;
+}
+
+export interface CheckpointItem<T = any> {
+  id: string;
+  extensionId: string;
+  key: string;
+  data: T;
+  createdAt: number;
+  status: string;
+}
+
+export interface CheckpointContext<T = any> {
+  extensionId: string;
+  checkpoints: CheckpointItem<T>[];
+  count: number;
+  latest: CheckpointItem<T> | null;
+  earliest: CheckpointItem<T> | null;
+  clear: () => number;
+  resolve: (id: string) => boolean;
+  get: (key: string) => CheckpointItem<T> | undefined;
+}
+
+export interface SaveCheckpointOptions {
+  key?: string;
+  id?: string;
+  status?: string;
+}
+
 export interface HydratedChunk {
   id: number;
   source_id: string;

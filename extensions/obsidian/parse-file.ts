@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { statSync, readFileSync } from "node:fs";
-import { sdkStorage, type ShaleSDK } from "@shale/sdk";
+import { sdkStorage, logger, type ShaleSDK } from "@shale/sdk";
 import { parseNoteContent, type ParsedNote } from "./parser";
 import { dynamicChunkNote, type MarkdownChunk } from "./chunker";
 
@@ -21,8 +21,29 @@ export interface ParsedFile {
 
 export interface ParseFileOptions {
   expandAtomicNotes?: boolean;
+  atomicNoteWordThreshold?: number;
   atomicNoteCharThreshold?: number;
+  targetTokens?: number;
   timeoutMs?: number;
+}
+
+/**
+ * Counts the number of words in a text string.
+ */
+export function countWords(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Calculates dynamic target token count for note expansion based on current note size.
+ */
+export function calculateDynamicTargetTokens(content: string): number {
+  const words = countWords(content);
+  // Dynamic scaling: base token allowance plus scaling proportional to content length
+  const target = Math.round(150 + words * 1.5);
+  return Math.max(100, Math.min(500, target));
 }
 
 /**
@@ -34,16 +55,38 @@ export async function expandNoteWithChatModel(
   noteTitle: string,
   content: string,
   timeoutMs?: number,
+  customTargetTokens?: number,
+  filePath?: string,
 ): Promise<string> {
-  const prompt = `You are a knowledge synthesis assistant. Expand on the following note content to provide a deeper, more detailed explanation for semantic search and knowledge retrieval.
-Elaborate on the key ideas, underlying principles, definitions, context, implications, and related domain concepts, while preserving the original intent and core meaning. Do not use stopwords (like "the," "is," "at," and "on").
+  // Check if a checkpoint already exists for this note summary
+  const checkpointKey = filePath
+    ? `ai_summary:${filePath}`
+    : `ai_summary:${noteTitle}`;
 
+  try {
+    const existing = sdk?.checkpoint?.get?.(checkpointKey);
+    if (existing?.data?.summary) {
+      (sdk?.logger ?? logger).log(
+        `Reusing checkpointed AI summary for note "${noteTitle}"`,
+      );
+      return existing.data.summary;
+    }
+  } catch {}
+
+  const targetTokens =
+    customTargetTokens ?? calculateDynamicTargetTokens(content);
+
+  const prompt = `Expand the following note for semantic retrieval. Provide key concepts, hardware/compiler flows, bit-level arithmetic, and related architectural domains. 
+
+Format requirements:
+- Structure as dense, telegraphic bullet points or semicolon-separated technical keywords.
+- Omit conversational prose, full sentence syntax, and filler articles (e.g., use "GGUF parser; bitstream generation" rather than complete sentences).
+- Target maximum output length: ~${targetTokens} tokens. Do not count.
 Note Title: ${noteTitle}
 Note Content:
 ${content}`;
 
-  const system =
-    "You are an expert knowledge assistant specializing in conceptual elaboration and semantic enrichment for personal knowledge bases.";
+  const system = `You are an expert knowledge assistant specializing in conceptual elaboration and semantic enrichment for personal knowledge bases. Target approximately ${targetTokens} tokens for your expansion response based on the note's size.`;
 
   try {
     const res = await sdk.queryLLM(
@@ -53,10 +96,30 @@ ${content}`;
       },
       timeoutMs !== undefined ? { timeoutMs } : undefined,
     );
-    return (typeof res === "string" ? res : res?.content || "").trim();
+    const summary = res.trim();
+    if (summary && sdk?.saveCheckpoint) {
+      try {
+        sdk.saveCheckpoint(
+          {
+            type: "ai_summary",
+            noteTitle,
+            filePath,
+            summary,
+            createdAt: Date.now(),
+          },
+          { id: checkpointKey, key: checkpointKey },
+        );
+      } catch (cpErr) {
+        (sdk?.logger ?? logger).warn(
+          `Failed to save checkpoint for note "${noteTitle}":`,
+          cpErr,
+        );
+      }
+    }
+    return summary;
   } catch (err) {
-    console.warn(
-      `[Obsidian] Failed to expand note "${noteTitle}" with Chat model:`,
+    (sdk?.logger ?? logger).warn(
+      `Failed to expand note "${noteTitle}" with Chat model:`,
       err,
     );
     return "";
@@ -140,24 +203,29 @@ export async function parseFile(
   const parsed = parseNoteContent(rawContent, noteTitle);
   const chunks = dynamicChunkNote(parsed.body, noteTitle);
 
-  // Content expansion using Chat model (Requirement 3: especially targeted toward atomic notes)
+  // Content expansion using Chat model: only short notes (under 250 words) get expanded
   const shouldExpand = options?.expandAtomicNotes ?? true;
-  const threshold = options?.atomicNoteCharThreshold ?? 800;
+  const wordCount = countWords(parsed.body);
+  const wordThreshold = options?.atomicNoteWordThreshold ?? 250;
   const timeoutMs = options?.timeoutMs;
 
   const sdk = sdkOverride ?? sdkStorage.getStore();
 
-  if (
-    shouldExpand &&
-    sdk &&
-    parsed.body.trim().length > 0 &&
-    parsed.body.trim().length < threshold
-  ) {
+  const isShortNote =
+    wordCount > 0 &&
+    wordCount < wordThreshold &&
+    (options?.atomicNoteCharThreshold !== undefined
+      ? parsed.body.trim().length < options.atomicNoteCharThreshold
+      : true);
+
+  if (shouldExpand && sdk && isShortNote) {
     const expanded = await expandNoteWithChatModel(
       sdk,
       noteTitle,
       parsed.body,
       timeoutMs,
+      options?.targetTokens,
+      filePath,
     );
     if (expanded) {
       chunks.push({

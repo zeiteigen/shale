@@ -94,6 +94,23 @@ function createTestDb(): Database {
     ) STRICT;
   `);
 
+  // Checkpoints
+  db.run(`
+    CREATE TABLE IF NOT EXISTS checkpoints (
+      id TEXT PRIMARY KEY,
+      extension_id TEXT NOT NULL,
+      checkpoint_key TEXT NOT NULL DEFAULT 'default',
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued'
+    ) STRICT;
+  `);
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_checkpoints_extension_status
+    ON checkpoints(extension_id, status, created_at);
+  `);
+
   // Entities with namespacing
   db.run(`
     CREATE TABLE IF NOT EXISTS entities (
@@ -411,9 +428,50 @@ describe("Database Schema & Trigger Integrity", () => {
       const ftsMatchesNew = db
         .query("SELECT * FROM chunks_fts WHERE chunks_fts MATCH 'Updated'")
         .all();
-
       expect(ftsMatchesOld.length).toBe(0);
       expect(ftsMatchesNew.length).toBe(1);
     });
+
+    describe("Checkpoints Table", () => {
+      it("stores and retrieves checkpoints in STRICT mode", () => {
+        db.query(`
+          INSERT INTO checkpoints (id, extension_id, checkpoint_key, data, created_at, status)
+          VALUES ('cp-1', 'ext-1', 'chunk-progress', '{"offset": 100}', 123456789, 'queued')
+        `).run();
+
+        const res = db
+          .query<{
+            id: string;
+            extension_id: string;
+            checkpoint_key: string;
+            data: string;
+            created_at: number;
+            status: string;
+          }>("SELECT * FROM checkpoints WHERE id = 'cp-1'")
+          .get()!;
+
+        expect(res).toBeDefined();
+        expect(res.id).toBe("cp-1");
+        expect(res.extension_id).toBe("ext-1");
+        expect(res.checkpoint_key).toBe("chunk-progress");
+        expect(JSON.parse(res.data)).toEqual({ offset: 100 });
+        expect(res.status).toBe("queued");
+      });
+
+      it("enforces PRIMARY KEY constraint on id", () => {
+        db.query(`
+          INSERT INTO checkpoints (id, extension_id, checkpoint_key, data, created_at, status)
+          VALUES ('cp-unique', 'ext-1', 'k1', 'data1', 100, 'queued')
+        `).run();
+
+        expect(() => {
+          db.query(`
+            INSERT INTO checkpoints (id, extension_id, checkpoint_key, data, created_at, status)
+            VALUES ('cp-unique', 'ext-1', 'k2', 'data2', 200, 'queued')
+          `).run();
+        }).toThrow();
+      });
+    });
   });
 });
+

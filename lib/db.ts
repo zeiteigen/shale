@@ -44,6 +44,23 @@ export interface ExtensionStateRecord {
   updated_at: number;
 }
 
+export interface CheckpointRecord {
+  id: string;
+  extension_id: string;
+  checkpoint_key: string;
+  data: string;
+  created_at: number;
+  status: string;
+}
+
+export interface SaveCheckpointInput {
+  id?: string;
+  extension_id: string;
+  checkpoint_key?: string;
+  data: any;
+  status?: string;
+}
+
 export interface IngestSourceAndChunksOptions {
   source: Source;
   chunks: {
@@ -322,7 +339,123 @@ export function getAllExtensionState(
   return stmt.all({ $extension_id: extensionId });
 }
 
-// 6. Chronological Context Hydration
+// 6. Checkpoints (Crash Recovery Work Queue)
+export function saveCheckpoint(input: SaveCheckpointInput): CheckpointRecord {
+  const id = input.id || randomUUIDv7();
+  const serializedData =
+    typeof input.data === "string" ? input.data : JSON.stringify(input.data);
+  const checkpointKey = input.checkpoint_key || "default";
+  const status = input.status || "queued";
+  const createdAt = Date.now();
+
+  const stmt = db.query(`
+    INSERT INTO checkpoints (id, extension_id, checkpoint_key, data, created_at, status)
+    VALUES ($id, $extension_id, $checkpoint_key, $data, $created_at, $status)
+    ON CONFLICT(id) DO UPDATE SET
+      extension_id = excluded.extension_id,
+      checkpoint_key = excluded.checkpoint_key,
+      data = excluded.data,
+      created_at = excluded.created_at,
+      status = excluded.status
+  `);
+
+  stmt.run({
+    $id: id,
+    $extension_id: input.extension_id,
+    $checkpoint_key: checkpointKey,
+    $data: serializedData,
+    $created_at: createdAt,
+    $status: status,
+  });
+
+  return {
+    id,
+    extension_id: input.extension_id,
+    checkpoint_key: checkpointKey,
+    data: serializedData,
+    created_at: createdAt,
+    status,
+  };
+}
+
+export function getQueuedCheckpoints(extensionId: string): CheckpointRecord[] {
+  const stmt = db.query<CheckpointRecord, { $extension_id: string }>(`
+    SELECT id, extension_id, checkpoint_key, data, created_at, status
+    FROM checkpoints
+    WHERE extension_id = $extension_id AND status = 'queued'
+    ORDER BY created_at ASC
+  `);
+  return stmt.all({ $extension_id: extensionId });
+}
+
+export function getAllCheckpoints(extensionId: string): CheckpointRecord[] {
+  const stmt = db.query<CheckpointRecord, { $extension_id: string }>(`
+    SELECT id, extension_id, checkpoint_key, data, created_at, status
+    FROM checkpoints
+    WHERE extension_id = $extension_id
+    ORDER BY created_at ASC
+  `);
+  return stmt.all({ $extension_id: extensionId });
+}
+
+export function getCheckpoint(id: string): CheckpointRecord | null {
+  const stmt = db.query<CheckpointRecord, { $id: string }>(`
+    SELECT id, extension_id, checkpoint_key, data, created_at, status
+    FROM checkpoints
+    WHERE id = $id
+  `);
+  const res = stmt.get({ $id: id });
+  return res || null;
+}
+
+export function hasQueuedCheckpoints(extensionId: string): boolean {
+  const stmt = db.query<{ one: number }, { $extension_id: string }>(`
+    SELECT 1 as one FROM checkpoints
+    WHERE extension_id = $extension_id AND status = 'queued'
+    LIMIT 1
+  `);
+  const res = stmt.get({ $extension_id: extensionId });
+  return !!res;
+}
+
+export function deleteCheckpoint(idOrKey: string): boolean {
+  const stmt = db.query(`
+    DELETE FROM checkpoints
+    WHERE id = $val OR checkpoint_key = $val
+  `);
+  const res = stmt.run({ $val: idOrKey });
+  return res.changes > 0;
+}
+
+export function clearQueuedCheckpoints(extensionId: string): number {
+  const stmt = db.query(`
+    DELETE FROM checkpoints
+    WHERE extension_id = $extension_id AND status = 'queued'
+  `);
+  const res = stmt.run({ $extension_id: extensionId });
+  return res.changes;
+}
+
+export function clearAllCheckpoints(extensionId: string): number {
+  const stmt = db.query(`
+    DELETE FROM checkpoints
+    WHERE extension_id = $extension_id
+  `);
+  const res = stmt.run({ $extension_id: extensionId });
+  return res.changes;
+}
+
+export function updateCheckpointStatus(id: string, status: string): boolean {
+  const stmt = db.query(`
+    UPDATE checkpoints
+    SET status = $status
+    WHERE id = $id
+  `);
+  const res = stmt.run({ $id: id, $status: status });
+  return res.changes > 0;
+}
+
+// 7. Chronological Context Hydration
 export function getChronologicalChunks(
   sourceIdOrUri: string,
   limit: number = 20,

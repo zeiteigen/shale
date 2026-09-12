@@ -1,4 +1,4 @@
-import { getSDK, type ShaleSDK } from "@shale/sdk";
+import { getSDK, logger, type ShaleSDK } from "@shale/sdk";
 import { parseFile, type ParsedFile, type ContextualChunk } from "./parse-file";
 import { parseImageFile, type ParsedImage } from "./parse-image";
 
@@ -13,6 +13,7 @@ export interface IngestFileResult {
   chunksCreated: number;
   entities: Array<{ name: string; type: string }>;
   edges: Array<{ source: string; target: string; relation: string }>;
+  parsedFile?: ParsedFile;
 }
 
 export interface IngestImageResult {
@@ -21,11 +22,20 @@ export interface IngestImageResult {
   chunksCreated: number;
   entities: Array<{ name: string; type: string }>;
   edges: Array<{ source: string; target: string; relation: string }>;
+  parsedImage?: ParsedImage;
 }
 
 export interface IngestFileOptions {
   embeddings?: number[][];
   expandAtomicNotes?: boolean;
+  deferEmbedding?: boolean;
+  parsedFile?: ParsedFile;
+}
+
+export interface IngestImageOptions {
+  precomputedEmbedding?: number[];
+  deferEmbedding?: boolean;
+  parsedImage?: ParsedImage;
 }
 
 /**
@@ -72,8 +82,8 @@ export async function embedContextualChunks(
   try {
     return await sdk.embed(textsToEmbed);
   } catch (embedErr) {
-    console.warn(
-      `[Obsidian] Embedding failed for "${noteTitle}", using fallback vector:`,
+    (sdk?.logger ?? logger).warn(
+      `Embedding failed for "${noteTitle}", using fallback vector:`,
       embedErr,
     );
     return generateFallbackEmbeddings(contextualChunks.length);
@@ -138,15 +148,37 @@ export async function ingestFile(
   const sdk = sdkOverride ?? getSDK();
 
   // 1. Note chunking and parsing (NO embedding inside parseFile!)
-  const parsedFile = await parseFile(filePath, sdk, {
-    expandAtomicNotes: options?.expandAtomicNotes,
-  });
+  const parsedFile =
+    options?.parsedFile ??
+    (await parseFile(filePath, sdk, {
+      expandAtomicNotes: options?.expandAtomicNotes,
+    }));
+
+  // Build Note entity, Vault membership edge, wikilink reference edges, and image feature edges
+  const { entities, edges } = buildNoteGraphElements(
+    parsedFile.noteTitle,
+    vaultEntityName,
+    parsedFile.parsed.wikilinks,
+    parsedFile.parsed.images,
+  );
+
+  // If embedding is deferred (Phase 1 Chat-only phase), return early without calling embedder
+  if (options?.deferEmbedding) {
+    return {
+      filePath,
+      noteTitle: parsedFile.noteTitle,
+      chunksCreated: 0,
+      entities,
+      edges,
+      parsedFile,
+    };
+  }
 
   // Check context hydration for historical continuity
   const existingContext = sdk.context.hydrate(parsedFile.noteUri, 3);
   if (existingContext.chunks.length > 0) {
-    console.log(
-      `[Obsidian] Hydrated ${existingContext.chunks.length} prior chunks for "${parsedFile.noteTitle}"`,
+    (sdk?.logger ?? logger).log(
+      `Hydrated ${existingContext.chunks.length} prior chunks for "${parsedFile.noteTitle}"`,
     );
   }
 
@@ -176,20 +208,13 @@ export async function ingestFile(
     namespace: "obsidian",
   });
 
-  // 4. Build Note entity, Vault membership edge, wikilink reference edges, and image feature edges
-  const { entities, edges } = buildNoteGraphElements(
-    parsedFile.noteTitle,
-    vaultEntityName,
-    parsedFile.parsed.wikilinks,
-    parsedFile.parsed.images,
-  );
-
   return {
     filePath,
     noteTitle: parsedFile.noteTitle,
     chunksCreated: ingestResult.chunksCount,
     entities,
     edges,
+    parsedFile,
   };
 }
 
@@ -204,16 +229,45 @@ export async function ingestImageFile(
   filePath: string,
   vaultEntityName: string = "Vault",
   sdkOverride?: ShaleSDK,
-  precomputedEmbedding?: number[],
+  embeddingOrOptions?: number[] | IngestImageOptions,
 ): Promise<IngestImageResult> {
   const sdk = sdkOverride ?? getSDK();
 
+  const options: IngestImageOptions = Array.isArray(embeddingOrOptions)
+    ? { precomputedEmbedding: embeddingOrOptions }
+    : (embeddingOrOptions ?? {});
+
   // 1. Image parsing and multimodal description via Chat model (no embedding inside parser)
-  const parsedImage = await parseImageFile(filePath, sdk);
+  const parsedImage =
+    options.parsedImage ?? (await parseImageFile(filePath, sdk));
+
+  // Image entity and Vault membership edge
+  const entities: Array<{ name: string; type: string }> = [
+    { name: parsedImage.imageTitle, type: "Image" },
+  ];
+  const edges: Array<{ source: string; target: string; relation: string }> = [
+    {
+      source: parsedImage.imageTitle,
+      target: vaultEntityName,
+      relation: "IN_SAME_VAULT",
+    },
+  ];
+
+  // If embedding is deferred (Phase 1 Chat-only phase), return early without calling embedder
+  if (options.deferEmbedding) {
+    return {
+      filePath,
+      imageTitle: parsedImage.imageTitle,
+      chunksCreated: 0,
+      entities,
+      edges,
+      parsedImage,
+    };
+  }
 
   // 2. Embedding generated OUTSIDE parsing
   const embedding =
-    precomputedEmbedding ??
+    options.precomputedEmbedding ??
     (
       await embedContextualChunks(
         sdk,
@@ -241,24 +295,13 @@ export async function ingestImageFile(
     namespace: "obsidian",
   });
 
-  // 4. Image entity and Vault membership edge
-  const entities: Array<{ name: string; type: string }> = [
-    { name: parsedImage.imageTitle, type: "Image" },
-  ];
-  const edges: Array<{ source: string; target: string; relation: string }> = [
-    {
-      source: parsedImage.imageTitle,
-      target: vaultEntityName,
-      relation: "IN_SAME_VAULT",
-    },
-  ];
-
   return {
     filePath,
     imageTitle: parsedImage.imageTitle,
     chunksCreated: ingestResult.chunksCount,
     entities,
     edges,
+    parsedImage,
   };
 }
 

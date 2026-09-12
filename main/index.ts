@@ -1,38 +1,152 @@
+import { dirname, join } from "node:path";
 import ingestQueue from "./ingest-queue";
 import { isIngestMaterial } from "../lib/ingest.types";
-import { crons } from "./load-extensions";
-import { createExtensionSDK, sdkStorage } from "../sdk";
+import {
+  crons,
+  checkpointRecoverScripts,
+  extensionNamespaces,
+  getCheckpointRecoverScript,
+} from "./load-extensions";
+import { createExtensionSDK, sdkStorage, findNearestManifest } from "../sdk";
+import { hasQueuedCheckpoints } from "../lib/db";
 import type { CronExtension } from "../lib/extension";
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-Bun.serve({
-  port: 7425,
-  routes: {
-    "/ingest": async (req) => {
-      try {
-        const body = await req.json();
+try {
+  Bun.serve({
+    port: Number(process.env.PORT) || 7425,
+    routes: {
+      "/ingest": async (req) => {
+        try {
+          const body = await req.json();
 
-        if (!isIngestMaterial(body)) {
+          if (!isIngestMaterial(body)) {
+            return new Response("ERR");
+          }
+
+          ingestQueue.add(body);
+          return new Response("OK");
+        } catch (err: any) {
+          console.log("Err in /ingest:", JSON.stringify(err));
           return new Response("ERR");
         }
-
-        ingestQueue.add(body);
-        return new Response("OK");
-      } catch (err: any) {
-        console.log("Err in /ingest:", JSON.stringify(err));
-        return new Response("ERR");
-      }
+      },
     },
-  },
-});
-
-console.log("Ingest server running on port 7425");
+  });
+  console.log("Ingest server running on port 7425");
+} catch (err: any) {
+  if (err?.code === "EADDRINUSE") {
+    console.warn(
+      "Port 7425 is already in use, skipping HTTP server startup in this process.",
+    );
+  } else {
+    throw err;
+  }
+}
 
 console.log("Loaded crons:", crons);
 
+const inFlightRecoveries = new Map<string, Promise<void>>();
+
+export async function runCheckpointRecover(
+  extensionId: string,
+  scriptPath: string,
+  namespace?: string,
+): Promise<void> {
+  const ns = namespace ?? extensionNamespaces.get(extensionId) ?? extensionId;
+  const sdk = createExtensionSDK(extensionId, ns);
+  const context = sdk.getCheckpointContext();
+  if (context.count === 0) {
+    return;
+  }
+
+  await sdkStorage.run(sdk, async () => {
+    let mod: any;
+    try {
+      mod = await import(scriptPath);
+    } catch {
+      // Fall back to transpilation/AsyncFunction if dynamic import fails
+    }
+
+    if (mod) {
+      if (typeof mod.run === "function") {
+        await mod.run(sdk, context);
+        for (const cp of context.checkpoints) {
+          sdk.deleteCheckpoint(cp.id);
+        }
+        return;
+      }
+      if (typeof mod.default === "function") {
+        await mod.default(sdk, context);
+        for (const cp of context.checkpoints) {
+          sdk.deleteCheckpoint(cp.id);
+        }
+        return;
+      }
+    }
+
+    const code = await Bun.file(scriptPath).text();
+    const transpiler = new Bun.Transpiler({ loader: "ts" });
+    const jsCode = transpiler.transformSync(code);
+    const runFn = new AsyncFunction("shared", jsCode);
+
+    await runFn({ sdk, context });
+    for (const cp of context.checkpoints) {
+      sdk.deleteCheckpoint(cp.id);
+    }
+  });
+}
+
+export async function wait_for_checkpoint_script(
+  extensionId: string,
+  cron?: CronExtension,
+): Promise<void> {
+  if (inFlightRecoveries.has(extensionId)) {
+    await inFlightRecoveries.get(extensionId);
+    return;
+  }
+
+  let scriptPath = getCheckpointRecoverScript(extensionId);
+  if (!scriptPath && cron?.script) {
+    try {
+      const discovered = findNearestManifest(dirname(cron.script));
+      if (discovered?.manifest?.checkpoint_recover) {
+        scriptPath = join(discovered.dir, discovered.manifest.checkpoint_recover);
+      }
+    } catch {}
+  }
+
+  if (!scriptPath) {
+    return;
+  }
+
+  if (!hasQueuedCheckpoints(extensionId)) {
+    return;
+  }
+
+  const recoveryPromise = (async () => {
+    try {
+      await runCheckpointRecover(extensionId, scriptPath, cron?.namespace);
+    } catch (err: any) {
+      console.error(
+        `Error in checkpoint recovery for extension ${extensionId}:`,
+        err?.message || err,
+      );
+    } finally {
+      inFlightRecoveries.delete(extensionId);
+    }
+  })();
+
+  inFlightRecoveries.set(extensionId, recoveryPromise);
+  await recoveryPromise;
+}
+
 export async function runCron(cron: CronExtension) {
   try {
+    const extensionId = cron.extensionId || "default";
+    await wait_for_checkpoint_script(extensionId, cron);
+
     const sdk = createExtensionSDK(
       cron.extensionId || "default",
       cron.namespace,

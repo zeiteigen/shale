@@ -25,6 +25,10 @@ import {
   describeImageWithChatModel,
   expandNoteWithChatModel,
 } from "../extensions/obsidian/index";
+import {
+  countWords,
+  calculateDynamicTargetTokens,
+} from "../extensions/obsidian/parse-file";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -790,7 +794,9 @@ Vector clocks and conflict-free replicated data types track causality across asy
       const chunk = db
         .query<{
           text_content: string;
-        }>("SELECT text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'architecture.png')")
+        }>(
+          "SELECT text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'architecture.png')",
+        )
         .get();
       expect(chunk?.text_content).toContain("Physical Layout: Central node A");
       expect(chunk?.text_content).toContain("Byzantine fault tolerance");
@@ -921,7 +927,9 @@ Vector clocks and conflict-free replicated data types track causality across asy
       const storedChunks = db
         .query<{
           text_content: string;
-        }>("SELECT text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'Legitimacy')")
+        }>(
+          "SELECT text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'Legitimacy')",
+        )
         .all();
       expect(storedChunks.length).toBe(2);
       expect(storedChunks[0].text_content).toContain(
@@ -929,6 +937,138 @@ Vector clocks and conflict-free replicated data types track causality across asy
       );
       expect(storedChunks[1].text_content).toContain(
         "Max Weber's authority types",
+      );
+
+      // Verify dynamic tokens requested in system prompt
+      expect(capturedPrompt).toContain(
+        "Target approximately 138 tokens for your expansion response based on the note's size.",
+      );
+    });
+
+    it("expands only short notes under 250 words and skips notes with 250 or more words", async () => {
+      const db = createTestDb();
+      let chatCalls = 0;
+
+      const mockFetch: typeof fetch = async (url: any, init: any) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/chat/completions")) {
+          chatCalls++;
+          return new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content: "Expanded concepts for short note.",
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: [{ object: "embedding", index: 0, embedding: new Array(1536).fill(0.01) }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
+        fetchFn: mockFetch,
+      });
+
+      const tempDir = mkdtempSync(join(tmpdir(), "word-limit-test-"));
+
+      // 1. Long note with 260 words (>= 250 words)
+      const longWords = Array.from({ length: 260 }, (_, i) => `word${i}`).join(" ");
+      const longNotePath = join(tempDir, "LongNote.md");
+      writeFileSync(longNotePath, longWords);
+
+      const parsedLong = await parseFile(longNotePath, sdk);
+      // Long note must NOT be expanded
+      expect(countWords(longWords)).toBe(260);
+      expect(parsedLong.chunks.some((c) => c.heading?.includes("Expanded Context"))).toBe(false);
+      expect(chatCalls).toBe(0);
+
+      // 2. Note with exactly 250 words (>= 250 words)
+      const exact250Words = Array.from({ length: 250 }, (_, i) => `term${i}`).join(" ");
+      const exact250NotePath = join(tempDir, "Exact250Note.md");
+      writeFileSync(exact250NotePath, exact250Words);
+
+      const parsed250 = await parseFile(exact250NotePath, sdk);
+      expect(countWords(exact250Words)).toBe(250);
+      expect(parsed250.chunks.some((c) => c.heading?.includes("Expanded Context"))).toBe(false);
+      expect(chatCalls).toBe(0);
+
+      // 3. Short note with 50 words (< 250 words)
+      const shortWords = Array.from({ length: 50 }, (_, i) => `concept${i}`).join(" ");
+      const shortNotePath = join(tempDir, "ShortNote.md");
+      writeFileSync(shortNotePath, shortWords);
+
+      const parsedShort = await parseFile(shortNotePath, sdk);
+      // Short note MUST be expanded
+      expect(countWords(shortWords)).toBe(50);
+      expect(parsedShort.chunks.some((c) => c.heading?.includes("Expanded Context"))).toBe(true);
+      expect(chatCalls).toBe(1);
+    });
+
+    it("dynamically computes target tokens based on note size in the system prompt", async () => {
+      const db = createTestDb();
+      const capturedSystemPrompts: string[] = [];
+
+      const mockFetch: typeof fetch = async (url: any, init: any) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        if (body.messages) {
+          const sys = body.messages.find((m: any) => m.role === "system");
+          if (sys) {
+            capturedSystemPrompts.push(sys.content);
+          }
+          return new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content: "Expanded content.",
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
+      };
+
+      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
+        fetchFn: mockFetch,
+      });
+
+      // Check helper calculations
+      expect(countWords("")).toBe(0);
+      expect(countWords("   \n\t  ")).toBe(0);
+      expect(countWords("one two   three")).toBe(3);
+
+      const tokens10 = calculateDynamicTargetTokens("a ".repeat(10));
+      const tokens100 = calculateDynamicTargetTokens("a ".repeat(100));
+      const tokens200 = calculateDynamicTargetTokens("a ".repeat(200));
+
+      expect(tokens10).toBeLessThan(tokens100);
+      expect(tokens100).toBeLessThan(tokens200);
+
+      // Test system prompt injection for a 20-word note vs 120-word note
+      await expandNoteWithChatModel(sdk, "Note20", "word ".repeat(20));
+      await expandNoteWithChatModel(sdk, "Note120", "word ".repeat(120));
+
+      expect(capturedSystemPrompts.length).toBe(2);
+      expect(capturedSystemPrompts[0]).toContain(
+        `Target approximately ${calculateDynamicTargetTokens("word ".repeat(20))} tokens`,
+      );
+      expect(capturedSystemPrompts[1]).toContain(
+        `Target approximately ${calculateDynamicTargetTokens("word ".repeat(120))} tokens`,
       );
     });
   });
@@ -996,6 +1136,104 @@ Furthermore, batches of chunks can be embedded together rather than one note at 
       expect(result.chunksCreated).toBe(1);
       // No calls should have hit the mock embedding endpoint because precomputed embeddings were supplied
       expect(embeddingCalls).toBe(0);
+    });
+
+    it("enforces strict two-phase execution: all chat model requests complete before any embedding request starts", async () => {
+      const db = createTestDb();
+      const callLog: Array<"chat" | "embedding"> = [];
+
+      const mockFetch: typeof fetch = async (url: any) => {
+        const urlStr = url.toString();
+        if (urlStr.includes("/chat/completions")) {
+          callLog.push("chat");
+          return new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content: "Expanded content or description from chat model.",
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        } else if (urlStr.includes("/embeddings")) {
+          callLog.push("embedding");
+          return new Response(
+            JSON.stringify({
+              object: "list",
+              data: [
+                {
+                  index: 0,
+                  embedding: new Array(4096).fill(0.01),
+                },
+                {
+                  index: 1,
+                  embedding: new Array(4096).fill(0.02),
+                },
+                {
+                  index: 2,
+                  embedding: new Array(4096).fill(0.03),
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
+        fetchFn: mockFetch,
+      });
+
+      const tempDir = mkdtempSync(join(tmpdir(), "twophase-vault-"));
+      const vaultInfo = {
+        id: "twophase-vault",
+        path: tempDir,
+        name: "twophase-vault",
+      };
+
+      // Create 2 atomic notes (triggering Chat model expansion)
+      writeFileSync(
+        join(tempDir, "Atomic1.md"),
+        "# Atomic Note 1\nConcise definition.",
+      );
+      writeFileSync(
+        join(tempDir, "Atomic2.md"),
+        "# Atomic Note 2\nAnother concise definition.",
+      );
+
+      // Create 1 image (triggering Chat model image description)
+      writeFileSync(
+        join(tempDir, "diagram.png"),
+        Buffer.from("fake-png-binary-content"),
+      );
+
+      const result = await processVault(vaultInfo, sdk);
+
+      expect(result.notesProcessed).toBe(2);
+      expect(result.imagesProcessed).toBe(1);
+
+      // Verify that chat model requests happened
+      const chatCalls = callLog.filter((c) => c === "chat");
+      const embedCalls = callLog.filter((c) => c === "embedding");
+      expect(chatCalls.length).toBeGreaterThanOrEqual(3); // 2 note expansions + 1 image description
+      expect(embedCalls.length).toBeGreaterThanOrEqual(2); // note and image embeddings
+
+      // Crucial assertion: All chat calls must happen strictly before the first embedding call
+      const firstEmbedIndex = callLog.indexOf("embedding");
+      const lastChatIndex = callLog.lastIndexOf("chat");
+
+      expect(firstEmbedIndex).toBeGreaterThan(-1);
+      expect(lastChatIndex).toBeGreaterThan(-1);
+      expect(lastChatIndex).toBeLessThan(firstEmbedIndex);
+
+      // Verify no interleaving (no chat calls after the first embedding call)
+      const callsAfterFirstEmbed = callLog.slice(firstEmbedIndex);
+      expect(callsAfterFirstEmbed.every((c) => c === "embedding")).toBe(true);
     });
   });
 });

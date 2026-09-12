@@ -29,6 +29,22 @@ import {
   getRecentChunks,
   ingestGraph,
   ingestSourceAndChunks,
+  CheckpointManager,
+  checkpoint,
+  saveCheckpoint,
+  getCheckpoints,
+  getQueuedCheckpoints,
+  getCheckpointContext,
+  hasCheckpoints,
+  clearCheckpoints,
+  deleteCheckpoint,
+  Logger,
+  logger,
+  log,
+  info,
+  warn,
+  error,
+  debug,
 } from "../sdk";
 
 function createTestDb(): Database {
@@ -120,6 +136,23 @@ function createTestDb(): Database {
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (extension_id, state_key)
     ) STRICT;
+  `);
+
+  // Checkpoints
+  db.run(`
+    CREATE TABLE IF NOT EXISTS checkpoints (
+      id TEXT PRIMARY KEY,
+      extension_id TEXT NOT NULL,
+      checkpoint_key TEXT NOT NULL DEFAULT 'default',
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued'
+    ) STRICT;
+  `);
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_checkpoints_extension_status
+    ON checkpoints(extension_id, status, created_at);
   `);
 
   // Entities with namespacing
@@ -667,4 +700,224 @@ describe("Shale SDK Architecture", () => {
       });
     });
   });
+
+  describe("8. Universal Logger Module", () => {
+    it("automatically prepends the extension name before content", () => {
+      const logs: Array<{ level: string; args: any[] }> = [];
+      const customLogger = new Logger({
+        name: "test-extension",
+        output: (level, ...args) => {
+          logs.push({ level, args });
+        },
+      });
+
+      customLogger.log("Hello world");
+      customLogger.info("Informational message", { detail: 123 });
+      customLogger.warn("Warning emitted");
+      customLogger.error("Error occurred");
+      customLogger.debug("Debugging data");
+
+      expect(logs.length).toBe(5);
+      expect(logs[0].level).toBe("log");
+      expect(logs[0].args[0]).toBe("[test-extension] Hello world");
+
+      expect(logs[1].level).toBe("info");
+      expect(logs[1].args[0]).toBe("[test-extension] Informational message");
+      expect(logs[1].args[1]).toEqual({ detail: 123 });
+
+      expect(logs[2].level).toBe("warn");
+      expect(logs[2].args[0]).toBe("[test-extension] Warning emitted");
+
+      expect(logs[3].level).toBe("error");
+      expect(logs[3].args[0]).toBe("[test-extension] Error occurred");
+
+      expect(logs[4].level).toBe("debug");
+      expect(logs[4].args[0]).toBe("[test-extension] Debugging data");
+    });
+
+    it("does not duplicate prefix if text already starts with prefix", () => {
+      const logs: string[] = [];
+      const customLogger = new Logger({
+        name: "my-ext",
+        output: (_level, ...args) => logs.push(args[0]),
+      });
+
+      customLogger.log("[my-ext] already formatted");
+      expect(logs[0]).toBe("[my-ext] already formatted");
+    });
+
+    it("prepends prefix as first argument when first arg is an object or error", () => {
+      const logs: any[] = [];
+      const customLogger = new Logger({
+        name: "obj-ext",
+        output: (_level, ...args) => logs.push(args),
+      });
+
+      const err = new Error("test failure");
+      customLogger.error(err);
+      expect(logs[0][0]).toBe("[obj-ext]");
+      expect(logs[0][1]).toBe(err);
+    });
+
+    it("integrates with ShaleSDK instance via sdk.logger", () => {
+      const sdk = createExtensionSDK("custom-plugin", "custom-ns", db);
+      expect(sdk.logger).toBeDefined();
+      expect(sdk.logger.name).toBe("custom-plugin");
+      expect(sdk.logger.prefix).toBe("[custom-plugin]");
+    });
+
+    it("resolves ambient SDK logger via top-level logger proxy and convenience functions", async () => {
+      const customSdk = createExtensionSDK("ambient-plugin", "amb-ns", db);
+
+      await runWithSDK(customSdk, async () => {
+        expect(logger.name).toBe("ambient-plugin");
+        expect(logger.prefix).toBe("[ambient-plugin]");
+
+        // Direct function invocation
+        const captured: string[] = [];
+        const originalLog = console.log;
+        console.log = (...args: any[]) => {
+          captured.push(args.join(" "));
+        };
+
+        try {
+          logger("Testing callable logger proxy");
+          logger.log("Testing method call");
+          log("Testing convenience log function");
+        } finally {
+          console.log = originalLog;
+        }
+
+        expect(captured.length).toBe(3);
+        expect(captured[0]).toBe("[ambient-plugin] Testing callable logger proxy");
+        expect(captured[1]).toBe("[ambient-plugin] Testing method call");
+        expect(captured[2]).toBe("[ambient-plugin] Testing convenience log function");
+      });
+    });
+
+    it("supports hierarchical child loggers", () => {
+      const parentLogger = new Logger("vault-engine");
+      const childLogger = parentLogger.child("subsystem");
+      expect(childLogger.name).toBe("vault-engine:subsystem");
+      expect(childLogger.prefix).toBe("[vault-engine:subsystem]");
+    });
+  });
+
+  describe("CheckpointManager & ShaleSDK Checkpoint Integration", () => {
+    it("saves and retrieves queued checkpoints in FIFO order", () => {
+      const mgr = new CheckpointManager("ext-test-1", db);
+
+      expect(mgr.hasQueued()).toBe(false);
+      expect(mgr.hasCheckpoints()).toBe(false);
+
+      const cp1 = mgr.save({ step: 1, file: "a.md" }, "step-1");
+      const cp2 = mgr.save({ step: 2, file: "b.md" }, "step-2");
+
+      expect(cp1.id).toBeDefined();
+      expect(cp1.key).toBe("step-1");
+      expect(cp1.data).toEqual({ step: 1, file: "a.md" });
+
+      expect(mgr.hasQueued()).toBe(true);
+      expect(mgr.hasCheckpoints()).toBe(true);
+
+      const queue = mgr.getQueue();
+      expect(queue.length).toBe(2);
+      expect(queue[0].key).toBe("step-1");
+      expect(queue[0].data).toEqual({ step: 1, file: "a.md" });
+      expect(queue[1].key).toBe("step-2");
+      expect(queue[1].data).toEqual({ step: 2, file: "b.md" });
+    });
+
+    it("isolates checkpoints across different extension IDs", () => {
+      const mgrA = new CheckpointManager("ext-A", db);
+      const mgrB = new CheckpointManager("ext-B", db);
+
+      mgrA.save({ work: "A" });
+      mgrB.save({ work: "B" });
+
+      expect(mgrA.getQueue().length).toBe(1);
+      expect(mgrA.getQueue()[0].data).toEqual({ work: "A" });
+
+      expect(mgrB.getQueue().length).toBe(1);
+      expect(mgrB.getQueue()[0].data).toEqual({ work: "B" });
+
+      mgrA.clear();
+      expect(mgrA.hasQueued()).toBe(false);
+      expect(mgrB.hasQueued()).toBe(true);
+    });
+
+    it("provides complete CheckpointContext via getContext()", () => {
+      const mgr = new CheckpointManager("ext-ctx-test", db);
+
+      mgr.save({ item: 1 }, "first");
+      mgr.save({ item: 2 }, "second");
+      mgr.save({ item: 3 }, "third");
+
+      const ctx = mgr.getContext();
+      expect(ctx.extensionId).toBe("ext-ctx-test");
+      expect(ctx.count).toBe(3);
+      expect(ctx.earliest?.key).toBe("first");
+      expect(ctx.latest?.key).toBe("third");
+      expect(ctx.get("second")?.data).toEqual({ item: 2 });
+
+      // Test resolve individual item
+      const toResolve = ctx.checkpoints[1].id;
+      expect(ctx.resolve(toResolve)).toBe(true);
+      expect(mgr.getQueue().length).toBe(2);
+
+      // Test clear all queued
+      ctx.clear();
+      expect(mgr.hasQueued()).toBe(false);
+    });
+
+    it("exposes checkpoint methods directly on ShaleSDK instance", () => {
+      const sdk = createExtensionSDK("sdk-ext-cp", "test-ns", db);
+
+      expect(sdk.hasCheckpoints()).toBe(false);
+
+      sdk.saveCheckpoint({ processed: 100 }, "progress");
+      expect(sdk.hasCheckpoints()).toBe(true);
+
+      const queue = sdk.getCheckpoints();
+      expect(queue.length).toBe(1);
+      expect(queue[0].key).toBe("progress");
+      expect(queue[0].data).toEqual({ processed: 100 });
+
+      const ctx = sdk.getCheckpointContext();
+      expect(ctx.count).toBe(1);
+      expect(ctx.latest?.key).toBe("progress");
+
+      sdk.clearCheckpoints();
+      expect(sdk.hasCheckpoints()).toBe(false);
+    });
+
+    it("supports ambient checkpoint proxy and convenience functions within runWithSDK", async () => {
+      const sdk = createExtensionSDK("ambient-cp-ext", "amb-cp-ns", db);
+
+      await runWithSDK(sdk, async () => {
+        expect(hasCheckpoints()).toBe(false);
+
+        saveCheckpoint({ notes: ["note1.md", "note2.md"] }, "notes-batch");
+        expect(hasCheckpoints()).toBe(true);
+
+        const checkpoints = getCheckpoints();
+        expect(checkpoints.length).toBe(1);
+        expect(checkpoints[0].key).toBe("notes-batch");
+
+        const queued = getQueuedCheckpoints();
+        expect(queued.length).toBe(1);
+
+        const ctx = getCheckpointContext();
+        expect(ctx.count).toBe(1);
+        expect(ctx.checkpoints[0].data).toEqual({ notes: ["note1.md", "note2.md"] });
+
+        // Using proxy
+        expect(checkpoint.hasQueued()).toBe(true);
+
+        clearCheckpoints();
+        expect(hasCheckpoints()).toBe(false);
+      });
+    });
+  });
 });
+

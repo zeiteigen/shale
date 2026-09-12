@@ -100,7 +100,7 @@ export function getGraphData(): GraphData {
       chunks: chunks.map((c) => ({
         id: c.id,
         chunk_index: c.chunk_index,
-        text_content: c.text_content.slice(0, 400),
+        text_content: c.text_content,
       })),
     };
   });
@@ -412,6 +412,22 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
             </div>
             <h3 id="detail-title" class="text-base font-bold text-white leading-tight break-words"></h3>
             <p id="detail-uri" class="text-[10px] text-slate-400 font-mono mt-1 break-all bg-slate-900/60 p-1.5 rounded border border-slate-800/80"></p>
+            <!-- Source External Open Actions -->
+            <div id="source-actions-bar" class="flex items-center gap-1.5 mt-2 pt-1.5 border-t border-slate-800/80 flex-wrap">
+              <button id="btn-open-system" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium border border-slate-700 flex items-center space-x-1 transition cursor-pointer" title="Open file in default system application (xdg-open)">
+                <span>↗ Open File</span>
+              </button>
+              <button id="btn-open-obsidian" class="px-2 py-1 rounded bg-purple-950/80 hover:bg-purple-900 text-purple-300 text-[11px] font-medium border border-purple-800/60 flex items-center space-x-1 transition cursor-pointer" title="Open directly in Obsidian app">
+                <span>💜 Open in Obsidian</span>
+              </button>
+              <a id="link-open-browser" href="#" target="_blank" class="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-[11px] font-medium border border-slate-800 flex items-center space-x-1 transition" title="Open raw file in a new browser tab">
+                <span>🌐 Browser</span>
+              </a>
+              <button id="btn-copy-path" class="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-[11px] font-mono border border-slate-800 transition cursor-pointer" title="Copy full filesystem path">
+                <span>📋 Copy Path</span>
+              </button>
+              <span id="open-action-feedback" class="text-[10px] text-emerald-400 font-mono ml-auto hidden">Opened!</span>
+            </div>
           </div>
 
           <!-- Quick Stats Grid -->
@@ -423,6 +439,39 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
             <div class="bg-slate-900/70 p-2.5 rounded-lg border border-slate-800">
               <span class="text-slate-400 text-[10px] block">Chunks Count</span>
               <span id="detail-chunks-count" class="text-sm font-bold text-emerald-400">0</span>
+            </div>
+          </div>
+
+          <!-- Semantic Nearest Neighbors (KNN) -->
+          <div id="knn-section" class="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-1.5">
+                <span class="text-xs">🧭</span>
+                <h4 class="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Nearest Neighbors</h4>
+              </div>
+              <span class="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 font-mono border border-cyan-800/60">Vector KNN</span>
+            </div>
+
+            <div class="flex items-center space-x-2">
+              <label class="text-[11px] text-slate-400 shrink-0 font-medium">K neighbors:</label>
+              <input type="number" id="knn-k-input" min="1" max="25" value="5" class="w-14 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white text-center font-mono focus:outline-none focus:border-cyan-500">
+              <button id="btn-find-knn" class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold py-1 px-2.5 rounded transition shadow flex items-center justify-center space-x-1 cursor-pointer">
+                <span>Find Neighbors</span>
+              </button>
+              <button id="btn-clear-knn" class="hidden text-slate-400 hover:text-white text-xs py-1 px-2 rounded bg-slate-800 hover:bg-slate-700 transition cursor-pointer" title="Clear KNN overlay">
+                &times;
+              </button>
+            </div>
+
+            <!-- KNN Results List -->
+            <div id="knn-results-container" class="hidden space-y-2 pt-1 border-t border-slate-800/80">
+              <div class="flex items-center justify-between text-[10px] text-slate-400">
+                <span id="knn-status-text">Top neighbors</span>
+                <span id="knn-active-count" class="font-mono text-cyan-400"></span>
+              </div>
+              <div id="knn-results-list" class="space-y-1.5 max-h-56 overflow-y-auto custom-scroll pr-1 text-xs">
+                <!-- Dynamically populated -->
+              </div>
             </div>
           </div>
 
@@ -462,6 +511,9 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
     let searchMode = "hybrid";
     let searchResults = []; // [{ entityId, rank, score, sourceTitle, ... }]
     let searchResultMap = new Map(); // entityId -> result
+
+    // KNN State
+    let activeKnn = null; // { sourceNode, k, neighbors, neighborMap }
 
     // Simulation params
     const sim = {
@@ -705,9 +757,22 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
             </div>
             <div class="flex items-center justify-between text-[10px] pt-1">
               <span class="text-slate-500 font-mono">Chunk #\${r.chunk_index ?? 0}</span>
-              <span class="text-blue-400 hover:text-blue-300 font-medium">Focus in Graph →</span>
+              <div class="flex items-center space-x-2">
+                <button class="open-result-btn text-slate-400 hover:text-cyan-300 font-medium px-1.5 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 transition cursor-pointer" title="Open source file externally">↗ Open</button>
+                <span class="text-blue-400 hover:text-blue-300 font-medium">Focus →</span>
+              </div>
             </div>
           \`;
+
+          const openResultBtn = card.querySelector('.open-result-btn');
+          openResultBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openResultBtn.textContent = '...';
+            openExternally({ chunkId: r.id, uri: r.source_uri }).then(() => {
+              openResultBtn.textContent = '✓';
+              setTimeout(() => { openResultBtn.textContent = '↗ Open'; }, 2000);
+            });
+          });
 
           card.onclick = () => {
             if (node) {
@@ -817,6 +882,30 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
         t.vy -= fy;
       }
 
+      // 2b. KNN Attraction Springs
+      if (activeKnn && activeKnn.sourceNode && activeKnn.neighbors) {
+        const s = nodeIndexMap.get(activeKnn.sourceNode.id);
+        if (s) {
+          for (const knn of activeKnn.neighbors) {
+            if (!knn.entityId) continue;
+            const t = nodeIndexMap.get(knn.entityId);
+            if (!t) continue;
+            const dx = t.x - s.x;
+            const dy = t.y - s.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const targetLen = 100 + (1 - (knn.cosineSimilarity || 0.5)) * 140;
+            const displacement = dist - targetLen;
+            const force = displacement * 0.003 * sim.alpha;
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            s.vx += fx;
+            s.vy += fy;
+            t.vx -= fx;
+            t.vy -= fy;
+          }
+        }
+      }
+
       // 3. Apply velocity
       for (const node of nodes) {
         if (node === draggedNode) continue;
@@ -872,6 +961,52 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
         ctx.setLineDash([]);
       }
 
+      // Draw Active KNN Similarity Links
+      if (activeKnn && activeKnn.sourceNode && activeKnn.neighbors) {
+        const s = nodeMap.get(activeKnn.sourceNode.id);
+        if (s) {
+          for (const knn of activeKnn.neighbors) {
+            if (!knn.entityId) continue;
+            const t = nodeMap.get(knn.entityId);
+            if (!t) continue;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(s.x, s.y);
+            ctx.lineTo(t.x, t.y);
+            ctx.setLineDash([5, 3]);
+            ctx.strokeStyle = "rgba(6, 182, 212, 0.85)";
+            ctx.lineWidth = Math.max(1.5, Math.min(3.5, (knn.cosineSimilarity || 0.5) * 3.5));
+            ctx.stroke();
+
+            // Similarity percentage pill
+            const midX = (s.x + t.x) / 2;
+            const midY = (s.y + t.y) / 2;
+            const simPct = (knn.cosineSimilarity * 100).toFixed(1) + "%";
+            ctx.setLineDash([]);
+            ctx.font = "bold 9px monospace";
+            const textWidth = ctx.measureText(simPct).width;
+            ctx.fillStyle = "rgba(8, 20, 36, 0.9)";
+            ctx.strokeStyle = "rgba(6, 182, 212, 0.6)";
+            ctx.lineWidth = 1;
+            if (ctx.roundRect) {
+              ctx.beginPath();
+              ctx.roundRect(midX - textWidth / 2 - 4, midY - 7, textWidth + 8, 14, 3);
+              ctx.fill();
+              ctx.stroke();
+            } else {
+              ctx.fillRect(midX - textWidth / 2 - 4, midY - 7, textWidth + 8, 14);
+              ctx.strokeRect(midX - textWidth / 2 - 4, midY - 7, textWidth + 8, 14);
+            }
+            ctx.fillStyle = "#22d3ee";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(simPct, midX, midY);
+            ctx.restore();
+          }
+        }
+      }
+
       // Draw Nodes
       for (const node of filteredNodes) {
         const style = TYPE_COLORS[node.type] || TYPE_COLORS["Note"];
@@ -882,10 +1017,12 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
           (e.target === selectedNode.id && e.source === node.id)
         );
         const searchHit = searchResultMap.get(node.id);
+        const knnHit = activeKnn?.neighborMap?.get(node.id);
+        const isKnnSource = activeKnn?.sourceNode?.id === node.id;
 
         let radius = style.radius + Math.min(node.degree * 0.5, 6);
         if (isSelected || isHovered) radius += 4;
-        if (searchHit) radius += 3;
+        if (searchHit || knnHit || isKnnSource) radius += 3;
 
         // Draw Search Hit Glow Ring
         if (searchHit) {
@@ -898,13 +1035,33 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
           ctx.stroke();
         }
 
+        // Draw KNN Source Ring / Halo
+        if (isKnnSource) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, radius + 8, 0, Math.PI * 2);
+          ctx.strokeStyle = "#06b6d4";
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([4, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else if (knnHit) {
+          // Draw KNN Neighbor Glow Ring
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, radius + 6, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(6, 182, 212, 0.25)";
+          ctx.fill();
+          ctx.strokeStyle = "#06b6d4";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = searchHit ? "#d97706" : style.bg;
+        ctx.fillStyle = searchHit ? "#d97706" : (knnHit ? "#0e7490" : style.bg);
         ctx.fill();
 
-        ctx.strokeStyle = isSelected ? "#ffffff" : (searchHit ? "#fef08a" : (isHovered || isConnected ? "#fef08a" : style.border));
-        ctx.lineWidth = isSelected ? 3 : (searchHit ? 2.5 : (isHovered ? 2.5 : 1.5));
+        ctx.strokeStyle = isSelected ? "#ffffff" : (searchHit ? "#fef08a" : (knnHit ? "#22d3ee" : (isHovered || isConnected ? "#fef08a" : style.border)));
+        ctx.lineWidth = isSelected ? 3 : (searchHit || knnHit ? 2.5 : (isHovered ? 2.5 : 1.5));
         ctx.stroke();
 
         // Search Rank Badge over Node
@@ -918,12 +1075,23 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(String(searchHit.rank), node.x + radius * 0.7, node.y - radius * 0.7);
+        } else if (knnHit) {
+          // KNN Rank Badge over Node
+          ctx.beginPath();
+          ctx.arc(node.x + radius * 0.7, node.y - radius * 0.7, 7, 0, Math.PI * 2);
+          ctx.fillStyle = "#0891b2";
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "bold 8px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(String(knnHit.rank), node.x + radius * 0.7, node.y - radius * 0.7);
         }
 
         // Node Label
-        if (node.type === "Vault" || isSelected || isHovered || searchHit || node.degree > 3 || camera.scale > 1.2) {
-          ctx.font = \`\${node.type === "Vault" ? "bold 13px" : (searchHit ? "bold 11px" : "11px")} sans-serif\`;
-          ctx.fillStyle = isSelected ? "#ffffff" : (searchHit ? "#fef08a" : "#cbd5e1");
+        if (node.type === "Vault" || isSelected || isHovered || searchHit || knnHit || isKnnSource || node.degree > 3 || camera.scale > 1.2) {
+          ctx.font = \`\${node.type === "Vault" ? "bold 13px" : (searchHit || knnHit ? "bold 11px" : "11px")} sans-serif\`;
+          ctx.fillStyle = isSelected ? "#ffffff" : (searchHit ? "#fef08a" : (knnHit ? "#67e8f9" : (isKnnSource ? "#38bdf8" : "#cbd5e1")));
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
           ctx.fillText(node.name, node.x, node.y + radius + 12);
@@ -974,6 +1142,34 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
       return null;
     }
 
+    // Helper to open a file/source/chunk externally
+    async function openExternally(params, feedbackElem) {
+      if (feedbackElem) {
+        feedbackElem.innerText = "Opening...";
+        feedbackElem.classList.remove("hidden");
+      }
+      try {
+        const res = await fetch("/api/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to open externally");
+        if (feedbackElem) {
+          feedbackElem.innerText = data.openedWith === "obsidian" ? "Opened in Obsidian!" : "Opened in system app!";
+          setTimeout(() => { feedbackElem.classList.add("hidden"); }, 2500);
+        }
+        return data;
+      } catch (err) {
+        if (feedbackElem) {
+          feedbackElem.innerText = "Error opening";
+          setTimeout(() => { feedbackElem.classList.add("hidden"); }, 2500);
+        }
+        console.error("Open error:", err);
+      }
+    }
+
     // Inspector Panel Population
     function selectNode(node) {
       selectedNode = node;
@@ -995,10 +1191,69 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
       document.getElementById("detail-degree").innerText = node.degree;
       document.getElementById("detail-chunks-count").innerText = node.chunksCount || 0;
 
+      // Configure Source Actions Bar
+      const actionsBar = document.getElementById("source-actions-bar");
+      const btnOpenSystem = document.getElementById("btn-open-system");
+      const btnOpenObsidian = document.getElementById("btn-open-obsidian");
+      const linkOpenBrowser = document.getElementById("link-open-browser");
+      const btnCopyPath = document.getElementById("btn-copy-path");
+      const feedback = document.getElementById("open-action-feedback");
+      feedback?.classList.add("hidden");
+
+      if (node.sourceUri) {
+        actionsBar?.classList.remove("hidden");
+        const cleanPath = decodeURIComponent(node.sourceUri.replace("file://", ""));
+        linkOpenBrowser.href = \`/api/file/raw?uri=\${encodeURIComponent(node.sourceUri)}\`;
+
+        btnOpenSystem.onclick = (e) => {
+          e.stopPropagation();
+          openExternally({ uri: node.sourceUri, app: "system" }, feedback);
+        };
+
+        if (node.type === "Note") {
+          btnOpenObsidian.style.display = "inline-flex";
+          btnOpenObsidian.onclick = (e) => {
+            e.stopPropagation();
+            openExternally({ uri: node.sourceUri, app: "obsidian" }, feedback);
+          };
+        } else {
+          btnOpenObsidian.style.display = "none";
+        }
+
+        btnCopyPath.onclick = (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(cleanPath).then(() => {
+            feedback.innerText = "Copied Path!";
+            feedback.classList.remove("hidden");
+            setTimeout(() => { feedback.classList.add("hidden"); }, 2000);
+          });
+        };
+      } else {
+        actionsBar?.classList.add("hidden");
+      }
+
       const badge = document.getElementById("detail-type-badge");
       badge.innerText = node.type;
       badge.className = "px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider uppercase " + 
         (node.type === "Vault" ? "badge-vault" : (node.type === "Image" ? "badge-image" : "badge-note"));
+
+      // KNN Section state
+      const knnSection = document.getElementById("knn-section");
+      const knnResultsContainer = document.getElementById("knn-results-container");
+      const btnClearKnn = document.getElementById("btn-clear-knn");
+
+      if (node.type === "Vault") {
+        knnSection?.classList.add("hidden");
+      } else {
+        knnSection?.classList.remove("hidden");
+        if (activeKnn && activeKnn.sourceNode.id === node.id) {
+          knnResultsContainer?.classList.remove("hidden");
+          btnClearKnn?.classList.remove("hidden");
+        } else if (!activeKnn) {
+          knnResultsContainer?.classList.add("hidden");
+          btnClearKnn?.classList.add("hidden");
+        }
+      }
 
       // Connected items
       const connList = document.getElementById("detail-connections-list");
@@ -1040,14 +1295,67 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
       } else {
         node.chunks.forEach(c => {
           const item = document.createElement("div");
-          item.className = "p-2.5 rounded bg-slate-900/80 border border-slate-800 space-y-1";
+          item.className = "p-2.5 rounded bg-slate-900/80 border border-slate-800 space-y-1.5";
+          const text = c.text_content || "";
+          const isLong = text.length > 500;
+          const charCount = text.length.toLocaleString();
+
           item.innerHTML = \`
             <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono">
-              <span>Chunk #\${c.chunk_index} (id: \${c.id})</span>
-              <span class="text-blue-400">4096-dim vector</span>
+              <span class="font-medium text-slate-400">Chunk #\${c.chunk_index} <span class="text-slate-600">(id: \${c.id})</span></span>
+              <div class="flex items-center space-x-2">
+                <span class="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">\${charCount} chars</span>
+                <span class="text-blue-400">4096-dim vector</span>
+                <button class="open-chunk-btn text-slate-400 hover:text-cyan-300 transition text-[11px] cursor-pointer" title="Open source file externally">↗ Open</button>
+                <button class="copy-chunk-btn text-slate-400 hover:text-white transition text-[11px] cursor-pointer" title="Copy chunk text">📋</button>
+              </div>
             </div>
-            <p class="text-slate-300 text-[11px] leading-relaxed break-words whitespace-pre-wrap font-sans">\${escapeHtml(c.text_content)}</p>
+            <div class="chunk-box \${isLong ? 'max-h-72 overflow-y-auto custom-scroll p-2.5 rounded bg-slate-950/70 border border-slate-800/80' : ''}">
+              <p class="chunk-text text-slate-300 text-[11px] leading-relaxed break-words whitespace-pre-wrap font-sans select-text">\${escapeHtml(text)}</p>
+            </div>
+            \${isLong ? \`
+              <div class="flex justify-end pt-0.5">
+                <button class="toggle-expand-btn text-[10px] text-blue-400 hover:text-blue-300 font-medium cursor-pointer">Expand to full</button>
+              </div>
+            \` : ''}
           \`;
+
+          const openChunkBtn = item.querySelector('.open-chunk-btn');
+          openChunkBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openChunkBtn.textContent = '...';
+            openExternally({ chunkId: c.id }).then(() => {
+              openChunkBtn.textContent = '✓';
+              setTimeout(() => { openChunkBtn.textContent = '↗ Open'; }, 2000);
+            });
+          });
+
+          const copyBtn = item.querySelector('.copy-chunk-btn');
+          copyBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(text).then(() => {
+              copyBtn.textContent = '✓';
+              setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+            }).catch(() => {});
+          });
+
+          if (isLong) {
+            const toggleBtn = item.querySelector('.toggle-expand-btn');
+            const box = item.querySelector('.chunk-box');
+            let isExpanded = false;
+            toggleBtn?.addEventListener('click', (e) => {
+              e.stopPropagation();
+              isExpanded = !isExpanded;
+              if (isExpanded) {
+                box?.classList.remove('max-h-72');
+                toggleBtn.textContent = 'Collapse view';
+              } else {
+                box?.classList.add('max-h-72');
+                toggleBtn.textContent = 'Expand to full';
+              }
+            });
+          }
+
           chunksList.appendChild(item);
         });
       }
@@ -1157,6 +1465,156 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
     });
 
     document.getElementById("filter-title-input")?.addEventListener("input", applyFilters);
+
+    // KNN Controls & Framing
+    function frameKnnCluster(sourceNode, neighbors) {
+      const nodeMap = new Map(filteredNodes.map(n => [n.id, n]));
+      const cluster = [sourceNode];
+      neighbors.forEach(n => {
+        if (!n.entityId) return;
+        const node = nodeMap.get(n.entityId);
+        if (node) cluster.push(node);
+      });
+
+      if (cluster.length <= 1) {
+        focusOnNode(sourceNode);
+        return;
+      }
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      cluster.forEach(n => {
+        if (n.x < minX) minX = n.x;
+        if (n.x > maxX) maxX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.y > maxY) maxY = n.y;
+      });
+
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(120, maxX - minX + 180);
+      const height = Math.max(120, maxY - minY + 180);
+      const scaleX = (rect.width * 0.7) / width;
+      const scaleY = (rect.height * 0.7) / height;
+      camera.scale = Math.max(0.3, Math.min(1.8, Math.min(scaleX, scaleY)));
+      const midX = (minX + maxX) / 2;
+      const midY = (minY + maxY) / 2;
+      camera.x = (rect.width / 2) - midX * camera.scale;
+      camera.y = (rect.height / 2) - midY * camera.scale;
+    }
+
+    document.getElementById("btn-find-knn").onclick = async function() {
+      if (!selectedNode) return;
+      const kInput = document.getElementById("knn-k-input");
+      const kVal = Math.max(1, Math.min(50, parseInt(kInput.value) || 5));
+      kInput.value = kVal;
+
+      const btn = document.getElementById("btn-find-knn");
+      const btnClear = document.getElementById("btn-clear-knn");
+      const resultsContainer = document.getElementById("knn-results-container");
+      const resultsList = document.getElementById("knn-results-list");
+      const statusText = document.getElementById("knn-status-text");
+      const countText = document.getElementById("knn-active-count");
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Searching...</span>';
+      resultsContainer.classList.remove("hidden");
+      resultsList.innerHTML = '<div class="text-center py-4 text-slate-500 text-xs">Querying vector embeddings...</div>';
+
+      try {
+        const res = await fetch("/api/neighbors", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entityId: selectedNode.id, k: kVal }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to find neighbors");
+
+        const neighborMap = new Map();
+        data.neighbors.forEach(n => {
+          if (n.entityId) neighborMap.set(n.entityId, n);
+        });
+
+        activeKnn = {
+          sourceNode: selectedNode,
+          k: kVal,
+          neighbors: data.neighbors,
+          neighborMap,
+        };
+
+        countText.innerText = \`\${data.neighbors.length} found\`;
+        statusText.innerText = \`Top \${data.neighbors.length} nearest to "\${selectedNode.name}"\`;
+        btnClear.classList.remove("hidden");
+
+        resultsList.innerHTML = "";
+        if (data.neighbors.length === 0) {
+          resultsList.innerHTML = '<div class="text-center py-4 text-slate-500 text-xs">No vector neighbors found.</div>';
+        } else {
+          data.neighbors.forEach(n => {
+            const card = document.createElement("div");
+            card.className = "p-2 rounded bg-slate-950/70 border border-slate-800/80 hover:border-cyan-500/50 cursor-pointer space-y-1 transition";
+            const simPct = (n.cosineSimilarity * 100).toFixed(1);
+            const badgeClass = n.entityType === "Image" ? "badge-image" : "badge-note";
+
+            card.innerHTML = \`
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-1.5 truncate">
+                  <span class="w-4 h-4 rounded-full bg-cyan-600 text-[10px] font-bold text-white flex items-center justify-center shrink-0">#\${n.rank}</span>
+                  <span class="font-semibold text-slate-200 text-xs truncate">\${escapeHtml(n.sourceTitle || n.entityName)}</span>
+                </div>
+                <span class="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 font-mono text-[9px] border border-cyan-800/50">\${simPct}% sim</span>
+              </div>
+              <p class="text-[10px] text-slate-400 line-clamp-2 leading-relaxed break-words">\${escapeHtml(n.preview || "")}</p>
+              <div class="flex items-center justify-between text-[9px] pt-0.5 text-slate-500 font-mono">
+                <span class="px-1 py-0.2 rounded \${badgeClass}">\${n.entityType}</span>
+                <div class="flex items-center space-x-2">
+                  <button class="open-knn-btn text-slate-400 hover:text-cyan-300 font-medium px-1.5 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 transition cursor-pointer" title="Open source file externally">↗ Open</button>
+                  <span class="text-cyan-400 hover:text-cyan-300 font-medium">Focus →</span>
+                </div>
+              </div>
+            \`;
+
+            const openKnnBtn = card.querySelector('.open-knn-btn');
+            openKnnBtn?.addEventListener('click', (e) => {
+              e.stopPropagation();
+              openKnnBtn.textContent = '...';
+              openExternally({ chunkId: n.chunkId, uri: n.sourceUri }).then(() => {
+                openKnnBtn.textContent = '✓';
+                setTimeout(() => { openKnnBtn.textContent = '↗ Open'; }, 2000);
+              });
+            });
+
+            card.onclick = () => {
+              const nodeMap = new Map(graphData.nodes.map(node => [node.id, node]));
+              const targetNode = nodeMap.get(n.entityId);
+              if (targetNode) {
+                focusOnNode(targetNode);
+                selectNode(targetNode);
+              }
+            };
+
+            resultsList.appendChild(card);
+          });
+        }
+
+        // Frame cluster and trigger physics wakeup
+        frameKnnCluster(selectedNode, data.neighbors);
+        sim.alpha = 0.35;
+        render();
+
+      } catch (err) {
+        console.error("KNN error:", err);
+        resultsList.innerHTML = \`<div class="p-2 bg-red-900/20 border border-red-800 rounded text-red-300 text-xs">\${escapeHtml(err.message)}</div>\`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Find Neighbors</span>';
+      }
+    };
+
+    document.getElementById("btn-clear-knn").onclick = function() {
+      activeKnn = null;
+      document.getElementById("knn-results-container").classList.add("hidden");
+      document.getElementById("btn-clear-knn").classList.add("hidden");
+      render();
+    };
 
     // Start
     resizeCanvas();
@@ -1360,6 +1818,340 @@ export function startVisualizerServer(port: number = 3333) {
           console.error("[Search] Hybrid search failed:", err);
           return Response.json(
             { error: err.message || "Hybrid search failed" },
+            { status: 500, headers: corsHeaders },
+          );
+        }
+      }
+
+      // 4. K-Nearest Neighbors Endpoint using SDK built-in vector search (KNN by chunkId)
+      if (url.pathname === "/api/neighbors" && req.method === "POST") {
+        try {
+          const body = (await req.json()) as {
+            entityId?: number;
+            chunkId?: number;
+            noteTitle?: string;
+            k?: number;
+          };
+
+          const k = Math.max(1, Math.min(50, Number(body.k) || 5));
+          let queryChunkId = body.chunkId;
+          let sourceEntity: { id: number; name: string; type: string } | null = null;
+          let sourceRecord: { id: string; title: string; uri: string } | null = null;
+
+          if (queryChunkId === undefined) {
+            if (body.entityId !== undefined) {
+              sourceEntity = db
+                .query<{ id: number; name: string; type: string }, { $id: number }>(
+                  "SELECT id, name, type FROM entities WHERE id = $id",
+                )
+                .get({ $id: body.entityId });
+            } else if (body.noteTitle) {
+              sourceEntity = db
+                .query<{ id: number; name: string; type: string }, { $name: string }>(
+                  "SELECT id, name, type FROM entities WHERE lower(name) = lower($name) LIMIT 1",
+                )
+                .get({ $name: body.noteTitle });
+            }
+
+            if (!sourceEntity) {
+              return Response.json(
+                { error: "Note entity not found" },
+                { status: 404, headers: corsHeaders },
+              );
+            }
+
+            // Find matching source
+            sourceRecord = db
+              .query<{ id: string; title: string; uri: string }, { $name: string }>(
+                "SELECT id, title, uri FROM sources WHERE lower(title) = lower($name) LIMIT 1",
+              )
+              .get({ $name: sourceEntity.name });
+
+            if (!sourceRecord) {
+              return Response.json(
+                { error: `No source record found for note "${sourceEntity.name}"` },
+                { status: 404, headers: corsHeaders },
+              );
+            }
+
+            // Find primary chunk (lowest chunk_index)
+            const chunkRow = db
+              .query<{ id: number }, { $sourceId: string }>(
+                "SELECT id FROM chunks WHERE source_id = $sourceId ORDER BY chunk_index ASC LIMIT 1",
+              )
+              .get({ $sourceId: sourceRecord.id });
+
+            if (!chunkRow) {
+              return Response.json(
+                { error: `No text chunks found for note "${sourceEntity.name}"` },
+                { status: 404, headers: corsHeaders },
+              );
+            }
+
+            queryChunkId = chunkRow.id;
+          } else {
+            const chunkInfo = db
+              .query<{ source_id: string; title: string }, { $id: number }>(
+                "SELECT c.source_id, s.title FROM chunks c LEFT JOIN sources s ON c.source_id = s.id WHERE c.id = $id",
+              )
+              .get({ $id: queryChunkId });
+            if (chunkInfo?.title) {
+              sourceEntity = db
+                .query<{ id: number; name: string; type: string }, { $name: string }>(
+                  "SELECT id, name, type FROM entities WHERE lower(name) = lower($name) LIMIT 1",
+                )
+                .get({ $name: chunkInfo.title });
+            }
+          }
+
+          // Use the built-in feature of the SDK: sdk.search.vector({ chunkId, limit, excludeSelf: true })
+          const fetchLimit = Math.max(k * 4, 30);
+          const rawResults = await sdk.search.vector({
+            chunkId: queryChunkId,
+            limit: fetchLimit,
+            excludeSelf: true,
+          });
+
+          const neighbors: any[] = [];
+          const seenEntityIds = new Set<number>();
+          if (sourceEntity) {
+            seenEntityIds.add(sourceEntity.id);
+          }
+
+          for (const r of rawResults) {
+            if (neighbors.length >= k) break;
+
+            const entity = r.source_title
+              ? db
+                  .query<{ id: number; name: string; type: string }, { $name: string }>(
+                    "SELECT id, name, type FROM entities WHERE lower(name) = lower($name) LIMIT 1",
+                  )
+                  .get({ $name: r.source_title })
+              : null;
+
+            if (entity && seenEntityIds.has(entity.id)) {
+              continue;
+            }
+            if (entity) {
+              seenEntityIds.add(entity.id);
+            }
+
+            neighbors.push({
+              rank: neighbors.length + 1,
+              chunkId: r.id,
+              chunkIndex: r.chunk_index,
+              sourceId: r.source_id,
+              sourceTitle: r.source_title,
+              sourceUri: r.source_uri,
+              entityId: entity?.id,
+              entityName: entity?.name,
+              entityType: entity?.type || "Note",
+              cosineSimilarity: r.cosineSimilarity ?? 0,
+              distance: r.distance ?? 0,
+              preview: r.preview || (r.text_content ? r.text_content.slice(0, 180) : ""),
+            });
+          }
+
+          return Response.json(
+            {
+              sourceNode: sourceEntity,
+              sourceChunkId: queryChunkId,
+              k,
+              neighbors,
+            },
+            { headers: corsHeaders },
+          );
+        } catch (err: any) {
+          console.error("[Neighbors] KNN vector search failed:", err);
+          return Response.json(
+            { error: err.message || "KNN vector search failed" },
+            { status: 500, headers: corsHeaders },
+          );
+        }
+      }
+
+      // 5. Raw File Streaming Endpoint (View in Browser Tab)
+      if (
+        url.pathname === "/api/file/raw" &&
+        (req.method === "GET" || req.method === "HEAD")
+      ) {
+        try {
+          const uriParam = url.searchParams.get("uri");
+          const pathParam = url.searchParams.get("path");
+          const chunkIdParam = url.searchParams.get("chunkId");
+
+          let targetPath = pathParam || "";
+          if (!targetPath && chunkIdParam) {
+            const chunkId = parseInt(chunkIdParam, 10);
+            if (!isNaN(chunkId)) {
+              const row = db
+                .query<{ uri: string }, { $id: number }>(
+                  "SELECT s.uri FROM chunks c LEFT JOIN sources s ON c.source_id = s.id WHERE c.id = $id",
+                )
+                .get({ $id: chunkId });
+              if (row?.uri) {
+                targetPath = decodeURIComponent(row.uri.replace(/^file:\/\//, ""));
+              }
+            }
+          }
+
+          if (!targetPath && uriParam) {
+            targetPath = decodeURIComponent(uriParam.replace(/^file:\/\//, ""));
+          }
+
+          if (!targetPath) {
+            return new Response("No file path or URI specified", {
+              status: 400,
+              headers: corsHeaders,
+            });
+          }
+
+          const file = Bun.file(targetPath);
+          if (!(await file.exists())) {
+            return new Response(`File not found: ${targetPath}`, {
+              status: 404,
+              headers: corsHeaders,
+            });
+          }
+
+          const headers = new Headers(corsHeaders);
+          if (targetPath.endsWith(".md") || targetPath.endsWith(".markdown")) {
+            headers.set("Content-Type", "text/plain; charset=utf-8");
+          } else if (targetPath.endsWith(".png")) {
+            headers.set("Content-Type", "image/png");
+          } else if (targetPath.endsWith(".jpg") || targetPath.endsWith(".jpeg")) {
+            headers.set("Content-Type", "image/jpeg");
+          } else if (targetPath.endsWith(".webp")) {
+            headers.set("Content-Type", "image/webp");
+          } else if (targetPath.endsWith(".gif")) {
+            headers.set("Content-Type", "image/gif");
+          } else if (targetPath.endsWith(".svg")) {
+            headers.set("Content-Type", "image/svg+xml");
+          } else if (file.type) {
+            headers.set("Content-Type", file.type);
+          } else {
+            headers.set("Content-Type", "application/octet-stream");
+          }
+
+          return new Response(file, { headers });
+        } catch (err: any) {
+          console.error("[Raw File] Failed to serve file:", err);
+          return new Response(err.message || "Failed to serve file", {
+            status: 500,
+            headers: corsHeaders,
+          });
+        }
+      }
+
+      // 6. Open Externally Endpoint (Obsidian or System Desktop App)
+      if (url.pathname === "/api/open" && req.method === "POST") {
+        try {
+          const body = (await req.json()) as {
+            uri?: string;
+            path?: string;
+            chunkId?: number;
+            entityId?: number;
+            app?: "system" | "obsidian" | "auto";
+          };
+
+          let targetPath = body.path || "";
+          let targetUri = body.uri || "";
+
+          if (!targetPath && !targetUri && body.chunkId !== undefined) {
+            const row = db
+              .query<{ uri: string; title: string }, { $id: number }>(
+                "SELECT s.uri, s.title FROM chunks c LEFT JOIN sources s ON c.source_id = s.id WHERE c.id = $id",
+              )
+              .get({ $id: body.chunkId });
+            if (row?.uri) {
+              targetUri = row.uri;
+            }
+          }
+
+          if (!targetPath && !targetUri && body.entityId !== undefined) {
+            const ent = db
+              .query<{ name: string }, { $id: number }>(
+                "SELECT name FROM entities WHERE id = $id",
+              )
+              .get({ $id: body.entityId });
+            if (ent?.name) {
+              const src = db
+                .query<{ uri: string }, { $name: string }>(
+                  "SELECT uri FROM sources WHERE lower(title) = lower($name) LIMIT 1",
+                )
+                .get({ $name: ent.name });
+              if (src?.uri) {
+                targetUri = src.uri;
+              }
+            }
+          }
+
+          if (!targetPath && targetUri) {
+            targetPath = decodeURIComponent(targetUri.replace(/^file:\/\//, ""));
+          }
+
+          if (!targetPath) {
+            return Response.json(
+              { error: "Could not resolve file path or URI" },
+              { status: 400, headers: corsHeaders },
+            );
+          }
+
+          const file = Bun.file(targetPath);
+          if (!(await file.exists())) {
+            return Response.json(
+              { error: `File does not exist on disk: ${targetPath}` },
+              { status: 404, headers: corsHeaders },
+            );
+          }
+
+          const requestedApp = body.app || "auto";
+          let openTarget = targetPath;
+          let openedWith = "system";
+
+          const isMarkdown =
+            targetPath.endsWith(".md") || targetPath.endsWith(".markdown");
+
+          if (
+            requestedApp === "obsidian" ||
+            (requestedApp === "auto" && isMarkdown)
+          ) {
+            openTarget = `obsidian://open?path=${encodeURIComponent(targetPath)}`;
+            openedWith = "obsidian";
+          }
+
+          let proc;
+          if (process.platform === "darwin") {
+            proc = Bun.spawn(["open", openTarget], {
+              stdout: "ignore",
+              stderr: "ignore",
+            });
+          } else if (process.platform === "win32") {
+            proc = Bun.spawn(["cmd", "/c", "start", "", openTarget], {
+              stdout: "ignore",
+              stderr: "ignore",
+            });
+          } else {
+            proc = Bun.spawn(["xdg-open", openTarget], {
+              stdout: "ignore",
+              stderr: "ignore",
+            });
+          }
+          proc.unref();
+
+          return Response.json(
+            {
+              success: true,
+              openedWith,
+              target: openTarget,
+              path: targetPath,
+            },
+            { headers: corsHeaders },
+          );
+        } catch (err: any) {
+          console.error("[Open] Failed to open externally:", err);
+          return Response.json(
+            { error: err.message || "Failed to open externally" },
             { status: 500, headers: corsHeaders },
           );
         }

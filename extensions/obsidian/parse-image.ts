@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { statSync } from "node:fs";
-import { getSDK, type ShaleSDK } from "@shale/sdk";
+import { getSDK, logger, type ShaleSDK } from "@shale/sdk";
 import type { ContextualChunk } from "./parse-file";
 
 export interface ParsedImage {
@@ -39,13 +39,11 @@ Your description must thoroughly cover two essential aspects:
       },
       timeoutMs !== undefined ? { timeoutMs } : undefined,
     );
-    const text = typeof res === "string" ? res : res?.content || "";
-    if (text.trim()) {
-      return text.trim();
-    }
+
+    return res.trim();
   } catch (err) {
-    console.warn(
-      `[Obsidian] Chat model description failed for image "${imageName}":`,
+    (sdk?.logger ?? logger).warn(
+      `Chat model description failed for image "${imageName}":`,
       err,
     );
   }

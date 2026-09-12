@@ -118,6 +118,39 @@ Standalone convenience functions:
 - `searchBM25(options)`
 - `searchChunks(options)` (unified entry point taking `{ mode: "hybrid" | "vector" | "bm25", ... }`)
 
+### 7. Checkpoints & Crash Recovery (`sdk.checkpoint` / `checkpoint`)
+
+Enables extensions to save temporary in-progress work to SQLite. If the process crashes mid-execution (OOM, sudden kill, exception), saved checkpoints queue up for crash recovery.
+
+- `sdk.saveCheckpoint(data: any, key?: string): CheckpointItem`
+- `sdk.getCheckpoints(): CheckpointItem[]`
+- `sdk.getQueuedCheckpoints(): CheckpointItem[]`
+- `sdk.getCheckpointContext(): CheckpointContext`
+  - Returns `count`, `checkpoints`, `latest`, `earliest`, `clear()`, `resolve(id)`, `get(key)`
+- `sdk.hasCheckpoints(): boolean`
+- `sdk.clearCheckpoints(): number`
+- `sdk.deleteCheckpoint(id: string): boolean`
+
+#### Manifest Configuration (`checkpoint_recover`)
+
+Extensions declare a `checkpoint_recover` script in `manifest.json`:
+
+```json
+{
+  "name": "my-extension",
+  "version": "1.0.0",
+  "description": "...",
+  "checkpoint_recover": "recover.ts",
+  "crons": [ ... ]
+}
+```
+
+#### Lifecycle & Cron Delay
+
+1. If checkpoints are queued for an extension, its `checkpoint_recover` script runs automatically.
+2. Context is provided to the script via `sdk.getCheckpointContext()` and `(sdk, context)` argument.
+3. Any crons of that extension are delayed (`await wait_for_checkpoint_script`) until the recovery script finishes, and run right after.
+
 ---
 
 ## Phase 4: The Stateless Extension Workflow (SOP)

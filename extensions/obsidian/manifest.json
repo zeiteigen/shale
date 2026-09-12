@@ -3,6 +3,7 @@
     "version": "0.0.1",
     "description": "A parser for Obsidian markdown files.",
     "namespace": "obsidian",
+    "checkpoint_recover": "recover.ts",
     "crons": [
         {
             "name": "obsidian-parser-cron",

@@ -101,6 +101,23 @@ db.run(`
   ) STRICT;
 `);
 
+// Checkpoints Table (temporary work queue for crash recovery)
+db.run(`
+  CREATE TABLE IF NOT EXISTS checkpoints (
+    id TEXT PRIMARY KEY,
+    extension_id TEXT NOT NULL,
+    checkpoint_key TEXT NOT NULL DEFAULT 'default',
+    data TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued'
+  ) STRICT;
+`);
+
+db.run(`
+  CREATE INDEX IF NOT EXISTS idx_checkpoints_extension_status
+  ON checkpoints(extension_id, status, created_at);
+`);
+
 // Graph
 
 // 1. Entities Table (Nodes with namespacing)

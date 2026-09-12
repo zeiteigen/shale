@@ -13,6 +13,7 @@ export type ExtensionManifest = {
   namespace?: string;
   setup_script?: string;
   subscribe_ingest?: string;
+  checkpoint_recover?: string;
   crons?: CronExtension[];
 };
 
@@ -31,6 +32,8 @@ export function isTExtensionManifest(obj: any): obj is ExtensionManifest {
       typeof (obj as any).subscribe_ingest === "string") &&
     ((obj as any).subscribe_hook === undefined ||
       typeof (obj as any).subscribe_hook === "string") &&
+    ((obj as any).checkpoint_recover === undefined ||
+      typeof (obj as any).checkpoint_recover === "string") &&
     ((obj as any).crons === undefined ||
       (Array.isArray((obj as any).crons) &&
         ((obj as any).crons as any[]).every(

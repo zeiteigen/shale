@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { readdirSync, statSync } from "node:fs";
-import { getSDK, type ShaleSDK } from "@shale/sdk";
+import { getSDK, logger, type ShaleSDK } from "@shale/sdk";
 import { type VaultInfo } from "./vault-finder";
 import { isImageFile } from "./parser";
 import {
@@ -114,7 +114,7 @@ export function findMarkdownFiles(
       }
     }
   } catch (err) {
-    console.warn(`[Obsidian] Error scanning directory ${dir}:`, err);
+    logger.warn(`Error scanning directory ${dir}:`, err);
   }
 
   return files;
@@ -143,7 +143,7 @@ export function findImageFiles(dir: string, baseDir: string = dir): string[] {
       }
     }
   } catch (err) {
-    console.warn(`[Obsidian] Error scanning directory ${dir} for images:`, err);
+    logger.warn(`Error scanning directory ${dir} for images:`, err);
   }
 
   return files;
@@ -177,16 +177,37 @@ export function filterModifiedFiles(
 /**
  * Processes an individual Obsidian vault using the Shale SDK:
  * 1. Discovers and filters modified markdown notes and images.
- * 2. Parses and chunks notes (including whole note + Chat model expansion for atomic notes).
- * 3. Parses images using Chat model for layout and meaning descriptions.
- * 4. Embeds chunks outside of note chunking/parsing (supporting local embedding models).
- * 5. Ingests sources, chunks, and commits graph entities/edges.
  */
-export async function processVault(
+export interface PreparedVault {
+  vault: VaultInfo;
+  maxMtime: number;
+  vaultEntityName: string;
+  entities: Array<{ name: string; type: string }>;
+  edges: Array<{ source: string; target: string; relation: string }>;
+  parsedNotes: Array<{
+    filePath: string;
+    parsedFile: ParsedFile;
+    entities: Array<{ name: string; type: string }>;
+    edges: Array<{ source: string; target: string; relation: string }>;
+  }>;
+  parsedImages: Array<{
+    filePath: string;
+    parsedImage: ParsedImage;
+    entities: Array<{ name: string; type: string }>;
+    edges: Array<{ source: string; target: string; relation: string }>;
+  }>;
+}
+
+/**
+ * Phase 1: Discovers modified notes and images and executes all Chat model operations
+ * (summaries, note content expansion, multimodal image descriptions).
+ * Zero embedding calls happen in this phase, keeping the Chat model loaded in GPU memory.
+ */
+export async function prepareVault(
   vault: VaultInfo,
   sdkOverride?: ShaleSDK,
   forceAll: boolean = false,
-): Promise<ProcessVaultResult> {
+): Promise<PreparedVault> {
   const sdk = sdkOverride ?? getSDK();
 
   const watermarkKey = `vault:${vault.path}:mtime`;
@@ -194,8 +215,8 @@ export async function processVault(
     ? 0
     : Number(sdk.state.getWatermark(watermarkKey) ?? "0");
 
-  console.log(
-    `[Obsidian] Processing vault "${vault.name}" (last watermark: ${lastWatermark})`,
+  sdk.logger.log(
+    `[Phase 1: Chat Model] Inspecting vault "${vault.name}" (last watermark: ${lastWatermark})`,
   );
 
   const allMdFiles = findMarkdownFiles(vault.path);
@@ -207,67 +228,218 @@ export async function processVault(
     filterModifiedFiles(allImageFiles, lastWatermark);
 
   const maxMtime = Math.max(maxNoteMtime, maxImageMtime);
+  const vaultEntityName = `Vault: ${vault.name}`;
+
+  const prepared: PreparedVault = {
+    vault,
+    maxMtime,
+    vaultEntityName,
+    entities: [{ name: vaultEntityName, type: "Vault" }],
+    edges: [],
+    parsedNotes: [],
+    parsedImages: [],
+  };
 
   if (modifiedNotes.length === 0 && modifiedImages.length === 0) {
-    console.log(
-      `[Obsidian] Vault "${vault.name}" has no updates since last run.`,
-    );
-    return {
-      vaultName: vault.name,
-      notesProcessed: 0,
-      imagesProcessed: 0,
-      chunksCreated: 0,
-      edgesCreated: 0,
-      watermarkAdvancedTo: lastWatermark,
-    };
+    sdk.logger.log(`Vault "${vault.name}" has no updates since last run.`);
+    return prepared;
   }
 
-  console.log(
-    `[Obsidian] Found ${modifiedNotes.length} updated note(s) and ${modifiedImages.length} updated image(s) to process in "${vault.name}"`,
+  sdk.logger.log(
+    `[Phase 1: Chat Model] Processing ${modifiedNotes.length} updated note(s) and ${modifiedImages.length} updated image(s) with Chat model in "${vault.name}"...`,
   );
 
-  const vaultEntityName = `Vault: ${vault.name}`;
-  const entities: Array<{ name: string; type: string }> = [
-    { name: vaultEntityName, type: "Vault" },
-  ];
-  const edges: Array<{ source: string; target: string; relation: string }> = [];
-
-  let totalChunksCreated = 0;
-  let notesProcessed = 0;
-  let imagesProcessed = 0;
-
-  // 1. Process modified notes via ingestFile (which calls parseFile)
+  // 1. Process modified notes via ingestFile with deferEmbedding: true (calls parseFile & Chat model expansion)
   for (const filePath of modifiedNotes) {
     try {
-      const fileResult = await ingestFile(filePath, vaultEntityName, sdk);
-      totalChunksCreated += fileResult.chunksCreated;
-      entities.push(...fileResult.entities);
-      edges.push(...fileResult.edges);
-      notesProcessed++;
+      const fileResult = await ingestFile(filePath, vaultEntityName, sdk, {
+        deferEmbedding: true,
+      });
+      if (fileResult.parsedFile) {
+        prepared.parsedNotes.push({
+          filePath,
+          parsedFile: fileResult.parsedFile,
+          entities: fileResult.entities,
+          edges: fileResult.edges,
+        });
+
+        // If the note has an AI summary / expanded chunk, save a checkpoint for crash recovery
+        const hasExpandedSummary = fileResult.parsedFile.chunks.some((c) =>
+          c.heading?.includes("(Expanded Context)"),
+        );
+        if (hasExpandedSummary && sdk?.saveCheckpoint) {
+          try {
+            sdk.saveCheckpoint(
+              {
+                type: "ai_summary",
+                vault: { name: vault.name, path: vault.path },
+                filePath,
+                noteTitle: fileResult.parsedFile.noteTitle,
+                noteUri: fileResult.parsedFile.noteUri,
+                updatedAt: fileResult.parsedFile.updatedAt,
+                parsedFile: fileResult.parsedFile,
+                entities: [{ name: vaultEntityName, type: "Vault" }, ...fileResult.entities],
+                edges: fileResult.edges,
+                mtime: statSync(filePath).mtimeMs,
+              },
+              { id: `ai_summary:${filePath}`, key: `ai_summary:${filePath}` },
+            );
+          } catch (cpErr) {
+            sdk.logger.warn(
+              `Failed to save checkpoint for note "${fileResult.parsedFile.noteTitle}":`,
+              cpErr,
+            );
+          }
+        }
+      }
     } catch (noteErr) {
-      console.error(
-        `[Obsidian] Failed to process note at ${filePath}:`,
-        noteErr,
-      );
+      sdk.logger.error(`Failed to process note at ${filePath}:`, noteErr);
     }
   }
 
-  // 2. Process modified images via ingestImageFile (which uses Chat model for layout and meaning)
+  // 2. Process modified images via ingestImageFile with deferEmbedding: true (calls parseImageFile & Chat model description)
   for (const imagePath of modifiedImages) {
     try {
       const imageResult = await ingestImageFile(
         imagePath,
         vaultEntityName,
         sdk,
+        { deferEmbedding: true },
       );
-      totalChunksCreated += imageResult.chunksCreated;
-      entities.push(...imageResult.entities);
-      edges.push(...imageResult.edges);
-      imagesProcessed++;
+      if (imageResult.parsedImage) {
+        prepared.parsedImages.push({
+          filePath: imagePath,
+          parsedImage: imageResult.parsedImage,
+          entities: imageResult.entities,
+          edges: imageResult.edges,
+        });
+      }
     } catch (imgErr) {
-      console.error(
-        `[Obsidian] Failed to process image at ${imagePath}:`,
-        imgErr,
+      sdk.logger.error(`Failed to process image at ${imagePath}:`, imgErr);
+    }
+  }
+
+  sdk.logger.log(
+    `[Phase 1: Chat Model] Finished Chat model operations for "${vault.name}" (${prepared.parsedNotes.length} note(s), ${prepared.parsedImages.length} image(s)).`,
+  );
+
+  return prepared;
+}
+
+/**
+ * Phase 2: Embeds all prepared chunks using the Embedding model and commits sources,
+ * chunks, and graph edges to SQLite. Zero Chat model calls happen in this phase,
+ * keeping the Embedding model loaded in GPU memory without switching back and forth.
+ */
+export async function finalizeVault(
+  prepared: PreparedVault,
+  sdkOverride?: ShaleSDK,
+): Promise<ProcessVaultResult> {
+  const sdk = sdkOverride ?? getSDK();
+
+  if (prepared.parsedNotes.length === 0 && prepared.parsedImages.length === 0) {
+    return {
+      vaultName: prepared.vault.name,
+      notesProcessed: 0,
+      imagesProcessed: 0,
+      chunksCreated: 0,
+      edgesCreated: 0,
+      watermarkAdvancedTo: prepared.maxMtime,
+    };
+  }
+
+  sdk.logger.log(
+    `[Phase 2: Embedding Model] Embedding and ingesting ${prepared.parsedNotes.length} note(s) and ${prepared.parsedImages.length} image(s) for "${prepared.vault.name}"...`,
+  );
+
+  let totalChunksCreated = 0;
+  let notesProcessed = 0;
+  let imagesProcessed = 0;
+
+  const entities: Array<{ name: string; type: string }> = [
+    ...prepared.entities,
+  ];
+  const edges: Array<{ source: string; target: string; relation: string }> = [
+    ...prepared.edges,
+  ];
+
+  // 1. Embed and ingest all parsed notes
+  for (const note of prepared.parsedNotes) {
+    try {
+      const embeddings = await embedContextualChunks(
+        sdk,
+        note.parsedFile.contextualChunks,
+        note.parsedFile.noteTitle,
+      );
+
+      const ingestResult = sdk.ingest.sourceAndChunks({
+        source: {
+          type: "markdown_note",
+          uri: note.parsedFile.noteUri,
+          origin: "obsidian",
+          title: note.parsedFile.noteTitle,
+          updated_at: note.parsedFile.updatedAt,
+        },
+        chunks: note.parsedFile.contextualChunks.map((chunk, idx) => ({
+          chunk_index: chunk.chunk_index,
+          text_content: chunk.text_content,
+          embedding: embeddings[idx],
+        })),
+        namespace: "obsidian",
+      });
+
+      totalChunksCreated += ingestResult.chunksCount;
+      entities.push(...note.entities);
+      edges.push(...note.edges);
+      notesProcessed++;
+
+      // Successfully ingested into database; resolve/delete checkpoint
+      try {
+        sdk.deleteCheckpoint?.(`ai_summary:${note.filePath}`);
+      } catch {}
+    } catch (err) {
+      sdk.logger.error(
+        `Failed to embed and ingest note at ${note.filePath}:`,
+        err,
+      );
+    }
+  }
+
+  // 2. Embed and ingest all parsed images
+  for (const img of prepared.parsedImages) {
+    try {
+      const embeddings = await embedContextualChunks(
+        sdk,
+        [img.parsedImage.contextualChunk],
+        img.parsedImage.imageTitle,
+      );
+
+      const ingestResult = sdk.ingest.sourceAndChunks({
+        source: {
+          type: "image",
+          uri: img.parsedImage.imageUri,
+          origin: "obsidian",
+          title: img.parsedImage.imageTitle,
+          updated_at: img.parsedImage.updatedAt,
+        },
+        chunks: [
+          {
+            chunk_index: 0,
+            text_content: img.parsedImage.contextualChunk.text_content,
+            embedding: embeddings[0],
+          },
+        ],
+        namespace: "obsidian",
+      });
+
+      totalChunksCreated += ingestResult.chunksCount;
+      entities.push(...img.entities);
+      edges.push(...img.edges);
+      imagesProcessed++;
+    } catch (err) {
+      sdk.logger.error(
+        `Failed to embed and ingest image at ${img.filePath}:`,
+        err,
       );
     }
   }
@@ -276,19 +448,38 @@ export async function processVault(
   const edgesCreated = commitVaultGraph(sdk, entities, edges);
 
   // 4. Advance Watermark
-  sdk.state.setWatermark(String(maxMtime), watermarkKey);
-  console.log(
-    `[Obsidian] Vault "${vault.name}" processed successfully (${notesProcessed} notes, ${imagesProcessed} images). Watermark advanced to ${maxMtime}.`,
+  if (prepared.maxMtime > 0) {
+    const watermarkKey = `vault:${prepared.vault.path}:mtime`;
+    sdk.state.setWatermark(String(prepared.maxMtime), watermarkKey);
+  }
+
+  sdk.logger.log(
+    `Vault "${prepared.vault.name}" processed successfully (${notesProcessed} notes, ${imagesProcessed} images). Watermark advanced to ${prepared.maxMtime}.`,
   );
 
   return {
-    vaultName: vault.name,
+    vaultName: prepared.vault.name,
     notesProcessed,
     imagesProcessed,
     chunksCreated: totalChunksCreated,
     edgesCreated,
-    watermarkAdvancedTo: maxMtime,
+    watermarkAdvancedTo: prepared.maxMtime,
   };
+}
+
+/**
+ * Processes an individual Obsidian vault using the two-phase pipeline:
+ * Phase 1: All Chat model work (content expansion, image descriptions).
+ * Phase 2: All Embedding model work (embeddings, DB chunk ingestion, graph edges).
+ */
+export async function processVault(
+  vault: VaultInfo,
+  sdkOverride?: ShaleSDK,
+  forceAll: boolean = false,
+): Promise<ProcessVaultResult> {
+  const sdk = sdkOverride ?? getSDK();
+  const prepared = await prepareVault(vault, sdk, forceAll);
+  return finalizeVault(prepared, sdk);
 }
 
 export default processVault;

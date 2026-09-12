@@ -17,6 +17,9 @@ const glob = new Glob("**/manifest.json");
 
 const crons: CronExtension[] = [];
 const subscribe_ingest: IngestHook[] = [];
+const checkpointRecoverScripts = new Map<string, string>();
+const extensionNamespaces = new Map<string, string>();
+
 for await (const file of glob.scan(extensionsDir)) {
   try {
     const manifestPath = join(extensionsDir, file);
@@ -25,6 +28,14 @@ for await (const file of glob.scan(extensionsDir)) {
 
     if (isTExtensionManifest(manifest)) {
       const extensionFolder = dirname(manifestPath);
+      extensionNamespaces.set(manifest.name, manifest.namespace || manifest.name);
+
+      if (manifest.checkpoint_recover) {
+        checkpointRecoverScripts.set(
+          manifest.name,
+          join(extensionFolder, manifest.checkpoint_recover),
+        );
+      }
 
       if (manifest.subscribe_ingest) {
         const entryPath = join(extensionFolder, manifest.subscribe_ingest);
@@ -64,4 +75,17 @@ for await (const file of glob.scan(extensionsDir)) {
   }
 }
 
-export { crons, subscribe_ingest };
+export function getCheckpointRecoverScript(
+  extensionId: string,
+): string | undefined {
+  return checkpointRecoverScripts.get(extensionId);
+}
+
+export function registerCheckpointRecoverScript(
+  extensionId: string,
+  scriptPath: string,
+): void {
+  checkpointRecoverScripts.set(extensionId, scriptPath);
+}
+
+export { crons, subscribe_ingest, checkpointRecoverScripts, extensionNamespaces };
