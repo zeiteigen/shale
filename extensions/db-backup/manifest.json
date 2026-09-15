@@ -1,0 +1,14 @@
+{
+  "name": "db-backup",
+  "version": "0.1.0",
+  "description": "Creates regular backups of the production SQLite database in a separate folder.",
+  "namespace": "db-backup",
+  "subscribe_ingest": "index.ts",
+  "crons": [
+    {
+      "name": "db-backup-cron",
+      "script": "index.ts",
+      "schedule": "0 2 * * *"
+    }
+  ]
+}

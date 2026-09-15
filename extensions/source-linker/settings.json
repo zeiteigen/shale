@@ -1,0 +1,17 @@
+{
+  "knnK": 5,
+  "minKnnSimilarity": 0.65,
+  "maxPairsPerRun": 20,
+  "bidirectional": true,
+  "defaultRelation": "RELATES_TO",
+  "minLlmConfidence": 0.5,
+  "contextChunksPerSource": 3,
+  "maxContentChars": 1500,
+  "llmModel": null,
+  "chatPromptTemplate": null,
+  "forceAll": false,
+  "namespace": "source-linker",
+  "enableEntityResolution": true,
+  "minEntityConfidence": 0.7,
+  "maxEntityResolutionsPerPair": 10
+}

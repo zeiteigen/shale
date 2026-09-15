@@ -6,6 +6,7 @@ import {
   CronExtension,
 } from "../lib/extension";
 import { IngestMaterial } from "../lib/ingest.types";
+import { createExtensionSDK, sdkStorage } from "../sdk";
 
 export type IngestHook = {
   func: (item: IngestMaterial) => Promise<void>;
@@ -35,6 +36,72 @@ for await (const file of glob.scan(extensionsDir)) {
           manifest.name,
           join(extensionFolder, manifest.checkpoint_recover),
         );
+      }
+
+      if (manifest.setup_script) {
+        try {
+          const setupPath = join(extensionFolder, manifest.setup_script);
+          const setupModule = await import(setupPath);
+          const sdk = createExtensionSDK(
+            manifest.name,
+            manifest.namespace || manifest.name,
+            undefined,
+            undefined,
+            undefined,
+            manifest.name,
+            extensionFolder,
+          );
+          await sdkStorage.run(sdk, async () => {
+            if (setupModule) {
+              if (typeof setupModule.setup === "function") {
+                await setupModule.setup(sdk);
+              } else if (typeof setupModule.default === "function") {
+                await setupModule.default(sdk);
+              } else if (typeof setupModule.init === "function") {
+                await setupModule.init(sdk);
+              }
+            }
+          });
+        } catch (setupErr) {
+          console.error(
+            `Error executing setup_script for extension "${manifest.name}":`,
+            setupErr,
+          );
+        }
+      }
+
+      if (manifest.subscribe_messages) {
+        try {
+          const msgPath = join(extensionFolder, manifest.subscribe_messages);
+          const msgModule = await import(msgPath);
+          const sdk = createExtensionSDK(
+            manifest.name,
+            manifest.namespace || manifest.name,
+            undefined,
+            undefined,
+            undefined,
+            manifest.name,
+            extensionFolder,
+          );
+          await sdkStorage.run(sdk, async () => {
+            if (msgModule) {
+              if (typeof msgModule.registerMessages === "function") {
+                await msgModule.registerMessages(sdk);
+              } else if (typeof msgModule.setup === "function") {
+                await msgModule.setup(sdk);
+              } else if (typeof msgModule.default === "function") {
+                await msgModule.default(sdk);
+              } else if (typeof msgModule.init === "function") {
+                await msgModule.init(sdk);
+              }
+            }
+          });
+        } catch (msgErr) {
+          console.error(
+            `Error executing subscribe_messages for extension "${manifest.name}":`,
+            msgErr,
+          );
+        }
       }
 
       if (manifest.subscribe_ingest) {

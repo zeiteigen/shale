@@ -74,6 +74,7 @@ function createTestDb(): Database {
       source_id TEXT NOT NULL,
       chunk_index INTEGER NOT NULL,
       text_content TEXT NOT NULL,
+      chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic')),
       FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
     ) STRICT;
   `);
@@ -173,6 +174,7 @@ function createTestDb(): Database {
       target_entity_id INTEGER NOT NULL,
       relation TEXT NOT NULL,
       weight REAL NOT NULL DEFAULT 1.0,
+      metadata TEXT,
       PRIMARY KEY (source_entity_id, target_entity_id, relation),
       FOREIGN KEY(source_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
       FOREIGN KEY(target_entity_id) REFERENCES entities(id) ON DELETE CASCADE
@@ -265,9 +267,44 @@ describe("Shale SDK Architecture", () => {
         10, 11, 12, 13, 14,
       ]);
       expect(context.chunks[0].text_content).toBe("Message 10");
+      expect(context.chunks[0].chunk_type).toBe("verbatim");
       expect(context.chunks[4].text_content).toBe("Message 14");
+      expect(context.chunks[4].chunk_type).toBe("verbatim");
       expect(context.title).toBe("Discord General");
       expect(context.combinedText).toContain("Message 10\n\nMessage 11");
+    });
+
+    it("retrieves and filters sources via getSources, getAllSources, and getSource", () => {
+      const hydrator = new ContextHydrator(db);
+
+      db.run(`
+        INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
+        VALUES 
+          ('src-1', 'markdown_note', 'file:///note1.md', 'obsidian', 100, 'Note 1', 100, 'h1'),
+          ('src-2', 'markdown_note', 'file:///note2.md', 'obsidian', 200, 'Note 2', 200, 'h2'),
+          ('src-3', 'image', 'file:///img.png', 'obsidian', 300, 'Image 1', 300, 'h3');
+      `);
+
+      // All sources
+      const all = hydrator.getAllSources();
+      expect(all.length).toBeGreaterThanOrEqual(3);
+
+      // Filter by since watermark
+      const updated = hydrator.getSources({ since: 150 });
+      expect(updated.map((s) => s.id)).toEqual(["src-2", "src-3"]);
+
+      // Filter by type
+      const notes = hydrator.getSources({ type: "markdown_note", since: 50 });
+      expect(notes.map((s) => s.id)).toEqual(["src-1", "src-2"]);
+
+      // Get single source by ID and URI
+      const s1 = hydrator.getSource("src-1");
+      expect(s1?.title).toBe("Note 1");
+
+      const s2 = hydrator.getSource("file:///note2.md");
+      expect(s2?.id).toBe("src-2");
+
+      expect(hydrator.getSource("nonexistent")).toBeNull();
     });
   });
 
@@ -287,6 +324,7 @@ describe("Shale SDK Architecture", () => {
             target: "TypeScript",
             relation: "SUPPORTS",
             weight: 1.0,
+            metadata: { reason: "Native TypeScript execution engine" },
           },
           { source: "Bun", target: "SQLite", relation: "EMBEDS", weight: 0.9 },
         ],
@@ -305,8 +343,9 @@ describe("Shale SDK Architecture", () => {
           target_entity_id: number;
           relation: string;
           weight: number;
+          metadata: string | null;
         }>(
-          "SELECT source_entity_id, target_entity_id, relation, weight FROM edges ORDER BY relation ASC",
+          "SELECT source_entity_id, target_entity_id, relation, weight, metadata FROM edges ORDER BY relation ASC",
         )
         .all();
 
@@ -314,9 +353,14 @@ describe("Shale SDK Architecture", () => {
       expect(edges[0].relation).toBe("EMBEDS");
       expect(edges[0].source_entity_id).toBe(res.entityMap["Bun"]);
       expect(edges[0].target_entity_id).toBe(res.entityMap["SQLite"]);
+      expect(edges[0].metadata).toBeNull();
+
       expect(edges[1].relation).toBe("SUPPORTS");
       expect(edges[1].source_entity_id).toBe(res.entityMap["Bun"]);
       expect(edges[1].target_entity_id).toBe(res.entityMap["TypeScript"]);
+      expect(edges[1].metadata).toBeDefined();
+      const meta = JSON.parse(edges[1].metadata!);
+      expect(meta.reason).toBe("Native TypeScript execution engine");
     });
 
     it("throws clear error when an edge references an unknown entity", () => {

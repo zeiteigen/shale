@@ -29,6 +29,7 @@ function createTestDb(): Database {
       source_id TEXT NOT NULL,
       chunk_index INTEGER NOT NULL,
       text_content TEXT NOT NULL,
+      chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic')),
       FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
     ) STRICT;
   `);
@@ -469,6 +470,58 @@ describe("Database Schema & Trigger Integrity", () => {
             INSERT INTO checkpoints (id, extension_id, checkpoint_key, data, created_at, status)
             VALUES ('cp-unique', 'ext-1', 'k2', 'data2', 200, 'queued')
           `).run();
+        }).toThrow();
+      });
+    });
+
+    describe("Chunks Table chunk_type", () => {
+      beforeEach(() => {
+        db.run(`
+          INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
+          VALUES ('src-chunk-type', 'doc', 'test://chunk-type', 'local', 100, 'Doc Chunk Type', 100, 'h-ct');
+        `);
+      });
+
+      it("defaults chunk_type to 'verbatim' when omitted", () => {
+        db.run(`
+          INSERT INTO chunks (source_id, chunk_index, text_content)
+          VALUES ('src-chunk-type', 0, 'Default verbatim text');
+        `);
+
+        const chunk = db
+          .query<{ chunk_type: string }>(
+            "SELECT chunk_type FROM chunks WHERE source_id = 'src-chunk-type'",
+          )
+          .get();
+        expect(chunk?.chunk_type).toBe("verbatim");
+      });
+
+      it("allows explicitly specifying 'verbatim' and 'synthetic'", () => {
+        db.run(`
+          INSERT INTO chunks (source_id, chunk_index, chunk_type, text_content)
+          VALUES ('src-chunk-type', 1, 'verbatim', 'Explicit verbatim text');
+        `);
+        db.run(`
+          INSERT INTO chunks (source_id, chunk_index, chunk_type, text_content)
+          VALUES ('src-chunk-type', 2, 'synthetic', 'Explicit synthetic summary');
+        `);
+
+        const chunks = db
+          .query<{ chunk_index: number; chunk_type: string }>(
+            "SELECT chunk_index, chunk_type FROM chunks WHERE source_id = 'src-chunk-type' AND chunk_index IN (1, 2) ORDER BY chunk_index ASC",
+          )
+          .all();
+        expect(chunks).toEqual([
+          { chunk_index: 1, chunk_type: "verbatim" },
+          { chunk_index: 2, chunk_type: "synthetic" },
+        ]);
+      });
+
+      it("rejects invalid chunk_type values", () => {
+        expect(() => {
+          db.query(
+            "INSERT INTO chunks (source_id, chunk_index, chunk_type, text_content) VALUES ('src-chunk-type', 3, 'invalid_type', 'Bad chunk')",
+          ).run();
         }).toThrow();
       });
     });

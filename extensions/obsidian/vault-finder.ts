@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { logger } from "@shale/sdk";
+import { logger, getSetting, type ShaleSDK } from "@shale/sdk";
 
 export interface VaultInfo {
   id: string;
@@ -31,12 +31,48 @@ export function getObsidianConfigPath(): string {
 }
 
 /**
- * Discovers all active Obsidian vaults configured on the system.
+ * Discovers all active Obsidian vaults configured on the system or in settings.json.
  *
  * @param configPath Optional path override for obsidian.json (useful for testing)
+ * @param sdkOverride Optional SDK instance override
  */
-export function discoverVaults(configPath?: string): VaultInfo[] {
-  const targetPath = configPath ?? getObsidianConfigPath();
+export function discoverVaults(
+  configPath?: string,
+  sdkOverride?: ShaleSDK,
+): VaultInfo[] {
+  // Check customVaults setting first
+  const customVaultsSetting =
+    sdkOverride?.settings.get<Array<{ name?: string; path: string } | string>>(
+      "customVaults",
+    ) ?? getSetting("customVaults");
+
+  if (Array.isArray(customVaultsSetting) && customVaultsSetting.length > 0) {
+    const customVaults: VaultInfo[] = [];
+    for (let i = 0; i < customVaultsSetting.length; i++) {
+      const item = customVaultsSetting[i];
+      const vPath = typeof item === "string" ? item : item.path;
+      const vName =
+        (typeof item === "object" ? item.name : undefined) || basename(vPath);
+      if (existsSync(vPath)) {
+        customVaults.push({
+          id: `custom-vault-${i + 1}`,
+          path: vPath,
+          name: vName,
+        });
+      }
+    }
+    if (customVaults.length > 0) {
+      return customVaults;
+    }
+  }
+
+  const configuredPath =
+    configPath ??
+    sdkOverride?.settings.get<string>("obsidianConfigPath") ??
+    getSetting("obsidianConfigPath") ??
+    getObsidianConfigPath();
+
+  const targetPath = configuredPath;
 
   if (!existsSync(targetPath)) {
     return [];

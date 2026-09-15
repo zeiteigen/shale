@@ -40,10 +40,23 @@ export class GraphIngestor {
       LIMIT 1
     `);
 
-    const insertEdgeStmt = this.db.query(`
-      INSERT OR REPLACE INTO edges (source_entity_id, target_entity_id, relation, weight)
-      VALUES ($source, $target, $relation, $weight)
-    `);
+    let hasMetadata = false;
+    try {
+      const cols = this.db
+        .query<{ name: string }, []>("PRAGMA table_info(edges)")
+        .all();
+      hasMetadata = cols.some((c) => c.name === "metadata");
+    } catch {}
+
+    const insertEdgeStmt = hasMetadata
+      ? this.db.query(`
+          INSERT OR REPLACE INTO edges (source_entity_id, target_entity_id, relation, weight, metadata)
+          VALUES ($source, $target, $relation, $weight, $metadata)
+        `)
+      : this.db.query(`
+          INSERT OR REPLACE INTO edges (source_entity_id, target_entity_id, relation, weight)
+          VALUES ($source, $target, $relation, $weight)
+        `);
 
     const txn = this.db.transaction(() => {
       const entityMap: Record<string, number> = {};
@@ -100,12 +113,23 @@ export class GraphIngestor {
         const sourceId = resolveEntityId(edge.source);
         const targetId = resolveEntityId(edge.target);
 
-        insertEdgeStmt.run({
+        const params: Record<string, any> = {
           $source: sourceId,
           $target: targetId,
           $relation: edge.relation,
           $weight: edge.weight ?? 1.0,
-        });
+        };
+
+        if (hasMetadata) {
+          params.$metadata =
+            edge.metadata !== undefined
+              ? typeof edge.metadata === "string"
+                ? edge.metadata
+                : JSON.stringify(edge.metadata)
+              : null;
+        }
+
+        insertEdgeStmt.run(params);
         edgesCount++;
       }
 

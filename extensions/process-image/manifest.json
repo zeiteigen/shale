@@ -1,0 +1,7 @@
+{
+  "name": "process-image",
+  "version": "0.1.0",
+  "description": "Multimodal image processing extension providing cross-extension file analysis, visual descriptions, chunking, and knowledge graph connections.",
+  "namespace": "images",
+  "setup_script": "setup.ts"
+}

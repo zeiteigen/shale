@@ -303,11 +303,14 @@ export function resolveTimeout(
   }
 
   const rawBase =
+    options?.endpoint ??
     options?.baseUrl ??
     process.env.OPENAI_BASE_URL ??
     (type === "chat"
-      ? process.env.OPENAI_CHAT_ENDPOINT
-      : process.env.EMBEDDING_BASE_URL);
+      ? process.env.OPENAI_CHAT_ENDPOINT ?? process.env.OPENAI_ENDPOINT
+      : process.env.EMBEDDING_ENDPOINT ??
+        process.env.OPENAI_ENDPOINT ??
+        process.env.EMBEDDING_BASE_URL);
 
   if (isLocalEndpoint(rawBase)) {
     return 300000; // 5 minutes for local model loading

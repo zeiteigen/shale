@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shale Browser Ingestor</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-area">
+        <span class="logo-badge">SHALE</span>
+        <h1>Browser Capture</h1>
+      </div>
+      <div id="connectionStatus" class="status-indicator checking">
+        <span class="status-dot"></span>
+        <span class="status-text">Checking...</span>
+      </div>
+    </header>
+
+    <!-- Feedback Banner -->
+    <div id="feedbackBanner" class="feedback-banner hidden"></div>
+
+    <!-- Onboarding / Initial Bootstrap Banner -->
+    <section id="onboardingBanner" class="card onboarding-card hidden">
+      <div class="onboarding-content">
+        <div class="onboarding-header">
+          <span class="onboarding-icon">🚀</span>
+          <div>
+            <h3>Ready for your first sync</h3>
+            <p>Choose exactly what Shale should import in the Browser library section below.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Full Data Import & Bootstrap (Manual Trigger & Testing) -->
+    <section class="card import-card">
+      <div class="card-header">
+        <span class="card-title">Import browser library</span>
+        <span class="badge badge-subtle">Choose data</span>
+      </div>
+      <p class="card-description">Open tabs include readable text, HTML, links, and image references. History and bookmarks only expose URL/title records through Chrome.</p>
+
+      <div class="import-options">
+        <label class="checkbox-row">
+          <input type="checkbox" id="chkImportTabs" checked>
+          <span><strong>Open tabs</strong><small>Full page content from every window</small></span>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="chkImportBookmarks" checked>
+          <span><strong>Bookmarks</strong><small>URLs, titles, folders, and dates</small></span>
+        </label>
+        <div class="history-option-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="chkImportHistory" checked>
+            <span><strong>History</strong><small>URLs, titles, visits, and counts</small></span>
+          </label>
+          <select id="historyRangeSelect" class="select-input">
+            <option value="24h">Last 24 Hours</option>
+            <option value="7d" selected>Last 7 Days</option>
+            <option value="30d">Last 30 Days</option>
+            <option value="90d">Last 90 Days</option>
+            <option value="all">All Time (Full History)</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="btnStartFullImport" class="btn btn-primary btn-full mt-2">
+        <span class="btn-icon">📥</span>
+        <span>Import selected data</span>
+      </button>
+
+      <!-- Import Progress Display -->
+      <div id="importProgressBox" class="progress-box hidden mt-2">
+        <div class="progress-header">
+          <span id="importStatusText" class="progress-status">Importing...</span>
+          <span id="importCountsText" class="progress-counts">0 items</span>
+        </div>
+        <div class="progress-bar-track">
+          <div id="importProgressBar" class="progress-bar-fill"></div>
+        </div>
+      </div>
+
+      <div class="import-actions mt-1">
+        <button id="btnResetSyncState" class="btn-link" title="Reset state to test initial onboarding again">
+          Show first-sync message again
+        </button>
+      </div>
+    </section>
+
+    <!-- Active Session Card -->
+    <section class="card session-card">
+      <div class="card-header">
+        <span class="card-title">Capture status</span>
+        <span id="sessionBadge" class="badge">Live Tracking</span>
+      </div>
+      <div class="session-info">
+        <div class="info-row">
+          <span class="label">Session ID:</span>
+          <span id="sessionId" class="val code">-</span>
+        </div>
+        <div class="stats-row">
+          <div class="stat-box">
+            <span id="sessionPageCount" class="stat-number">0</span>
+            <span class="stat-label">Pages this session</span>
+          </div>
+          <div class="stat-box">
+            <span id="totalIngestedCount" class="stat-number">0</span>
+            <span class="stat-label">Items sent</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Actions -->
+    <section class="card">
+      <div class="card-header">
+        <span class="card-title">Capture now</span>
+      </div>
+      <div class="action-grid">
+        <button id="btnIngestCurrent" class="btn btn-primary">
+          <span class="btn-icon">⚡</span>
+          <span>Capture this page</span>
+        </button>
+        <button id="btnIngestAllTabs" class="btn btn-secondary">
+          <span class="btn-icon">📑</span>
+          <span>Capture open tabs</span>
+        </button>
+        <button id="btnSyncHistory" class="btn btn-secondary">
+          <span class="btn-icon">🕒</span>
+          <span>Sync History (24h)</span>
+        </button>
+        <button id="btnSyncBookmarks" class="btn btn-secondary">
+          <span class="btn-icon">⭐</span>
+          <span>Sync Bookmarks</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Settings Section -->
+    <details class="card settings-card">
+      <summary>Settings</summary>
+      <div class="card-header">
+        <span class="card-title">Connection & privacy</span>
+      </div>
+
+      <div class="setting-item toggle-row">
+        <label for="toggleAutoSync" class="toggle-label">
+          <span class="setting-name">Live Active Page Sync</span>
+          <span class="setting-desc">Auto-ingest tabs upon page load</span>
+        </label>
+        <input type="checkbox" id="toggleAutoSync" class="toggle-input">
+      </div>
+
+      <div class="setting-item toggle-row">
+        <label for="toggleSocialMedia" class="toggle-label">
+          <span class="setting-name">Exclude Social Media</span>
+          <span class="setting-desc">Filter X, Reddit, Instagram, etc.</span>
+        </label>
+        <input type="checkbox" id="toggleSocialMedia" class="toggle-input">
+      </div>
+
+      <div class="setting-item form-group">
+        <label for="serverUrlInput" class="field-label">Shale Server Endpoint</label>
+        <div class="input-with-button">
+          <input type="text" id="serverUrlInput" class="text-input" placeholder="http://localhost:7425/ingest">
+          <button id="btnSaveUrl" class="btn btn-sm">Save</button>
+        </div>
+      </div>
+
+      <div class="setting-item form-group">
+        <label for="excludeDomainsText" class="field-label">Custom Excluded Domains (one per line)</label>
+        <textarea id="excludeDomainsText" class="textarea-input" rows="2" placeholder="mail.google.com&#10;reddit.com"></textarea>
+        <button id="btnSaveExclusions" class="btn btn-sm btn-full mt-1">Update Exclusions</button>
+      </div>
+    </details>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span id="lastSyncLabel" class="last-sync">Last sync: Never</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

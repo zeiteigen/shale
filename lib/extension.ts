@@ -2,6 +2,8 @@ export type CronExtension = {
   name?: string;
   schedule: string;
   script: string;
+  /** Run this cron once after the host has finished loading extensions. */
+  run_on_startup?: boolean;
   extensionId?: string;
   namespace?: string;
 };
@@ -13,6 +15,7 @@ export type ExtensionManifest = {
   namespace?: string;
   setup_script?: string;
   subscribe_ingest?: string;
+  subscribe_messages?: string;
   checkpoint_recover?: string;
   crons?: CronExtension[];
 };
@@ -30,6 +33,8 @@ export function isTExtensionManifest(obj: any): obj is ExtensionManifest {
       typeof (obj as any).setup_script === "string") &&
     ((obj as any).subscribe_ingest === undefined ||
       typeof (obj as any).subscribe_ingest === "string") &&
+    ((obj as any).subscribe_messages === undefined ||
+      typeof (obj as any).subscribe_messages === "string") &&
     ((obj as any).subscribe_hook === undefined ||
       typeof (obj as any).subscribe_hook === "string") &&
     ((obj as any).checkpoint_recover === undefined ||
@@ -42,7 +47,9 @@ export function isTExtensionManifest(obj: any): obj is ExtensionManifest {
             typeof cron === "object" &&
             typeof cron.schedule === "string" &&
             typeof cron.script === "string" &&
-            (cron.name === undefined || typeof cron.name === "string"),
+            (cron.name === undefined || typeof cron.name === "string") &&
+            (cron.run_on_startup === undefined ||
+              typeof cron.run_on_startup === "boolean"),
         )))
   );
 }

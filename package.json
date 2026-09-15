@@ -5,11 +5,20 @@
     "./sdk": "./sdk/index.ts",
     "./sdk/*": "./sdk/*"
   },
+  "scripts": {
+    "settings": "bun scripts/settings.ts",
+    "queue:view": "bun run scripts/browser-queue-viewer.ts",
+    "visualizer": "cd visualizer && bun run dev && cd .."
+  },
   "dependencies": {
+    "@clack/prompts": "^1.8.0",
+    "commander": "^15.0.0",
     "openai": "^7.12.1",
-    "sqlite-vec": "^0.1.9"
+    "sqlite-vec": "^0.1.9",
+    "stopword": "^3.1.5"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.0"
+    "@types/bun": "^1.4.0",
+    "@types/stopword": "^2.0.3"
   }
 }

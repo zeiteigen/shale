@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { readdirSync, statSync } from "node:fs";
-import { getSDK, logger, type ShaleSDK } from "@shale/sdk";
+import { getSDK, logger, getSetting, type ShaleSDK } from "@shale/sdk";
 import { type VaultInfo } from "./vault-finder";
 import { isImageFile } from "./parser";
 import {
@@ -13,6 +13,7 @@ import {
 } from "./parse-file";
 import {
   parseImageFile,
+  parseImageFilesBatch,
   describeImageWithChatModel,
   type ParsedImage,
 } from "./parse-image";
@@ -42,6 +43,7 @@ export interface ProcessVaultResult {
 export {
   parseFile,
   parseImageFile,
+  parseImageFilesBatch,
   buildContextualChunks,
   expandNoteWithChatModel,
   describeImageWithChatModel,
@@ -88,27 +90,34 @@ export function commitVaultGraph(
 }
 
 /**
- * Recursively discovers all markdown files within a directory, ignoring hidden directories.
+ * Recursively discovers all markdown files within a directory, ignoring hidden and configured directories.
  */
 export function findMarkdownFiles(
   dir: string,
   baseDir: string = dir,
+  ignoredDirs?: string[],
 ): string[] {
   const files: string[] = [];
+  const ignoredList =
+    ignoredDirs ?? getSetting<string[]>("ignoredDirectories") ?? [];
+  const ignoredSet = new Set(ignoredList.map((d) => d.toLowerCase()));
 
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
 
     for (const entry of entries) {
-      // Ignore hidden directories like .obsidian, .git, .trash
-      if (entry.name.startsWith(".")) {
+      // Ignore hidden directories (.obsidian, .git, .trash) and configured ignored directories
+      if (
+        entry.name.startsWith(".") ||
+        ignoredSet.has(entry.name.toLowerCase())
+      ) {
         continue;
       }
 
       const fullPath = join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        files.push(...findMarkdownFiles(fullPath, baseDir));
+        files.push(...findMarkdownFiles(fullPath, baseDir, ignoredDirs));
       } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
         files.push(fullPath);
       }
@@ -121,23 +130,33 @@ export function findMarkdownFiles(
 }
 
 /**
- * Recursively discovers all image files within a directory, ignoring hidden directories.
+ * Recursively discovers all image files within a directory, ignoring hidden and configured directories.
  */
-export function findImageFiles(dir: string, baseDir: string = dir): string[] {
+export function findImageFiles(
+  dir: string,
+  baseDir: string = dir,
+  ignoredDirs?: string[],
+): string[] {
   const files: string[] = [];
+  const ignoredList =
+    ignoredDirs ?? getSetting<string[]>("ignoredDirectories") ?? [];
+  const ignoredSet = new Set(ignoredList.map((d) => d.toLowerCase()));
 
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
 
     for (const entry of entries) {
-      if (entry.name.startsWith(".")) {
+      if (
+        entry.name.startsWith(".") ||
+        ignoredSet.has(entry.name.toLowerCase())
+      ) {
         continue;
       }
 
       const fullPath = join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        files.push(...findImageFiles(fullPath, baseDir));
+        files.push(...findImageFiles(fullPath, baseDir, ignoredDirs));
       } else if (entry.isFile() && isImageFile(entry.name)) {
         files.push(fullPath);
       }
@@ -210,8 +229,13 @@ export async function prepareVault(
 ): Promise<PreparedVault> {
   const sdk = sdkOverride ?? getSDK();
 
+  const force =
+    forceAll ||
+    sdk.settings.get<boolean>("forceAll") ||
+    getSetting<boolean>("forceAll", false);
+
   const watermarkKey = `vault:${vault.path}:mtime`;
-  const lastWatermark = forceAll
+  const lastWatermark = force
     ? 0
     : Number(sdk.state.getWatermark(watermarkKey) ?? "0");
 
@@ -219,8 +243,22 @@ export async function prepareVault(
     `[Phase 1: Chat Model] Inspecting vault "${vault.name}" (last watermark: ${lastWatermark})`,
   );
 
-  const allMdFiles = findMarkdownFiles(vault.path);
-  const allImageFiles = findImageFiles(vault.path);
+  const includeMarkdown =
+    sdk.settings.get<boolean>("includeMarkdown") ??
+    getSetting<boolean>("includeMarkdown", true);
+  const includeImages =
+    sdk.settings.get<boolean>("includeImages") ??
+    getSetting<boolean>("includeImages", true);
+  const ignoredDirectories =
+    sdk.settings.get<string[]>("ignoredDirectories") ??
+    getSetting<string[]>("ignoredDirectories");
+
+  const allMdFiles = includeMarkdown
+    ? findMarkdownFiles(vault.path, vault.path, ignoredDirectories)
+    : [];
+  const allImageFiles = includeImages
+    ? findImageFiles(vault.path, vault.path, ignoredDirectories)
+    : [];
 
   const { modifiedFiles: modifiedNotes, maxMtime: maxNoteMtime } =
     filterModifiedFiles(allMdFiles, lastWatermark);
@@ -297,25 +335,49 @@ export async function prepareVault(
     }
   }
 
-  // 2. Process modified images via ingestImageFile with deferEmbedding: true (calls parseImageFile & Chat model description)
-  for (const imagePath of modifiedImages) {
+  // 2. Process modified images via bulk parsing with deferEmbedding: true
+  if (modifiedImages.length > 0) {
     try {
-      const imageResult = await ingestImageFile(
-        imagePath,
-        vaultEntityName,
-        sdk,
-        { deferEmbedding: true },
-      );
-      if (imageResult.parsedImage) {
+      const parsedBatch = await parseImageFilesBatch(modifiedImages, sdk);
+      for (const parsedImage of parsedBatch) {
         prepared.parsedImages.push({
-          filePath: imagePath,
-          parsedImage: imageResult.parsedImage,
-          entities: imageResult.entities,
-          edges: imageResult.edges,
+          filePath: parsedImage.filePath,
+          parsedImage,
+          entities: [{ name: parsedImage.imageTitle, type: "Image" }],
+          edges: [
+            {
+              source: parsedImage.imageTitle,
+              target: vaultEntityName,
+              relation: "IN_SAME_VAULT",
+            },
+          ],
         });
       }
-    } catch (imgErr) {
-      sdk.logger.error(`Failed to process image at ${imagePath}:`, imgErr);
+    } catch (batchErr) {
+      sdk.logger.error(
+        `Failed to batch parse images in "${vault.name}":`,
+        batchErr,
+      );
+      for (const imagePath of modifiedImages) {
+        try {
+          const imageResult = await ingestImageFile(
+            imagePath,
+            vaultEntityName,
+            sdk,
+            { deferEmbedding: true },
+          );
+          if (imageResult.parsedImage) {
+            prepared.parsedImages.push({
+              filePath: imagePath,
+              parsedImage: imageResult.parsedImage,
+              entities: imageResult.entities,
+              edges: imageResult.edges,
+            });
+          }
+        } catch (imgErr) {
+          sdk.logger.error(`Failed to process image at ${imagePath}:`, imgErr);
+        }
+      }
     }
   }
 
@@ -382,6 +444,7 @@ export async function finalizeVault(
         },
         chunks: note.parsedFile.contextualChunks.map((chunk, idx) => ({
           chunk_index: chunk.chunk_index,
+          chunk_type: chunk.chunk_type ?? "verbatim",
           text_content: chunk.text_content,
           embedding: embeddings[idx],
         })),
@@ -408,9 +471,15 @@ export async function finalizeVault(
   // 2. Embed and ingest all parsed images
   for (const img of prepared.parsedImages) {
     try {
+      const targetChunks =
+        img.parsedImage.contextualChunks &&
+        img.parsedImage.contextualChunks.length > 0
+          ? img.parsedImage.contextualChunks
+          : [img.parsedImage.contextualChunk];
+
       const embeddings = await embedContextualChunks(
         sdk,
-        [img.parsedImage.contextualChunk],
+        targetChunks,
         img.parsedImage.imageTitle,
       );
 
@@ -422,13 +491,14 @@ export async function finalizeVault(
           title: img.parsedImage.imageTitle,
           updated_at: img.parsedImage.updatedAt,
         },
-        chunks: [
-          {
-            chunk_index: 0,
-            text_content: img.parsedImage.contextualChunk.text_content,
-            embedding: embeddings[0],
-          },
-        ],
+        chunks: targetChunks.map((chunk, idx) => ({
+          chunk_index: chunk.chunk_index,
+          chunk_type:
+            chunk.chunk_type ??
+            (chunk.chunk_index === 0 ? "verbatim" : "synthetic"),
+          text_content: chunk.text_content,
+          embedding: embeddings[idx],
+        })),
         namespace: "obsidian",
       });
 

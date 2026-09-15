@@ -15,10 +15,13 @@ export interface Source {
   hash: string;
 }
 
-export interface ChunkWithoutEmbedding {
-  id: number;
+export type ChunkType = "verbatim" | "synthetic";
+
+export interface Chunk {
+  id?: number;
   source_id: string;
   chunk_index: number;
+  chunk_type?: ChunkType;
   text_content: string;
 }
 
@@ -26,6 +29,7 @@ export interface ChunkWithEmbedding {
   id?: number;
   source_id: string;
   chunk_index: number;
+  chunk_type?: ChunkType;
   text_content: string;
   embedding: number[]; // Float32Array also acceptable, but usually passed as number[] from JS
 }
@@ -65,6 +69,7 @@ export interface IngestSourceAndChunksOptions {
   source: Source;
   chunks: {
     chunk_index?: number;
+    chunk_type?: ChunkType;
     text_content: string;
     embedding: number[] | Float32Array;
   }[];
@@ -75,6 +80,7 @@ export interface Edge {
   target_entity_id: number;
   relation: string;
   weight?: number;
+  metadata?: string | Record<string, any>;
 }
 
 export interface ChunkEntityLink {
@@ -105,10 +111,10 @@ export function addSource(source: Source) {
 export function addChunksWithEmbeddings(chunks: ChunkWithEmbedding[]) {
   const insertChunk = db.query<
     { id: number },
-    { $source_id: string; $chunk_index: number; $text_content: string }
+    { $source_id: string; $chunk_index: number; $chunk_type: string; $text_content: string }
   >(`
-    INSERT INTO chunks (source_id, chunk_index, text_content) 
-    VALUES ($source_id, $chunk_index, $text_content)
+    INSERT INTO chunks (source_id, chunk_index, chunk_type, text_content) 
+    VALUES ($source_id, $chunk_index, $chunk_type, $text_content)
     RETURNING id
   `);
   const insertVector = db.query(`
@@ -121,6 +127,7 @@ export function addChunksWithEmbeddings(chunks: ChunkWithEmbedding[]) {
       const res = insertChunk.get({
         $source_id: chunk.source_id,
         $chunk_index: chunk.chunk_index,
+        $chunk_type: chunk.chunk_type ?? "verbatim",
         $text_content: chunk.text_content,
       });
 
@@ -150,10 +157,10 @@ export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
 
   const insertChunk = db.query<
     { id: number },
-    { $source_id: string; $chunk_index: number; $text_content: string }
+    { $source_id: string; $chunk_index: number; $chunk_type: string; $text_content: string }
   >(`
-    INSERT INTO chunks (source_id, chunk_index, text_content) 
-    VALUES ($source_id, $chunk_index, $text_content)
+    INSERT INTO chunks (source_id, chunk_index, chunk_type, text_content) 
+    VALUES ($source_id, $chunk_index, $chunk_type, $text_content)
     RETURNING id
   `);
 
@@ -183,6 +190,7 @@ export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
       const res = insertChunk.get({
         $source_id: source.id,
         $chunk_index: chunkIndex,
+        $chunk_type: chunk.chunk_type ?? "verbatim",
         $text_content: chunk.text_content,
       });
 
@@ -240,10 +248,23 @@ export function addGraphData(
     ON CONFLICT(namespace, name) DO UPDATE SET type = excluded.type 
     RETURNING id
   `);
-  const insertEdge = db.query(`
-    INSERT OR REPLACE INTO edges (source_entity_id, target_entity_id, relation, weight) 
-    VALUES ($source, $target, $relation, $weight)
-  `);
+  let hasMetadata = false;
+  try {
+    const cols = db
+      .query<{ name: string }, []>("PRAGMA table_info(edges)")
+      .all();
+    hasMetadata = cols.some((c) => c.name === "metadata");
+  } catch {}
+
+  const insertEdge = hasMetadata
+    ? db.query(`
+        INSERT OR REPLACE INTO edges (source_entity_id, target_entity_id, relation, weight, metadata) 
+        VALUES ($source, $target, $relation, $weight, $metadata)
+      `)
+    : db.query(`
+        INSERT OR REPLACE INTO edges (source_entity_id, target_entity_id, relation, weight) 
+        VALUES ($source, $target, $relation, $weight)
+      `);
 
   const txn = db.transaction(
     (ents: Entity[], edgs: Edge[], defaultNs: string) => {
@@ -266,12 +287,21 @@ export function addGraphData(
       for (const e of edgs) {
         const sourceId = idMap.get(e.source_entity_id) ?? e.source_entity_id;
         const targetId = idMap.get(e.target_entity_id) ?? e.target_entity_id;
-        insertEdge.run({
+        const params: Record<string, any> = {
           $source: sourceId,
           $target: targetId,
           $relation: e.relation,
           $weight: e.weight ?? 1.0,
-        });
+        };
+        if (hasMetadata) {
+          params.$metadata =
+            e.metadata !== undefined
+              ? typeof e.metadata === "string"
+                ? e.metadata
+                : JSON.stringify(e.metadata)
+              : null;
+        }
+        insertEdge.run(params);
       }
     },
   );

@@ -53,10 +53,10 @@ export class UnifiedIngestor {
 
     const insertChunkStmt = this.db.query<
       { id: number },
-      { $source_id: string; $chunk_index: number; $text_content: string }
+      { $source_id: string; $chunk_index: number; $chunk_type: string; $text_content: string }
     >(`
-      INSERT INTO chunks (source_id, chunk_index, text_content)
-      VALUES ($source_id, $chunk_index, $text_content)
+      INSERT INTO chunks (source_id, chunk_index, chunk_type, text_content)
+      VALUES ($source_id, $chunk_index, $chunk_type, $text_content)
       RETURNING id
     `);
 
@@ -116,6 +116,7 @@ export class UnifiedIngestor {
         const res = insertChunkStmt.get({
           $source_id: sourceId,
           $chunk_index: chunkIndex,
+          $chunk_type: chunk.chunk_type ?? "verbatim",
           $text_content: chunk.text_content,
         });
 

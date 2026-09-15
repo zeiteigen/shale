@@ -22,7 +22,7 @@ export class ContextHydrator {
       { $idOrUri: string; $limit: number }
     >(`
       SELECT * FROM (
-        SELECT c.id, c.source_id, c.chunk_index, c.text_content
+        SELECT c.id, c.source_id, c.chunk_index, c.chunk_type, c.text_content
         FROM chunks c
         LEFT JOIN sources s ON c.source_id = s.id
         WHERE c.source_id = $idOrUri OR s.id = $idOrUri OR s.uri = $idOrUri
@@ -66,6 +66,64 @@ export class ContextHydrator {
       chunks,
       combinedText,
     };
+  }
+
+  /**
+   * Retrieves sources from the database with optional filtering.
+   *
+   * @param options Optional filters (since timestamp, origin, type, limit)
+   */
+  getSources(options?: import("./types").GetSourcesOptions): import("./types").Source[] {
+    let sql = `
+      SELECT id, type, uri, origin, created_at, title, updated_at, hash
+      FROM sources
+      WHERE 1 = 1
+    `;
+    const params: Record<string, any> = {};
+
+    if (options?.since !== undefined) {
+      sql += ` AND updated_at > $since`;
+      params.$since = options.since;
+    }
+    if (options?.origin) {
+      sql += ` AND origin = $origin`;
+      params.$origin = options.origin;
+    }
+    if (options?.type) {
+      sql += ` AND type = $type`;
+      params.$type = options.type;
+    }
+
+    sql += ` ORDER BY updated_at ASC`;
+
+    if (options?.limit) {
+      sql += ` LIMIT $limit`;
+      params.$limit = options.limit;
+    }
+
+    return this.db.query<import("./types").Source, any>(sql).all(params);
+  }
+
+  /**
+   * Retrieves all sources in the database.
+   */
+  getAllSources(): import("./types").Source[] {
+    return this.getSources();
+  }
+
+  /**
+   * Retrieves a single source by ID or URI.
+   *
+   * @param idOrUri Unique source ID or URI
+   */
+  getSource(idOrUri: string): import("./types").Source | null {
+    const stmt = this.db.query<import("./types").Source, { $idOrUri: string }>(`
+      SELECT id, type, uri, origin, created_at, title, updated_at, hash
+      FROM sources
+      WHERE id = $idOrUri OR uri = $idOrUri
+      LIMIT 1
+    `);
+    return stmt.get({ $idOrUri: idOrUri }) ?? null;
   }
 }
 

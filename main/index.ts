@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path";
 import ingestQueue from "./ingest-queue";
+import "./ingest-router";
 import { isIngestMaterial } from "../lib/ingest.types";
 import {
   crons,
@@ -13,35 +14,38 @@ import type { CronExtension } from "../lib/extension";
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-try {
-  Bun.serve({
-    port: Number(process.env.PORT) || 7425,
-    routes: {
-      "/ingest": async (req) => {
-        try {
-          const body = await req.json();
+if (import.meta.main) {
+  try {
+    Bun.serve({
+      port: Number(process.env.PORT) || 7425,
+      routes: {
+        "/health": () => Response.json({ status: "ok", service: "shale" }),
+        "/ingest": async (req) => {
+          try {
+            const body = await req.json();
 
-          if (!isIngestMaterial(body)) {
+            if (!isIngestMaterial(body)) {
+              return new Response("ERR");
+            }
+
+            ingestQueue.add(body);
+            return new Response("OK");
+          } catch (err: any) {
+            console.log("Err in /ingest:", JSON.stringify(err));
             return new Response("ERR");
           }
-
-          ingestQueue.add(body);
-          return new Response("OK");
-        } catch (err: any) {
-          console.log("Err in /ingest:", JSON.stringify(err));
-          return new Response("ERR");
-        }
+        },
       },
-    },
-  });
-  console.log("Ingest server running on port 7425");
-} catch (err: any) {
-  if (err?.code === "EADDRINUSE") {
-    console.warn(
-      "Port 7425 is already in use, skipping HTTP server startup in this process.",
-    );
-  } else {
-    throw err;
+    });
+    console.log("Ingest server running on port 7425");
+  } catch (err: any) {
+    if (err?.code === "EADDRINUSE") {
+      console.warn(
+        "Port 7425 is already in use, skipping HTTP server startup in this process.",
+      );
+    } else {
+      throw err;
+    }
   }
 }
 
@@ -194,13 +198,26 @@ export async function runAllCrons() {
   }
 }
 
+/** Run only crons explicitly marked for the host startup phase. */
+export async function runStartupCrons() {
+  for (const cron of crons) {
+    if (cron.run_on_startup) {
+      await runCron(cron);
+    }
+  }
+}
+
 for (const cron of crons) {
   Bun.cron(cron.schedule, async () => {
     await runCron(cron);
   });
 }
 
-if (process.argv.includes("--run-all-cron")) {
+if (import.meta.main) {
+  await runStartupCrons();
+}
+
+if (import.meta.main && process.argv.includes("--run-all-cron")) {
   console.log("Running all cron scripts on startup (--run-all-cron)...");
   await runAllCrons();
 }

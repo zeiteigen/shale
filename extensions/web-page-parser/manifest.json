@@ -1,0 +1,7 @@
+{
+  "name": "web-page-parser",
+  "version": "0.1.0",
+  "description": "Extracts readable web-page content, contextualizes it with an LLM, chunks it, and delegates discovered images to process-image.",
+  "namespace": "web",
+  "setup_script": "setup.ts"
+}

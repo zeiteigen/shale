@@ -1,3 +1,12 @@
+// Compatibility entrypoint. The visualizer now lives in ../visualizer.
+export { getGraphData, startVisualizerServer, type GraphData } from "../visualizer/server";
+import { startVisualizerServer } from "../visualizer/server";
+
+if (import.meta.main) {
+  startVisualizerServer();
+}
+
+/*
 import { createExtensionSDK, type ChunkSearchResult } from "../sdk";
 
 const sdk = createExtensionSDK("visualizer");
@@ -306,48 +315,13 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
         <!-- Node Type Filters -->
         <div>
           <label class="text-[11px] font-semibold text-slate-400 block mb-1.5">NODE TYPES</label>
-          <div class="grid grid-cols-3 gap-1.5 text-xs">
-            <label class="flex items-center space-x-1.5 bg-slate-900/80 px-2 py-1.5 rounded border border-slate-800 cursor-pointer hover:border-slate-700">
-              <input type="checkbox" id="filter-vault" checked class="accent-purple-500 rounded">
-              <span class="text-purple-300 text-[11px]">Vault</span>
-            </label>
-            <label class="flex items-center space-x-1.5 bg-slate-900/80 px-2 py-1.5 rounded border border-slate-800 cursor-pointer hover:border-slate-700">
-              <input type="checkbox" id="filter-notes" checked class="accent-blue-500 rounded">
-              <span class="text-blue-300 text-[11px]">Notes</span>
-            </label>
-            <label class="flex items-center space-x-1.5 bg-slate-900/80 px-2 py-1.5 rounded border border-slate-800 cursor-pointer hover:border-slate-700">
-              <input type="checkbox" id="filter-images" checked class="accent-emerald-500 rounded">
-              <span class="text-emerald-300 text-[11px]">Images</span>
-            </label>
-          </div>
+          <div id="node-type-filters" class="grid grid-cols-2 gap-1.5 text-xs"></div>
         </div>
 
         <!-- Relationship Filters -->
         <div>
           <label class="text-[11px] font-semibold text-slate-400 block mb-1.5">RELATIONSHIPS</label>
-          <div class="space-y-1 text-xs">
-            <label class="flex items-center justify-between bg-slate-900/80 px-2.5 py-1.5 rounded border border-slate-800 cursor-pointer hover:border-slate-700">
-              <span class="flex items-center space-x-2">
-                <span class="w-3 h-0.5 bg-cyan-400 inline-block"></span>
-                <span class="text-slate-300 text-[11px]">REFERENCES (Wikilinks)</span>
-              </span>
-              <input type="checkbox" id="filter-ref" checked class="accent-cyan-500 rounded">
-            </label>
-            <label class="flex items-center justify-between bg-slate-900/80 px-2.5 py-1.5 rounded border border-slate-800 cursor-pointer hover:border-slate-700">
-              <span class="flex items-center space-x-2">
-                <span class="w-3 h-0.5 bg-emerald-400 inline-block"></span>
-                <span class="text-slate-300 text-[11px]">FEATURES_IMAGE</span>
-              </span>
-              <input type="checkbox" id="filter-feat" checked class="accent-emerald-500 rounded">
-            </label>
-            <label class="flex items-center justify-between bg-slate-900/80 px-2.5 py-1.5 rounded border border-slate-800 cursor-pointer hover:border-slate-700">
-              <span class="flex items-center space-x-2">
-                <span class="w-3 h-0.5 border-t border-dashed border-purple-400 inline-block"></span>
-                <span class="text-slate-300 text-[11px]">IN_SAME_VAULT (Vault Star)</span>
-              </span>
-              <input type="checkbox" id="filter-vault-edges" checked class="accent-purple-500 rounded">
-            </label>
-          </div>
+          <div id="relationship-filters" class="space-y-1 text-xs"></div>
         </div>
 
         <!-- Title Filter -->
@@ -540,14 +514,31 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
     const TYPE_COLORS = {
       "Vault": { bg: "#8b5cf6", border: "#c084fc", text: "#ede9fe", radius: 22 },
       "Note": { bg: "#2563eb", border: "#60a5fa", text: "#eff6ff", radius: 9 },
-      "Image": { bg: "#059669", border: "#34d399", text: "#ecfdf5", radius: 12 }
+      "Image": { bg: "#059669", border: "#34d399", text: "#ecfdf5", radius: 12 },
+      "WebPage": { bg: "#0891b2", border: "#22d3ee", text: "#ecfeff", radius: 10 },
+      "WebSession": { bg: "#7c3aed", border: "#c4b5fd", text: "#f5f3ff", radius: 16 },
+      "Domain": { bg: "#b45309", border: "#fbbf24", text: "#fffbeb", radius: 9 },
+      "Topic": { bg: "#be185d", border: "#f9a8d4", text: "#fdf2f8", radius: 10 },
+      "BookmarkFolder": { bg: "#4d7c0f", border: "#a3e635", text: "#f7fee7", radius: 11 },
+      "Generic": { bg: "#475569", border: "#94a3b8", text: "#f8fafc", radius: 10 }
     };
 
     const EDGE_COLORS = {
       "REFERENCES": "rgba(56, 189, 248, 0.75)",
       "FEATURES_IMAGE": "rgba(52, 211, 153, 0.85)",
-      "IN_SAME_VAULT": "rgba(147, 51, 234, 0.18)"
+      "IN_SAME_VAULT": "rgba(147, 51, 234, 0.18)",
+      "BELONGS_TO_DOMAIN": "rgba(34, 211, 238, 0.7)",
+      "HAS_TOPIC": "rgba(244, 114, 182, 0.7)",
+      "CONTAINS_PAGE": "rgba(196, 181, 253, 0.75)",
+      "COVERS_TOPIC": "rgba(249, 168, 212, 0.7)",
+      "PRIMARY_DOMAIN": "rgba(251, 191, 36, 0.7)",
+      "NAVIGATED_TO": "rgba(148, 163, 184, 0.65)",
+      "BOOKMARKED_IN": "rgba(163, 230, 53, 0.7)"
     };
+
+    function nodeStyle(type) {
+      return TYPE_COLORS[type] || TYPE_COLORS.Generic;
+    }
 
     function resizeCanvas() {
       const rect = canvas.getBoundingClientRect();
@@ -573,11 +564,40 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
         }
       }
 
+      populateFilters();
       updateStatsUI();
       initializeNodePositions();
       applyFilters();
       recenterView();
       requestAnimationFrame(simLoop);
+    }
+
+    function populateFilters() {
+      const nodeTypes = [...new Set(graphData.nodes.map(n => n.type))].sort();
+      const relations = [...new Set(graphData.edges.map(e => e.relation))].sort();
+      const nodeContainer = document.getElementById("node-type-filters");
+      const relationshipContainer = document.getElementById("relationship-filters");
+
+      nodeContainer.innerHTML = nodeTypes.map(type =>
+        \`<label class="flex items-center space-x-1.5 bg-slate-900/80 px-2 py-1.5 rounded border border-slate-800 cursor-pointer hover:border-slate-700">
+          <input type="checkbox" data-node-type="\${escapeHtml(type)}" checked class="accent-blue-500 rounded">
+          <span class="text-slate-300 text-[11px] truncate" title="\${escapeHtml(type)}">\${escapeHtml(type)}</span>
+        </label>\`
+      ).join("") || '<span class="text-[11px] text-slate-500">No node types yet.</span>';
+
+      relationshipContainer.innerHTML = relations.map(relation =>
+        \`<label class="flex items-center justify-between gap-2 bg-slate-900/80 px-2.5 py-1.5 rounded border border-slate-800 cursor-pointer hover:border-slate-700">
+          <span class="flex items-center space-x-2 min-w-0">
+            <span class="w-3 h-0.5 bg-cyan-400 inline-block shrink-0"></span>
+            <span class="text-slate-300 text-[11px] truncate" title="\${escapeHtml(relation)}">\${escapeHtml(relation)}</span>
+          </span>
+          <input type="checkbox" data-relation="\${escapeHtml(relation)}" checked class="accent-cyan-500 rounded shrink-0">
+        </label>\`
+      ).join("") || '<span class="text-[11px] text-slate-500">No relationships yet.</span>';
+
+      document.querySelectorAll("[data-node-type], [data-relation]").forEach(input => {
+        input.addEventListener("change", applyFilters);
+      });
     }
 
     function updateStatsUI() {
@@ -605,27 +625,13 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
     }
 
     function applyFilters() {
-      const showVault = document.getElementById("filter-vault").checked;
-      const showNotes = document.getElementById("filter-notes").checked;
-      const showImages = document.getElementById("filter-images").checked;
-      const showRef = document.getElementById("filter-ref").checked;
-      const showFeat = document.getElementById("filter-feat").checked;
-      const showVaultEdges = document.getElementById("filter-vault-edges").checked;
       const titleFilter = document.getElementById("filter-title-input")?.value?.trim()?.toLowerCase() || "";
-
-      const visibleType = new Set();
-      if (showVault) visibleType.add("Vault");
-      if (showNotes) visibleType.add("Note");
-      if (showImages) visibleType.add("Image");
-
-      const visibleRelations = new Set();
-      if (showRef) visibleRelations.add("REFERENCES");
-      if (showFeat) visibleRelations.add("FEATURES_IMAGE");
-      if (showVaultEdges) visibleRelations.add("IN_SAME_VAULT");
+      const visibleTypes = new Set([...document.querySelectorAll("[data-node-type]:checked")].map(input => input.dataset.nodeType));
+      const visibleRelations = new Set([...document.querySelectorAll("[data-relation]:checked")].map(input => input.dataset.relation));
 
       const nodeMap = new Map();
       filteredNodes = graphData.nodes.filter(n => {
-        if (!visibleType.has(n.type)) return false;
+        if (!visibleTypes.has(n.type)) return false;
         if (titleFilter && !n.name.toLowerCase().includes(titleFilter)) return false;
         nodeMap.set(n.id, n);
         return true;
@@ -1009,7 +1015,7 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
 
       // Draw Nodes
       for (const node of filteredNodes) {
-        const style = TYPE_COLORS[node.type] || TYPE_COLORS["Note"];
+        const style = nodeStyle(node.type);
         const isSelected = selectedNode && selectedNode.id === node.id;
         const isHovered = hoveredNode && hoveredNode.id === node.id;
         const isConnected = selectedNode && filteredEdges.some(e => 
@@ -1089,7 +1095,7 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
         }
 
         // Node Label
-        if (node.type === "Vault" || isSelected || isHovered || searchHit || knnHit || isKnnSource || node.degree > 3 || camera.scale > 1.2) {
+        if (node.type === "Vault" || node.type === "WebSession" || isSelected || isHovered || searchHit || knnHit || isKnnSource || node.degree > 3 || camera.scale > 1.2) {
           ctx.font = \`\${node.type === "Vault" ? "bold 13px" : (searchHit || knnHit ? "bold 11px" : "11px")} sans-serif\`;
           ctx.fillStyle = isSelected ? "#ffffff" : (searchHit ? "#fef08a" : (knnHit ? "#67e8f9" : (isKnnSource ? "#38bdf8" : "#cbd5e1")));
           ctx.textAlign = "center";
@@ -1131,7 +1137,7 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
       const w = screenToWorld(sx, sy);
       for (let i = filteredNodes.length - 1; i >= 0; i--) {
         const n = filteredNodes[i];
-        const style = TYPE_COLORS[n.type] || TYPE_COLORS["Note"];
+        const style = nodeStyle(n.type);
         const r = style.radius + 6;
         const dx = n.x - w.x;
         const dy = n.y - w.y;
@@ -1235,7 +1241,7 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
       const badge = document.getElementById("detail-type-badge");
       badge.innerText = node.type;
       badge.className = "px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider uppercase " + 
-        (node.type === "Vault" ? "badge-vault" : (node.type === "Image" ? "badge-image" : "badge-note"));
+        (node.type === "Vault" || node.type === "WebSession" ? "badge-vault" : (node.type === "Image" ? "badge-image" : "badge-note"));
 
       // KNN Section state
       const knnSection = document.getElementById("knn-section");
@@ -1458,11 +1464,6 @@ export function buildVisualizerHtml(embeddedData?: GraphData): string {
         "px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded shadow transition" :
         "px-2.5 py-1 text-xs bg-amber-600 hover:bg-amber-500 text-white rounded shadow transition";
     };
-
-    // Filter controls
-    ["filter-vault", "filter-notes", "filter-images", "filter-ref", "filter-feat", "filter-vault-edges"].forEach(id => {
-      document.getElementById(id).addEventListener("change", applyFilters);
-    });
 
     document.getElementById("filter-title-input")?.addEventListener("input", applyFilters);
 
@@ -2170,3 +2171,4 @@ export function startVisualizerServer(port: number = 3333) {
 if (import.meta.main) {
   startVisualizerServer(3333);
 }
+*/

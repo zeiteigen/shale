@@ -43,6 +43,7 @@ function createTestDb(): Database {
       source_id TEXT NOT NULL,
       chunk_index INTEGER NOT NULL,
       text_content TEXT NOT NULL,
+      chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic')),
       FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
     ) STRICT;
   `);
@@ -120,10 +121,11 @@ function insertChunk(
   chunkIndex: number,
   textContent: string,
   embedding: number[],
+  chunkType: "verbatim" | "synthetic" = "verbatim",
 ) {
   db.query(
-    "INSERT INTO chunks (id, source_id, chunk_index, text_content) VALUES (?, ?, ?, ?)",
-  ).run(id, sourceId, chunkIndex, textContent);
+    "INSERT INTO chunks (id, source_id, chunk_index, chunk_type, text_content) VALUES (?, ?, ?, ?, ?)",
+  ).run(id, sourceId, chunkIndex, chunkType, textContent);
 
   db.query("INSERT INTO vector_index (rowid, embedding) VALUES (?, ?)").run(
     id,
@@ -687,6 +689,106 @@ describe("Chunk Search Engine in Shale SDK", () => {
         });
         expect([1, 3]).toContain(convUnified[0].id);
         expect(convUnified[0].text_content).toContain("Bun");
+      });
+    });
+
+    describe("Verbatim vs Synthetic Chunk Type Filtering", () => {
+      beforeEach(() => {
+        // Insert a verbatim chunk and a synthetic chunk
+        insertChunk(
+          db,
+          101,
+          "src-tech",
+          10,
+          "Direct code quotation: function computeHash(data) returns SHA256 verbatim string.",
+          [0.9, 0.1, 0.0, 0.0],
+          "verbatim",
+        );
+
+        insertChunk(
+          db,
+          102,
+          "src-tech",
+          11,
+          "AI summary and conceptual expansion: High level overview of cryptographic hashing algorithms.",
+          [0.9, 0.1, 0.0, 0.0],
+          "synthetic",
+        );
+      });
+
+      it("populates chunk_type in vector search results and filters by filterChunkType", async () => {
+        const searcher = new ChunkSearcher(db);
+
+        const allResults = await searcher.vector({
+          vector: [0.9, 0.1, 0.0, 0.0],
+          limit: 5,
+        });
+        const hit101 = allResults.find((r) => r.id === 101);
+        const hit102 = allResults.find((r) => r.id === 102);
+        expect(hit101?.chunk_type).toBe("verbatim");
+        expect(hit102?.chunk_type).toBe("synthetic");
+
+        const verbatimOnly = await searcher.vector({
+          vector: [0.9, 0.1, 0.0, 0.0],
+          filterChunkType: "verbatim",
+          limit: 5,
+        });
+        expect(verbatimOnly.some((r) => r.id === 101)).toBe(true);
+        expect(verbatimOnly.some((r) => r.id === 102)).toBe(false);
+        expect(verbatimOnly.every((r) => r.chunk_type === "verbatim")).toBe(true);
+
+        const syntheticOnly = await searcher.vector({
+          vector: [0.9, 0.1, 0.0, 0.0],
+          filterChunkType: "synthetic",
+          limit: 5,
+        });
+        expect(syntheticOnly.some((r) => r.id === 102)).toBe(true);
+        expect(syntheticOnly.some((r) => r.id === 101)).toBe(false);
+        expect(syntheticOnly.every((r) => r.chunk_type === "synthetic")).toBe(true);
+      });
+
+      it("populates chunk_type in BM25 search results and filters by filterChunkType", async () => {
+        const searcher = new ChunkSearcher(db);
+
+        const verbatimResults = await searcher.bm25({
+          query: "cryptographic hashing verbatim",
+          filterChunkType: "verbatim",
+        });
+        expect(verbatimResults.length).toBeGreaterThan(0);
+        expect(verbatimResults.some((r) => r.id === 101)).toBe(true);
+        expect(verbatimResults.some((r) => r.id === 102)).toBe(false);
+        expect(verbatimResults.every((r) => r.chunk_type === "verbatim")).toBe(true);
+
+        const syntheticResults = await searcher.bm25({
+          query: "cryptographic hashing verbatim",
+          filterChunkType: "synthetic",
+        });
+        expect(syntheticResults.length).toBeGreaterThan(0);
+        expect(syntheticResults.some((r) => r.id === 102)).toBe(true);
+        expect(syntheticResults.some((r) => r.id === 101)).toBe(false);
+        expect(syntheticResults.every((r) => r.chunk_type === "synthetic")).toBe(true);
+      });
+
+      it("filters by filterChunkType in hybrid search and preserves chunk_type in fused results", async () => {
+        const searcher = new ChunkSearcher(db);
+
+        const hybridVerbatim = await searcher.hybrid({
+          query: "cryptographic hashing algorithms",
+          vector: [0.9, 0.1, 0.0, 0.0],
+          filterChunkType: "verbatim",
+        });
+        expect(hybridVerbatim.some((r) => r.id === 101)).toBe(true);
+        expect(hybridVerbatim.some((r) => r.id === 102)).toBe(false);
+        expect(hybridVerbatim.every((r) => r.chunk_type === "verbatim")).toBe(true);
+
+        const hybridSynthetic = await searcher.hybrid({
+          query: "cryptographic hashing algorithms",
+          vector: [0.9, 0.1, 0.0, 0.0],
+          filterChunkType: "synthetic",
+        });
+        expect(hybridSynthetic.some((r) => r.id === 102)).toBe(true);
+        expect(hybridSynthetic.some((r) => r.id === 101)).toBe(false);
+        expect(hybridSynthetic.every((r) => r.chunk_type === "synthetic")).toBe(true);
       });
     });
   });

@@ -77,6 +77,11 @@ export async function run(
         chunks: parsedFile.contextualChunks.map(
           (chunk: any, idx: number) => ({
             chunk_index: chunk.chunk_index,
+            chunk_type:
+              chunk.chunk_type ??
+              (chunk.heading?.includes("(Expanded Context)")
+                ? "synthetic"
+                : "verbatim"),
             text_content: chunk.text_content,
             embedding: embeddings[idx],
           }),

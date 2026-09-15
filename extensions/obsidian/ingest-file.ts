@@ -1,4 +1,4 @@
-import { getSDK, logger, type ShaleSDK } from "@shale/sdk";
+import { getSDK, logger, getSetting, type ShaleSDK } from "@shale/sdk";
 import { parseFile, type ParsedFile, type ContextualChunk } from "./parse-file";
 import { parseImageFile, type ParsedImage } from "./parse-image";
 
@@ -30,12 +30,16 @@ export interface IngestFileOptions {
   expandAtomicNotes?: boolean;
   deferEmbedding?: boolean;
   parsedFile?: ParsedFile;
+  contextHydrationLimit?: number;
+  namespace?: string;
 }
 
 export interface IngestImageOptions {
   precomputedEmbedding?: number[];
+  precomputedEmbeddings?: number[][];
   deferEmbedding?: boolean;
   parsedImage?: ParsedImage;
+  namespace?: string;
 }
 
 /**
@@ -86,7 +90,10 @@ export async function embedContextualChunks(
       `Embedding failed for "${noteTitle}", using fallback vector:`,
       embedErr,
     );
-    return generateFallbackEmbeddings(contextualChunks.length);
+    const fallbackDims =
+      sdk?.settings.get<number>("fallbackEmbeddingDimensions") ??
+      getSetting<number>("fallbackEmbeddingDimensions", 4096);
+    return generateFallbackEmbeddings(contextualChunks.length, fallbackDims);
   }
 }
 
@@ -175,7 +182,12 @@ export async function ingestFile(
   }
 
   // Check context hydration for historical continuity
-  const existingContext = sdk.context.hydrate(parsedFile.noteUri, 3);
+  const hydrationLimit =
+    options?.contextHydrationLimit ??
+    sdk?.settings.get<number>("contextHydrationLimit") ??
+    getSetting<number>("contextHydrationLimit", 3);
+
+  const existingContext = sdk.context.hydrate(parsedFile.noteUri, hydrationLimit);
   if (existingContext.chunks.length > 0) {
     (sdk?.logger ?? logger).log(
       `Hydrated ${existingContext.chunks.length} prior chunks for "${parsedFile.noteTitle}"`,
@@ -191,6 +203,11 @@ export async function ingestFile(
       parsedFile.noteTitle,
     ));
 
+  const ns =
+    options?.namespace ??
+    sdk?.settings.get<string>("namespace") ??
+    getSetting<string>("namespace", "obsidian");
+
   // 3. Ingest note source and chunks atomically
   const ingestResult = sdk.ingest.sourceAndChunks({
     source: {
@@ -202,10 +219,11 @@ export async function ingestFile(
     },
     chunks: parsedFile.contextualChunks.map((chunk, idx) => ({
       chunk_index: chunk.chunk_index,
+      chunk_type: chunk.chunk_type ?? "verbatim",
       text_content: chunk.text_content,
       embedding: embeddings[idx],
     })),
-    namespace: "obsidian",
+    namespace: ns,
   });
 
   return {
@@ -221,8 +239,8 @@ export async function ingestFile(
 /**
  * Ingests an individual image file using the Shale SDK:
  * 1. Calls parseImageFile to generate multimodal description using Chat model
- * 2. Embeds the description chunk outside of parsing (or uses precomputed embedding)
- * 3. Atomically ingests source and chunk
+ * 2. Embeds the description chunks outside of parsing (or uses precomputed embeddings)
+ * 3. Atomically ingests source and chunks with chunk_type (verbatim for layout, synthetic for meaning)
  * 4. Constructs Image graph entity and IN_SAME_VAULT edge
  */
 export async function ingestImageFile(
@@ -266,17 +284,42 @@ export async function ingestImageFile(
   }
 
   // 2. Embedding generated OUTSIDE parsing
-  const embedding =
-    options.precomputedEmbedding ??
-    (
-      await embedContextualChunks(
-        sdk,
-        [parsedImage.contextualChunk],
-        parsedImage.imageTitle,
-      )
-    )[0];
+  const targetChunks =
+    parsedImage.contextualChunks && parsedImage.contextualChunks.length > 0
+      ? parsedImage.contextualChunks
+      : [parsedImage.contextualChunk];
 
-  // 3. Atomically ingest image source and chunk
+  let embeddings: number[][];
+  if (
+    options.precomputedEmbeddings &&
+    options.precomputedEmbeddings.length >= targetChunks.length
+  ) {
+    embeddings = options.precomputedEmbeddings;
+  } else if (options.precomputedEmbedding) {
+    if (targetChunks.length === 1) {
+      embeddings = [options.precomputedEmbedding];
+    } else {
+      const restEmbeddings = await embedContextualChunks(
+        sdk,
+        targetChunks.slice(1),
+        parsedImage.imageTitle,
+      );
+      embeddings = [options.precomputedEmbedding, ...restEmbeddings];
+    }
+  } else {
+    embeddings = await embedContextualChunks(
+      sdk,
+      targetChunks,
+      parsedImage.imageTitle,
+    );
+  }
+
+  const imageNs =
+    options.namespace ??
+    sdk?.settings.get<string>("namespace") ??
+    getSetting<string>("namespace", "obsidian");
+
+  // 3. Atomically ingest image source and chunks
   const ingestResult = sdk.ingest.sourceAndChunks({
     source: {
       type: "image",
@@ -285,14 +328,15 @@ export async function ingestImageFile(
       title: parsedImage.imageTitle,
       updated_at: parsedImage.updatedAt,
     },
-    chunks: [
-      {
-        chunk_index: 0,
-        text_content: parsedImage.contextualChunk.text_content,
-        embedding,
-      },
-    ],
-    namespace: "obsidian",
+    chunks: targetChunks.map((chunk, idx) => ({
+      chunk_index: chunk.chunk_index,
+      chunk_type:
+        chunk.chunk_type ??
+        (chunk.chunk_index === 0 ? "verbatim" : "synthetic"),
+      text_content: chunk.text_content,
+      embedding: embeddings[idx],
+    })),
+    namespace: imageNs,
   });
 
   return {

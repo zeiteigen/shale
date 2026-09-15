@@ -1,11 +1,13 @@
 import { basename } from "node:path";
 import { statSync, readFileSync } from "node:fs";
-import { sdkStorage, logger, type ShaleSDK } from "@shale/sdk";
+import { sdkStorage, logger, getSetting, type ShaleSDK } from "@shale/sdk";
+import type { ChunkType } from "../../lib/db";
 import { parseNoteContent, type ParsedNote } from "./parser";
 import { dynamicChunkNote, type MarkdownChunk } from "./chunker";
 
 export interface ContextualChunk {
   chunk_index: number;
+  chunk_type?: ChunkType;
   text_content: string;
 }
 
@@ -37,13 +39,29 @@ export function countWords(text: string): number {
 }
 
 /**
- * Calculates dynamic target token count for note expansion based on current note size.
+ * Calculates dynamic target token count for note expansion based on current note size and settings.
  */
-export function calculateDynamicTargetTokens(content: string): number {
+export function calculateDynamicTargetTokens(
+  content: string,
+  sdk?: ShaleSDK,
+): number {
   const words = countWords(content);
+  const base =
+    sdk?.settings.get<number>("dynamicTokenBase") ??
+    getSetting<number>("dynamicTokenBase", 150);
+  const multiplier =
+    sdk?.settings.get<number>("dynamicTokenMultiplier") ??
+    getSetting<number>("dynamicTokenMultiplier", 1.5);
+  const minTokens =
+    sdk?.settings.get<number>("dynamicTokenMin") ??
+    getSetting<number>("dynamicTokenMin", 100);
+  const maxTokens =
+    sdk?.settings.get<number>("dynamicTokenMax") ??
+    getSetting<number>("dynamicTokenMax", 500);
+
   // Dynamic scaling: base token allowance plus scaling proportional to content length
-  const target = Math.round(150 + words * 1.5);
-  return Math.max(100, Math.min(500, target));
+  const target = Math.round(base + words * multiplier);
+  return Math.max(minTokens, Math.min(maxTokens, target));
 }
 
 /**
@@ -74,9 +92,21 @@ export async function expandNoteWithChatModel(
   } catch {}
 
   const targetTokens =
-    customTargetTokens ?? calculateDynamicTargetTokens(content);
+    customTargetTokens ??
+    sdk?.settings.get<number>("targetTokens") ??
+    getSetting<number>("targetTokens") ??
+    calculateDynamicTargetTokens(content, sdk);
 
-  const prompt = `Expand the following note for semantic retrieval. Provide key concepts, hardware/compiler flows, bit-level arithmetic, and related architectural domains. 
+  const configuredPromptTemplate =
+    sdk?.settings.get<string>("chatPromptTemplate") ??
+    getSetting<string>("chatPromptTemplate");
+
+  const prompt = configuredPromptTemplate
+    ? configuredPromptTemplate
+        .replace(/\{\{title\}\}/g, noteTitle)
+        .replace(/\{\{content\}\}/g, content)
+        .replace(/\{\{targetTokens\}\}/g, String(targetTokens))
+    : `Expand the following note for semantic retrieval. Provide key concepts, hardware/compiler flows, bit-level arithmetic, and related architectural domains. 
 
 Format requirements:
 - Structure as dense, telegraphic bullet points or semicolon-separated technical keywords.
@@ -86,7 +116,19 @@ Note Title: ${noteTitle}
 Note Content:
 ${content}`;
 
-  const system = `You are an expert knowledge assistant specializing in conceptual elaboration and semantic enrichment for personal knowledge bases. Target approximately ${targetTokens} tokens for your expansion response based on the note's size.`;
+  const configuredSystemPrompt =
+    sdk?.settings.get<string>("chatSystemPrompt") ??
+    getSetting<string>("chatSystemPrompt");
+
+  const system = configuredSystemPrompt
+    ? configuredSystemPrompt.replace(/\{\{targetTokens\}\}/g, String(targetTokens))
+    : `You are an expert knowledge assistant specializing in conceptual elaboration and semantic enrichment for personal knowledge bases. Target approximately ${targetTokens} tokens for your expansion response based on the note's size.`;
+
+  const effectiveTimeout =
+    timeoutMs !== undefined
+      ? timeoutMs
+      : sdk?.settings.get<number>("chatTimeoutMs") ??
+        getSetting<number>("chatTimeoutMs");
 
   try {
     const res = await sdk.queryLLM(
@@ -94,7 +136,7 @@ ${content}`;
         prompt,
         system,
       },
-      timeoutMs !== undefined ? { timeoutMs } : undefined,
+      effectiveTimeout !== undefined ? { timeoutMs: effectiveTimeout } : undefined,
     );
     const summary = res.trim();
     if (summary && sdk?.saveCheckpoint) {
@@ -164,6 +206,7 @@ export function buildContextualChunks(
     return [
       {
         chunk_index: 0,
+        chunk_type: "verbatim",
         text_content: contextualText || `# Note: ${noteTitle}`,
       },
     ];
@@ -177,6 +220,7 @@ export function buildContextualChunks(
     const contextualText = `# Note: ${noteTitle}${headingPart}\n${categoryLine}${tagsLine}\n${c.text_content}`;
     return {
       chunk_index: c.chunk_index,
+      chunk_type: c.chunk_type ?? "verbatim",
       text_content: contextualText,
     };
   });
@@ -203,19 +247,36 @@ export async function parseFile(
   const parsed = parseNoteContent(rawContent, noteTitle);
   const chunks = dynamicChunkNote(parsed.body, noteTitle);
 
-  // Content expansion using Chat model: only short notes (under 250 words) get expanded
-  const shouldExpand = options?.expandAtomicNotes ?? true;
-  const wordCount = countWords(parsed.body);
-  const wordThreshold = options?.atomicNoteWordThreshold ?? 250;
-  const timeoutMs = options?.timeoutMs;
-
   const sdk = sdkOverride ?? sdkStorage.getStore();
+
+  // Content expansion using Chat model: only short notes get expanded
+  const shouldExpand =
+    options?.expandAtomicNotes ??
+    sdk?.settings.get<boolean>("expandAtomicNotes") ??
+    getSetting<boolean>("expandAtomicNotes", true);
+  const wordCount = countWords(parsed.body);
+  const wordThreshold =
+    options?.atomicNoteWordThreshold ??
+    sdk?.settings.get<number>("atomicNoteWordThreshold") ??
+    getSetting<number>("atomicNoteWordThreshold", 250);
+  const charThreshold =
+    options?.atomicNoteCharThreshold ??
+    sdk?.settings.get<number>("atomicNoteCharThreshold") ??
+    getSetting<number>("atomicNoteCharThreshold");
+  const timeoutMs =
+    options?.timeoutMs ??
+    sdk?.settings.get<number>("chatTimeoutMs") ??
+    getSetting<number>("chatTimeoutMs");
+  const targetTokens =
+    options?.targetTokens ??
+    sdk?.settings.get<number>("targetTokens") ??
+    getSetting<number>("targetTokens");
 
   const isShortNote =
     wordCount > 0 &&
     wordCount < wordThreshold &&
-    (options?.atomicNoteCharThreshold !== undefined
-      ? parsed.body.trim().length < options.atomicNoteCharThreshold
+    (charThreshold !== undefined
+      ? parsed.body.trim().length < charThreshold
       : true);
 
   if (shouldExpand && sdk && isShortNote) {
@@ -224,7 +285,7 @@ export async function parseFile(
       noteTitle,
       parsed.body,
       timeoutMs,
-      options?.targetTokens,
+      targetTokens,
       filePath,
     );
     if (expanded) {
@@ -232,6 +293,7 @@ export async function parseFile(
         heading: `${noteTitle} (Expanded Context)`,
         level: 1,
         chunk_index: chunks.length,
+        chunk_type: "synthetic",
         text_content: expanded,
       });
     }

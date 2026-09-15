@@ -55,6 +55,7 @@ function createTestDb(): Database {
       source_id TEXT NOT NULL,
       chunk_index INTEGER NOT NULL,
       text_content TEXT NOT NULL,
+      chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic')),
       FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
     ) STRICT;
   `);
@@ -756,7 +757,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
         sdk,
       );
       expect(imgResult.imageTitle).toBe("architecture.png");
-      expect(imgResult.chunksCreated).toBe(1);
+      expect(imgResult.chunksCreated).toBe(2);
 
       // Verify Chat model prompt covered both physical layout and underlying explanation/meaning
       expect(capturedChatPrompt).toContain(
@@ -791,15 +792,20 @@ Vector clocks and conflict-free replicated data types track causality across asy
         .get();
       expect(source?.type).toBe("image");
 
-      const chunk = db
+      const chunks = db
         .query<{
+          chunk_index: number;
+          chunk_type: string;
           text_content: string;
         }>(
-          "SELECT text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'architecture.png')",
+          "SELECT chunk_index, chunk_type, text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'architecture.png') ORDER BY chunk_index ASC",
         )
-        .get();
-      expect(chunk?.text_content).toContain("Physical Layout: Central node A");
-      expect(chunk?.text_content).toContain("Byzantine fault tolerance");
+        .all();
+      expect(chunks.length).toBe(2);
+      expect(chunks[0].chunk_type).toBe("verbatim");
+      expect(chunks[0].text_content).toContain("Central node A");
+      expect(chunks[1].chunk_type).toBe("synthetic");
+      expect(chunks[1].text_content).toContain("Byzantine fault tolerance");
     });
 
     it("connects notes to images with FEATURES_IMAGE edge when referenced in notes", async () => {
@@ -926,22 +932,26 @@ Vector clocks and conflict-free replicated data types track causality across asy
 
       const storedChunks = db
         .query<{
+          chunk_index: number;
+          chunk_type: string;
           text_content: string;
         }>(
-          "SELECT text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'Legitimacy')",
+          "SELECT chunk_index, chunk_type, text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'Legitimacy') ORDER BY chunk_index ASC",
         )
         .all();
       expect(storedChunks.length).toBe(2);
+      expect(storedChunks[0].chunk_type).toBe("verbatim");
       expect(storedChunks[0].text_content).toContain(
         "Legitimacy is the popular acceptance",
       );
+      expect(storedChunks[1].chunk_type).toBe("synthetic");
       expect(storedChunks[1].text_content).toContain(
         "Max Weber's authority types",
       );
 
       // Verify dynamic tokens requested in system prompt
       expect(capturedPrompt).toContain(
-        "Target approximately 138 tokens for your expansion response based on the note's size.",
+        `Target approximately ${calculateDynamicTargetTokens("Legitimacy is the popular acceptance of an authority, governing regime, or law.")} tokens for your expansion response based on the note's size.`,
       );
     });
 

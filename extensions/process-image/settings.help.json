@@ -1,0 +1,59 @@
+{
+  "extension": "process-image",
+  "settings": {
+    "describeImages": {
+      "type": "boolean",
+      "description": "Whether to use multimodal Chat LLM to describe images.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "imagePrompt": {
+      "type": "string",
+      "description": "Prompt instructing LLM on image layout and meaning analysis.",
+      "default": "Please provide a detailed, comprehensive text description of this image.\nYour description must thoroughly cover two essential aspects:\n1. Physical layout and visual elements: Describe the layout, composition, visual components, diagram structure, charts, drawings, colors, labels, symbols, visible text, and spatial relationships.\n2. Underlying explanation and meaning: Explain what concept, process, system, or idea the image conveys, its significance, scientific or contextual explanation, and how the visual elements represent the subject matter."
+    },
+    "imageSystemPrompt": {
+      "type": "string",
+      "description": "System prompt for multimodal image analysis.",
+      "default": "You are an expert multimodal analysis assistant. You analyze images to produce detailed, semantically rich descriptions capturing both visible layout elements and underlying conceptual meaning for semantic search and knowledge retrieval."
+    },
+    "imageTimeoutMs": {
+      "type": "number",
+      "description": "Timeout in milliseconds for LLM vision queries.",
+      "default": 60000,
+      "range": {
+        "min": 1000,
+        "max": 300000
+      }
+    },
+    "fallbackDescriptionTemplate": {
+      "type": "string",
+      "description": "Fallback text when LLM is unavailable or disabled, supporting {{imageName}} placeholder.",
+      "default": "Detailed visual diagram and conceptual representation for {{imageName}}. Covers physical layout, components, and underlying subject explanation."
+    },
+    "supportedExtensions": {
+      "type": "string[]",
+      "description": "Recognized image extensions for discovery and processing.",
+      "default": [
+        "png",
+        "jpg",
+        "jpeg",
+        "webp",
+        "gif",
+        "svg",
+        "bmp",
+        "tiff"
+      ]
+    },
+    "defaultRelation": {
+      "type": "string",
+      "description": "Default graph edge relation from image to its container entity.",
+      "default": "IN_SAME_VAULT"
+    },
+    "defaultEntityType": {
+      "type": "string",
+      "description": "Default entity type created for processed images.",
+      "default": "Image"
+    }
+  }
+}

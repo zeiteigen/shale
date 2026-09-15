@@ -1,0 +1,95 @@
+{
+  "extension": "source-linker",
+  "settings": {
+    "knnK": {
+      "type": "number",
+      "description": "Number of nearest neighbor chunks/sources to discover per source chunk during KNN search.",
+      "default": 5,
+      "range": { "min": 1, "max": 50 }
+    },
+    "minKnnSimilarity": {
+      "type": "number",
+      "description": "Minimum cosine similarity threshold (0.0 to 1.0) for a KNN candidate pair to be considered for LLM analysis.",
+      "default": 0.65,
+      "range": { "min": 0.1, "max": 1.0 }
+    },
+    "maxPairsPerRun": {
+      "type": "number",
+      "description": "Maximum number of candidate source pairs evaluated by the LLM per cron or run invocation to manage latency and token usage.",
+      "default": 20,
+      "range": { "min": 1, "max": 500 }
+    },
+    "bidirectional": {
+      "type": "boolean",
+      "description": "Whether to create bidirectional edges in the knowledge graph between linked sources.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "defaultRelation": {
+      "type": "string",
+      "description": "Fallback relation name to use if the LLM does not specify a distinct relationship type.",
+      "default": "RELATES_TO",
+      "examples": ["RELATES_TO", "SIMILAR_TO", "LINKED_TO"]
+    },
+    "minLlmConfidence": {
+      "type": "number",
+      "description": "Minimum confidence / weight score (0.0 to 1.0) from the LLM required to establish a link.",
+      "default": 0.5,
+      "range": { "min": 0.0, "max": 1.0 }
+    },
+    "contextChunksPerSource": {
+      "type": "number",
+      "description": "Number of recent text chunks to hydrate from each source for LLM prompt context.",
+      "default": 3,
+      "range": { "min": 1, "max": 20 }
+    },
+    "maxContentChars": {
+      "type": "number",
+      "description": "Maximum character length of content excerpt included per source in the LLM analysis prompt.",
+      "default": 1500,
+      "range": { "min": 100, "max": 20000 }
+    },
+    "llmModel": {
+      "type": "string",
+      "description": "Custom chat completion model name override for relationship analysis (defaults to OPENAI_CHAT_MODEL).",
+      "default": null,
+      "examples": ["gpt-4o-mini", "llama3:8b", "qwen2.5:7b"]
+    },
+    "chatPromptTemplate": {
+      "type": "string",
+      "description": "Custom prompt template for relationship analysis. Supports {{titleA}}, {{contentA}}, {{titleB}}, {{contentB}} placeholders.",
+      "default": null,
+      "examples": ["Compare {{titleA}} with {{titleB}} and output JSON with shouldLink and reason."]
+    },
+    "forceAll": {
+      "type": "boolean",
+      "description": "If true, analyzes all sources across the database, ignoring updated_at watermarks.",
+      "default": false,
+      "possibleValues": [true, false]
+    },
+    "namespace": {
+      "type": "string",
+      "description": "Knowledge graph namespace for generated entities and edges.",
+      "default": "source-linker",
+      "examples": ["source-linker", "knowledge", "links"]
+    },
+    "enableEntityResolution": {
+      "type": "boolean",
+      "description": "Resolve entity mentions and aliases shared across candidate sources into canonical graph entities.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "minEntityConfidence": {
+      "type": "number",
+      "description": "Minimum confidence required to create entity mention and coreference edges.",
+      "default": 0.7,
+      "range": { "min": 0.0, "max": 1.0 }
+    },
+    "maxEntityResolutionsPerPair": {
+      "type": "number",
+      "description": "Maximum grounded entity clusters retained from each source pair.",
+      "default": 10,
+      "range": { "min": 1, "max": 50 }
+    }
+  }
+}

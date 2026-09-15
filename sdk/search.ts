@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { eng, removeStopwords } from "stopword";
 import defaultDb from "../lib/db-init";
 import {
   EmbedderClient,
@@ -16,186 +17,12 @@ import type {
   VectorSearchOptions,
 } from "./types";
 
+export { eng, removeStopwords };
+
 /**
- * Standard English stopwords to discard when breaking sentences into keywords.
+ * Standard English stopwords from the stopword package to discard when breaking sentences into keywords.
  */
-export const DEFAULT_STOP_WORDS = new Set<string>([
-  "a",
-  "about",
-  "above",
-  "after",
-  "again",
-  "against",
-  "all",
-  "am",
-  "an",
-  "and",
-  "any",
-  "are",
-  "aren't",
-  "as",
-  "at",
-  "be",
-  "because",
-  "been",
-  "before",
-  "being",
-  "below",
-  "between",
-  "both",
-  "but",
-  "by",
-  "can",
-  "can't",
-  "cannot",
-  "could",
-  "couldn't",
-  "did",
-  "didn't",
-  "do",
-  "does",
-  "doesn't",
-  "doing",
-  "don't",
-  "down",
-  "during",
-  "each",
-  "few",
-  "for",
-  "from",
-  "further",
-  "had",
-  "hadn't",
-  "has",
-  "hasn't",
-  "have",
-  "haven't",
-  "having",
-  "he",
-  "he'd",
-  "he'll",
-  "he's",
-  "her",
-  "here",
-  "here's",
-  "hers",
-  "herself",
-  "him",
-  "himself",
-  "his",
-  "how",
-  "how's",
-  "i",
-  "i'd",
-  "i'll",
-  "i'm",
-  "i've",
-  "if",
-  "in",
-  "into",
-  "is",
-  "isn't",
-  "it",
-  "it's",
-  "its",
-  "itself",
-  "let's",
-  "me",
-  "more",
-  "most",
-  "mustn't",
-  "my",
-  "myself",
-  "no",
-  "nor",
-  "not",
-  "of",
-  "off",
-  "on",
-  "once",
-  "only",
-  "or",
-  "other",
-  "ought",
-  "our",
-  "ours",
-  "ourselves",
-  "out",
-  "over",
-  "own",
-  "same",
-  "shan't",
-  "she",
-  "she'd",
-  "she'll",
-  "she's",
-  "should",
-  "shouldn't",
-  "so",
-  "some",
-  "such",
-  "than",
-  "that",
-  "that's",
-  "the",
-  "their",
-  "theirs",
-  "them",
-  "themselves",
-  "then",
-  "there",
-  "there's",
-  "these",
-  "they",
-  "they'd",
-  "they'll",
-  "they're",
-  "they've",
-  "this",
-  "those",
-  "through",
-  "to",
-  "too",
-  "under",
-  "until",
-  "up",
-  "very",
-  "was",
-  "wasn't",
-  "we",
-  "we'd",
-  "we'll",
-  "we're",
-  "we've",
-  "were",
-  "weren't",
-  "what",
-  "what's",
-  "when",
-  "when's",
-  "where",
-  "where's",
-  "which",
-  "while",
-  "who",
-  "who's",
-  "whom",
-  "why",
-  "why's",
-  "with",
-  "won't",
-  "would",
-  "wouldn't",
-  "you",
-  "you'd",
-  "you'll",
-  "you're",
-  "you've",
-  "your",
-  "yours",
-  "yourself",
-  "yourselves",
-]);
+export const DEFAULT_STOP_WORDS = new Set<string>([...eng, "not"]);
 
 export interface KeywordExtractionOptions {
   stopWords?: string[] | Set<string>;
@@ -207,7 +34,7 @@ export interface KeywordExtractionOptions {
 
 /**
  * Breaks a sentence down into keywords, discarding common stopwords like 'of', 'and', 'the', etc.
- * Supports SQLite json_each builtin filtering when useSqliteStopwords is enabled.
+ * Uses the stopword npm package for stopword filtering, and supports SQLite json_each builtin filtering when useSqliteStopwords is enabled.
  */
 export function extractKeywords(
   text: string,
@@ -234,22 +61,17 @@ export function extractKeywords(
     );
   }
 
-  // Build active stop word set
-  let activeStopWords: Set<string>;
-  if (options?.stopWords) {
-    if (options.stopWords instanceof Set) {
-      activeStopWords = options.stopWords;
-    } else {
-      activeStopWords = new Set(options.stopWords.map((w) => w.toLowerCase()));
-    }
-  } else {
-    activeStopWords = DEFAULT_STOP_WORDS;
-  }
+  // Build active stop word list
+  const stopWordsList = options?.stopWords
+    ? (options.stopWords instanceof Set
+        ? Array.from(options.stopWords)
+        : options.stopWords
+      ).map((w) => w.toLowerCase())
+    : Array.from(DEFAULT_STOP_WORDS);
 
   // Optional SQLite-side stopword filtering using json_each builtin
   if (options?.useSqliteStopwords && options.db) {
     try {
-      const stopWordsArray = Array.from(activeStopWords);
       const query = `
         WITH input_tokens AS (
           SELECT lower(value) AS word FROM json_each($tokens)
@@ -268,11 +90,11 @@ export function extractKeywords(
         >(query)
         .all({
           $tokens: JSON.stringify(normalizedTokens),
-          $stopwords: JSON.stringify(stopWordsArray),
+          $stopwords: JSON.stringify(stopWordsList),
           $minLen: minLen,
         });
 
-      const sqliteFiltered = rows.map((r) => r.word);
+      const sqliteFiltered = rows.map((r: { word: string }) => r.word);
       if (sqliteFiltered.length > 0) {
         return sqliteFiltered;
       }
@@ -281,14 +103,13 @@ export function extractKeywords(
     }
   }
 
-  // Fast in-memory stop word filter
-  const filtered = normalizedTokens.filter((token) => {
-    if (activeStopWords.has(token)) return false;
-    if (token.length < minLen && !/^\d+$/.test(token)) return false;
-    return true;
-  });
+  // Fast in-memory stop word filter using 'stopword' package
+  const withoutStopwords = removeStopwords(normalizedTokens, stopWordsList);
+  const filtered = withoutStopwords.filter(
+    (token) => token.length >= minLen || /^\d+$/.test(token),
+  );
 
-  // If every token was filtered out as a stop word (e.g., "to be or not to be"),
+  // If every token was filtered out as a stop word (e.g., "to be and to be"),
   // fall back to non-empty tokens so queries do not return empty.
   const result = filtered.length > 0 ? filtered : normalizedTokens;
   return Array.from(new Set(result));
@@ -316,9 +137,14 @@ export class ChunkSearcher {
     }
     try {
       const row = this.db
-        .query<{
-          sql: string;
-        }>("SELECT sql FROM sqlite_master WHERE name = 'vector_index' AND type = 'table'")
+        .query<
+          {
+            sql: string;
+          },
+          []
+        >(
+          "SELECT sql FROM sqlite_master WHERE name = 'vector_index' AND type = 'table'",
+        )
         .get();
       if (row?.sql) {
         const match = row.sql.match(/float\[(\d+)\]/i);
@@ -395,6 +221,7 @@ export class ChunkSearcher {
         c.id, 
         c.source_id, 
         c.chunk_index, 
+        c.chunk_type,
         c.text_content, 
         v.distance,
         (1.0 - vec_distance_cosine(v.embedding, $query)) AS cosine_similarity,
@@ -414,6 +241,11 @@ export class ChunkSearcher {
     if (options.filterSourceId) {
       sql += ` AND (c.source_id = $sourceId OR s.id = $sourceId OR s.uri = $sourceId)`;
       params.$sourceId = options.filterSourceId;
+    }
+
+    if (options.filterChunkType) {
+      sql += ` AND c.chunk_type = $filterChunkType`;
+      params.$filterChunkType = options.filterChunkType;
     }
 
     sql += ` ORDER BY v.distance`;
@@ -445,6 +277,7 @@ export class ChunkSearcher {
         id: row.id,
         source_id: row.source_id,
         chunk_index: row.chunk_index,
+        chunk_type: row.chunk_type,
         text_content: row.text_content,
         source_title: row.source_title,
         source_uri: row.source_uri,
@@ -501,6 +334,7 @@ export class ChunkSearcher {
           c.id, 
           c.source_id, 
           c.chunk_index, 
+          c.chunk_type,
           c.text_content, 
           s.title AS source_title, 
           s.uri AS source_uri,
@@ -518,6 +352,11 @@ export class ChunkSearcher {
         params.$sourceId = options.filterSourceId;
       }
 
+      if (options.filterChunkType) {
+        sql += ` AND c.chunk_type = $filterChunkType`;
+        params.$filterChunkType = options.filterChunkType;
+      }
+
       sql += ` ORDER BY bm25_score LIMIT $limit`;
       params.$limit = limit;
 
@@ -532,6 +371,7 @@ export class ChunkSearcher {
           id: r.id,
           source_id: r.source_id,
           chunk_index: r.chunk_index,
+          chunk_type: r.chunk_type,
           text_content: r.text_content,
           source_title: r.source_title,
           source_uri: r.source_uri,
@@ -551,6 +391,7 @@ export class ChunkSearcher {
         id: number;
         source_id: string;
         chunk_index: number;
+        chunk_type?: import("../lib/db").ChunkType;
         text_content: string;
         source_title: string | null;
         source_uri: string | null;
@@ -569,6 +410,7 @@ export class ChunkSearcher {
           c.id, 
           c.source_id, 
           c.chunk_index, 
+          c.chunk_type,
           c.text_content, 
           s.title AS source_title, 
           s.uri AS source_uri,
@@ -584,6 +426,11 @@ export class ChunkSearcher {
       if (options.filterSourceId) {
         sql += ` AND (c.source_id = $sourceId OR s.id = $sourceId OR s.uri = $sourceId)`;
         params.$sourceId = options.filterSourceId;
+      }
+
+      if (options.filterChunkType) {
+        sql += ` AND c.chunk_type = $filterChunkType`;
+        params.$filterChunkType = options.filterChunkType;
       }
 
       sql += ` ORDER BY bm25_score LIMIT $candidateLimit`;
@@ -658,6 +505,7 @@ export class ChunkSearcher {
       id: c.row.id,
       source_id: c.row.source_id,
       chunk_index: c.row.chunk_index,
+      chunk_type: c.row.chunk_type,
       text_content: c.row.text_content,
       source_title: c.row.source_title,
       source_uri: c.row.source_uri,
@@ -689,12 +537,14 @@ export class ChunkSearcher {
         chunkId: options.chunkId,
         limit: vectorLimit,
         filterSourceId: options.filterSourceId,
+        filterChunkType: options.filterChunkType,
         ...options.vectorOptions,
       }),
       this.bm25({
         query: options.query,
         limit: bm25Limit,
         filterSourceId: options.filterSourceId,
+        filterChunkType: options.filterChunkType,
         ...options.bm25Options,
       }),
     ]);
@@ -747,6 +597,7 @@ export class ChunkSearcher {
           id: base.id,
           source_id: base.source_id,
           chunk_index: base.chunk_index,
+          chunk_type: base.chunk_type,
           text_content: base.text_content,
           source_title: base.source_title,
           source_uri: base.source_uri,
@@ -809,6 +660,7 @@ export class ChunkSearcher {
           id: base.id,
           source_id: base.source_id,
           chunk_index: base.chunk_index,
+          chunk_type: base.chunk_type,
           text_content: base.text_content,
           source_title: base.source_title,
           source_uri: base.source_uri,
@@ -847,6 +699,7 @@ export class ChunkSearcher {
             id: base.id,
             source_id: base.source_id,
             chunk_index: base.chunk_index,
+            chunk_type: base.chunk_type,
             text_content: base.text_content,
             source_title: base.source_title,
             source_uri: base.source_uri,
@@ -864,6 +717,7 @@ export class ChunkSearcher {
           id: base.id,
           source_id: base.source_id,
           chunk_index: base.chunk_index,
+          chunk_type: base.chunk_type,
           text_content: base.text_content,
           source_title: base.source_title,
           source_uri: base.source_uri,

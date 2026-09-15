@@ -1,0 +1,208 @@
+{
+  "extension": "obsidian",
+  "settings": {
+    "obsidianConfigPath": {
+      "type": "string",
+      "description": "Optional custom path to obsidian.json. Defaults to ~/.config/obsidian/obsidian.json.",
+      "default": null,
+      "examples": ["~/.config/obsidian/obsidian.json", "/custom/path/obsidian.json"]
+    },
+    "customVaults": {
+      "type": "array",
+      "description": "Explicit custom vault definitions (paths or objects with name and path) to index.",
+      "default": [],
+      "examples": [
+        ["/home/user/vault1"],
+        [{"name": "Work", "path": "/home/user/work-vault"}]
+      ]
+    },
+    "ignoredDirectories": {
+      "type": "string[]",
+      "description": "Additional folder names to ignore during note/image scanning (e.g. templates, archive). Hidden folders (.obsidian, .git, .trash) are always ignored.",
+      "default": [],
+      "examples": [["templates", "archive", "daily"]]
+    },
+    "includeMarkdown": {
+      "type": "boolean",
+      "description": "Whether to discover and process markdown notes (.md).",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "includeImages": {
+      "type": "boolean",
+      "description": "Whether to discover and process image files.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "imageExtensions": {
+      "type": "string[]",
+      "description": "Recognized image file extensions for image discovery.",
+      "default": ["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "tiff"],
+      "examples": [["png", "jpg", "jpeg", "webp"]]
+    },
+    "atomicNoteCharLimit": {
+      "type": "number",
+      "description": "Maximum character length for an atomic note (kept as a single whole-note chunk).",
+      "default": 600,
+      "range": { "min": 50, "max": 9999999 }
+    },
+    "moderateNoteCharLimit": {
+      "type": "number",
+      "description": "Character threshold separating moderate length notes from large notes.",
+      "default": 2500,
+      "range": { "min": 200, "max": 9999999 }
+    },
+    "moderateSnippetMaxChars": {
+      "type": "number",
+      "description": "Max characters per paragraph snippet for moderate notes without headings.",
+      "default": 900,
+      "range": { "min": 100, "max": 9999999 }
+    },
+    "largeNoteSnippetMaxChars": {
+      "type": "number",
+      "description": "Max characters per paragraph snippet for large notes.",
+      "default": 1200,
+      "range": { "min": 100, "max": 9999999 }
+    },
+    "h3SubdivisionMinSectionChars": {
+      "type": "number",
+      "description": "Minimum section character length before checking for H3 subdivisions in large notes.",
+      "default": 1800,
+      "range": { "min": 200, "max": 9999999 }
+    },
+    "h3SnippetSubdivisionMinChars": {
+      "type": "number",
+      "description": "Minimum H3 subsection length before paragraph snippet splitting in large notes.",
+      "default": 1500,
+      "range": { "min": 200, "max": 9999999  }
+    },
+    "largeSectionSnippetMinChars": {
+      "type": "number",
+      "description": "Minimum section length before paragraph snippet splitting in large notes.",
+      "default": 1500,
+      "range": { "min": 200, "max": 20000 }
+    },
+    "expandAtomicNotes": {
+      "type": "boolean",
+      "description": "Whether to expand atomic/short notes using the Chat model.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "atomicNoteWordThreshold": {
+      "type": "number",
+      "description": "Word count cutoff below which a note qualifies as short/atomic for expansion.",
+      "default": 250,
+      "range": { "min": 10, "max": 5000 }
+    },
+    "atomicNoteCharThreshold": {
+      "type": "number",
+      "description": "Optional character length ceiling for note expansion.",
+      "default": null,
+      "range": { "min": 50, "max": 25000 }
+    },
+    "targetTokens": {
+      "type": "number",
+      "description": "Fixed target token count override for LLM expansion response.",
+      "default": null,
+      "range": { "min": 50, "max": 4096 }
+    },
+    "dynamicTokenBase": {
+      "type": "number",
+      "description": "Base allowance for dynamic target tokens formula: round(base + words * multiplier).",
+      "default": 150,
+      "range": { "min": 10, "max": 2000 }
+    },
+    "dynamicTokenMultiplier": {
+      "type": "number",
+      "description": "Multiplier per word in dynamic target tokens formula.",
+      "default": 1.5,
+      "range": { "min": 0.1, "max": 10.0 }
+    },
+    "dynamicTokenMin": {
+      "type": "number",
+      "description": "Minimum allowed tokens in dynamic target tokens clamp.",
+      "default": 100,
+      "range": { "min": 10, "max": 2000 }
+    },
+    "dynamicTokenMax": {
+      "type": "number",
+      "description": "Maximum allowed tokens in dynamic target tokens clamp.",
+      "default": 500,
+      "range": { "min": 50, "max": 8192 }
+    },
+    "chatPromptTemplate": {
+      "type": "string",
+      "description": "Custom user prompt template for note expansion. Supports {{title}} and {{content}} placeholders.",
+      "default": null,
+      "examples": ["Expand the following note titled {{title}}:\n\n{{content}}"]
+    },
+    "chatSystemPrompt": {
+      "type": "string",
+      "description": "Custom system prompt for note expansion. Supports {{targetTokens}} placeholder.",
+      "default": null,
+      "examples": ["You are a personal knowledge assistant. Expand the note concisely within {{targetTokens}} tokens."]
+    },
+    "chatTimeoutMs": {
+      "type": "number",
+      "description": "Timeout in milliseconds for note expansion LLM queries.",
+      "default": null,
+      "range": { "min": 1000, "max": 300000 },
+      "examples": [30000, 60000]
+    },
+    "describeImages": {
+      "type": "boolean",
+      "description": "Whether to generate multimodal text descriptions for images using the Chat model.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "imagePrompt": {
+      "type": "string",
+      "description": "Custom prompt for multimodal image descriptions.",
+      "default": null,
+      "examples": ["Describe this image in detail, noting any text, diagrams, and visual structure."]
+    },
+    "imageSystemPrompt": {
+      "type": "string",
+      "description": "Custom system prompt for multimodal image descriptions.",
+      "default": null,
+      "examples": ["You are an expert image analyst extracting knowledge from Obsidian vault attachments."]
+    },
+    "imageTimeoutMs": {
+      "type": "number",
+      "description": "Timeout in milliseconds for image description LLM queries.",
+      "default": null,
+      "range": { "min": 1000, "max": 300000 },
+      "examples": [30000, 60000]
+    },
+    "fallbackDescriptionTemplate": {
+      "type": "string",
+      "description": "Fallback text template when image description fails or runs offline. Supports {{imageName}} placeholder.",
+      "default": null,
+      "examples": ["[Image attachment: {{imageName}}]"]
+    },
+    "contextHydrationLimit": {
+      "type": "number",
+      "description": "Number of prior chunks to hydrate for continuity context during file ingestion.",
+      "default": 3,
+      "range": { "min": 0, "max": 20 }
+    },
+    "fallbackEmbeddingDimensions": {
+      "type": "number",
+      "description": "Dimension size of fallback embedding vectors when embedding model is unreachable.",
+      "default": 4096,
+      "range": { "min": 64, "max": 16384 }
+    },
+    "namespace": {
+      "type": "string",
+      "description": "Namespace for sources, chunks, and graph elements.",
+      "default": "obsidian",
+      "examples": ["obsidian", "my-vault"]
+    },
+    "forceAll": {
+      "type": "boolean",
+      "description": "If true, forces reprocessing of all vault files, ignoring mtime watermarks.",
+      "default": false,
+      "possibleValues": [true, false]
+    }
+  }
+}

@@ -44,6 +44,7 @@ export interface HydratedChunk {
   id: number;
   source_id: string;
   chunk_index: number;
+  chunk_type?: ChunkType;
   text_content: string;
 }
 
@@ -67,6 +68,16 @@ export interface IngestEdgeInput {
   target: string | number;
   relation: string;
   weight?: number;
+  metadata?: string | Record<string, any>;
+}
+
+export type { Source, ChunkType } from "../lib/db";
+
+export interface GetSourcesOptions {
+  since?: number;
+  limit?: number;
+  origin?: string;
+  type?: string;
 }
 
 export interface IngestGraphOptions {
@@ -96,6 +107,7 @@ export interface SourceInput {
 export interface ChunkInput {
   text_content: string;
   chunk_index?: number;
+  chunk_type?: ChunkType;
   embedding: number[] | Float32Array;
   entity_names?: string[];
 }
@@ -138,6 +150,7 @@ export interface ChunkSearchResult {
   id: number;
   source_id: string;
   chunk_index: number;
+  chunk_type?: ChunkType;
   text_content: string;
   source_title?: string | null;
   source_uri?: string | null;
@@ -185,6 +198,7 @@ export interface VectorSearchOptions {
   excludeSelf?: boolean;
   minSimilarity?: number;
   filterSourceId?: string;
+  filterChunkType?: ChunkType;
   embedderOptions?: import("../lib/ai").EmbedderOptions;
 }
 
@@ -198,6 +212,7 @@ export interface BM25SearchOptions {
   stopWords?: string[] | Set<string>;
   keepStopWords?: boolean;
   filterSourceId?: string;
+  filterChunkType?: ChunkType;
   useSqliteStopwords?: boolean;
 }
 
@@ -210,10 +225,11 @@ export interface HybridSearchOptions {
   bm25CandidateLimit?: number;
   fusion?: HybridFusionOptions;
   filterSourceId?: string;
-  bm25Options?: Omit<BM25SearchOptions, "query" | "limit" | "filterSourceId">;
+  filterChunkType?: ChunkType;
+  bm25Options?: Omit<BM25SearchOptions, "query" | "limit" | "filterSourceId" | "filterChunkType">;
   vectorOptions?: Omit<
     VectorSearchOptions,
-    "query" | "vector" | "chunkId" | "limit" | "filterSourceId"
+    "query" | "vector" | "chunkId" | "limit" | "filterSourceId" | "filterChunkType"
   >;
 }
 
@@ -221,3 +237,6 @@ export type UnifiedSearchOptions =
   | ({ mode: "hybrid" } & HybridSearchOptions)
   | ({ mode: "vector" } & VectorSearchOptions)
   | ({ mode: "bm25" } & BM25SearchOptions);
+
+export * from "../lib/messages.types";
+

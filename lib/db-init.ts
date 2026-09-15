@@ -35,9 +35,18 @@ db.run(`
     source_id TEXT NOT NULL,
     chunk_index INTEGER NOT NULL,
     text_content TEXT NOT NULL,
+    chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic')),
     FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
   ) STRICT;
 `);
+
+// Safe migration for existing databases lacking chunk_type column
+try {
+  db.run(
+    "ALTER TABLE chunks ADD COLUMN chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic'));",
+  );
+} catch {}
+
 
 // Initialize the Vector Embeddings virtual table
 // Note: Virtual tables do not use 'STRICT' mode
@@ -138,11 +147,17 @@ db.run(`
     target_entity_id INTEGER NOT NULL,
     relation TEXT NOT NULL,
     weight REAL NOT NULL DEFAULT 1.0,
+    metadata TEXT,
     PRIMARY KEY (source_entity_id, target_entity_id, relation),
     FOREIGN KEY(source_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
     FOREIGN KEY(target_entity_id) REFERENCES entities(id) ON DELETE CASCADE
   ) STRICT;
 `);
+
+// Safe migration for existing databases lacking metadata column
+try {
+  db.run("ALTER TABLE edges ADD COLUMN metadata TEXT;");
+} catch {}
 
 // 3. Chunk_Entities Table (Provenance Bridge)
 db.run(`

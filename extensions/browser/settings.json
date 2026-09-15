@@ -1,0 +1,29 @@
+{
+  "excludeDomains": [
+    "x.com",
+    "twitter.com",
+    "reddit.com",
+    "facebook.com",
+    "instagram.com",
+    "tiktok.com",
+    "linkedin.com",
+    "youtube.com"
+  ],
+  "excludePatterns": [
+    "*mail.google.com*",
+    "*accounts.google.com*",
+    "*bank*",
+    "*login*",
+    "*signin*"
+  ],
+  "excludePrivateBrowsing": true,
+  "sessionInactivityMinutes": 30,
+  "enableLlmAnalysis": false,
+  "generateSessionSummaries": true,
+  "extractTopics": true,
+  "minContentLength": 100,
+  "maxContentChars": 3000,
+  "chunkSize": 1000,
+  "llmModel": null,
+  "namespace": "browser"
+}

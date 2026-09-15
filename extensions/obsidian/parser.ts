@@ -8,7 +8,9 @@ export interface ParsedNote {
   frontmatter: Record<string, unknown>;
 }
 
-export const IMAGE_EXTENSIONS = new Set([
+import { getSetting } from "@shale/sdk";
+
+export const DEFAULT_IMAGE_EXTENSIONS = new Set([
   "png",
   "jpg",
   "jpeg",
@@ -19,12 +21,41 @@ export const IMAGE_EXTENSIONS = new Set([
   "tiff",
 ]);
 
+export const IMAGE_EXTENSIONS = DEFAULT_IMAGE_EXTENSIONS;
+
+/**
+ * Resolves the active set of image extensions, preferring settings.json if configured.
+ */
+export function getImageExtensions(
+  customExtensions?: string[] | Set<string>,
+): Set<string> {
+  if (customExtensions) {
+    return customExtensions instanceof Set
+      ? customExtensions
+      : new Set(customExtensions.map((e) => e.toLowerCase().replace(/^\./, "")));
+  }
+
+  const configured = getSetting<string[]>("imageExtensions");
+  if (Array.isArray(configured) && configured.length > 0) {
+    return new Set(
+      configured.map((e) => e.toLowerCase().replace(/^\./, "")),
+    );
+  }
+
+  return DEFAULT_IMAGE_EXTENSIONS;
+}
+
 /**
  * Checks whether a filename or path represents an image.
  */
-export function isImageFile(filepath: string): boolean {
+export function isImageFile(
+  filepath: string,
+  customExtensions?: string[] | Set<string>,
+): boolean {
   const ext = filepath.split(".").pop()?.toLowerCase();
-  return ext ? IMAGE_EXTENSIONS.has(ext) : false;
+  if (!ext) return false;
+  const active = getImageExtensions(customExtensions);
+  return active.has(ext);
 }
 
 /**

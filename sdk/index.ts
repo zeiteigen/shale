@@ -24,6 +24,7 @@ import {
   type LLMReasoningEffort,
 } from "./llm";
 import { ChunkSearcher, extractKeywords } from "./search";
+import { SettingsManager } from "./settings";
 import {
   Logger,
   createLoggerProxy,
@@ -31,6 +32,8 @@ import {
   type LoggerOptions,
   type LoggerProxy,
 } from "./logger";
+import { ExtensionMessages } from "./messages";
+import { MessageBus, defaultMessageBus, createMessageBus } from "../lib/messages";
 import type {
   ExtensionStateRecord,
   CheckpointRecord,
@@ -56,6 +59,8 @@ export { ContextHydrator } from "./context";
 export { CheckpointManager } from "./checkpoint";
 export { GraphIngestor } from "./graph";
 export { UnifiedIngestor } from "./ingest";
+export { ExtensionMessages } from "./messages";
+export { MessageBus, defaultMessageBus, createMessageBus } from "../lib/messages";
 export { EmbedderClient, getEmbedding, getEmbeddings } from "./embed";
 export {
   LLMClient,
@@ -64,7 +69,14 @@ export {
   type LLMQueryInput,
   type LLMReasoningEffort,
 } from "./llm";
-export { ChunkSearcher, extractKeywords } from "./search";
+export {
+  ChunkSearcher,
+  extractKeywords,
+  DEFAULT_STOP_WORDS,
+  removeStopwords,
+  eng,
+} from "./search";
+export { SettingsManager } from "./settings";
 export {
   Logger,
   createLoggerProxy,
@@ -83,10 +95,13 @@ export class ShaleSDK {
   readonly llm: LLMClient;
   readonly search: ChunkSearcher;
   readonly logger: Logger;
+  readonly settings: SettingsManager;
+  readonly messages: ExtensionMessages;
   readonly extensionId: string;
   readonly extensionName: string;
   readonly namespace: string;
   readonly database: Database;
+  readonly extensionDir?: string;
 
   constructor(
     extensionId: string,
@@ -95,13 +110,26 @@ export class ShaleSDK {
     defaultEmbedderOptions?: EmbedderOptions,
     defaultLLMOptions?: LLMOptions,
     extensionName?: string,
+    extensionDir?: string,
+    messageBus?: MessageBus,
   ) {
     this.extensionId = extensionId;
     this.extensionName = extensionName || extensionId;
     this.namespace = namespace || extensionId;
     this.database = database ?? defaultDb;
+    this.extensionDir = extensionDir;
 
     this.logger = new Logger(this.extensionName);
+    this.messages = new ExtensionMessages(
+      this.extensionId,
+      messageBus ?? defaultMessageBus,
+      this.logger,
+    );
+    this.settings = new SettingsManager(
+      this.extensionDir,
+      undefined,
+      this.logger,
+    );
     this.state = new StateManager(this.extensionId, this.database);
     this.context = new ContextHydrator(this.database);
     this.checkpoint = new CheckpointManager(this.extensionId, this.database);
@@ -231,6 +259,8 @@ export function createExtensionSDK(
   defaultEmbedderOptions?: EmbedderOptions,
   defaultLLMOptions?: LLMOptions,
   extensionName?: string,
+  extensionDir?: string,
+  messageBus?: MessageBus,
 ): ShaleSDK {
   return new ShaleSDK(
     extensionId,
@@ -239,6 +269,8 @@ export function createExtensionSDK(
     defaultEmbedderOptions,
     defaultLLMOptions,
     extensionName,
+    extensionDir,
+    messageBus,
   );
 }
 
@@ -387,14 +419,30 @@ export function getSDK(dirOrPath?: string): ShaleSDK {
 
     const extId = discovered.manifest.name;
     const ns = discovered.manifest.namespace || extId;
-    const sdk = createExtensionSDK(extId, ns);
+    const sdk = createExtensionSDK(
+      extId,
+      ns,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      discovered.dir,
+    );
     manifestSdkCache.set(discovered.path, sdk);
     return sdk;
   }
 
   // 4. Default fallback
   if (!defaultSdkInstance) {
-    defaultSdkInstance = createExtensionSDK("default", "default");
+    defaultSdkInstance = createExtensionSDK(
+      "default",
+      "default",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      process.cwd(),
+    );
   }
   return defaultSdkInstance;
 }
@@ -404,6 +452,18 @@ export const getActiveSDK = getSDK;
 // ---------------------------------------------------------------------------
 // Convenience Proxies for Scoped Submodules
 // ---------------------------------------------------------------------------
+
+/**
+ * Dynamic proxy to the active extension's SettingsManager.
+ * Automatically resolves to the ambient or discovered extension scope.
+ */
+export const settings: SettingsManager = new Proxy({} as SettingsManager, {
+  get(_target, prop, receiver) {
+    const active = getActiveSDK().settings;
+    const val = Reflect.get(active, prop, receiver);
+    return typeof val === "function" ? val.bind(active) : val;
+  },
+});
 
 /**
  * Dynamic proxy to the active extension's StateManager.
@@ -483,9 +543,28 @@ export const search: ChunkSearcher = new Proxy({} as ChunkSearcher, {
  */
 export const logger: LoggerProxy = createLoggerProxy(() => getActiveSDK().logger);
 
+/**
+ * Dynamic proxy to the active extension's ExtensionMessages.
+ * Automatically resolves to the ambient or discovered extension scope.
+ */
+export const messages: ExtensionMessages = new Proxy({} as ExtensionMessages, {
+  get(_target, prop, receiver) {
+    const active = getActiveSDK().messages;
+    const val = Reflect.get(active, prop, receiver);
+    return typeof val === "function" ? val.bind(active) : val;
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Individual Convenience Functions
 // ---------------------------------------------------------------------------
+
+// Settings functions
+export const getSettings = <T = Record<string, any>>(): T =>
+  getActiveSDK().settings.getAll<T>();
+
+export const getSetting = <T = any>(key: string, defaultValue?: T): T =>
+  getActiveSDK().settings.get<T>(key, defaultValue);
 
 // State functions
 export const getWatermark = (key: string = "watermark"): string | null =>
@@ -619,4 +698,36 @@ export const warn = (...args: any[]): void => getActiveSDK().logger.warn(...args
 export const error = (...args: any[]): void => getActiveSDK().logger.error(...args);
 export const debug = (...args: any[]): void => getActiveSDK().logger.debug(...args);
 
+// Messaging functions (delegating to active SDK instance)
+export const requestMessage = async <TResp = any, TReq = any>(
+  channel: any,
+  payload: TReq,
+  options?: any,
+): Promise<TResp> => getActiveSDK().messages.request(channel, payload, options);
+
+export const sendMessage = async <TResp = any, TReq = any>(
+  channel: any,
+  payload: TReq,
+  options?: any,
+): Promise<TResp> => getActiveSDK().messages.send(channel, payload, options);
+
+export const publishMessage = async <TPayload = any>(
+  channel: any,
+  payload: TPayload,
+  options?: any,
+): Promise<void> => getActiveSDK().messages.publish(channel, payload, options);
+
+export const handleMessage = <TReq = any, TResp = any>(
+  channel: any,
+  handler: (payload: TReq, context: any) => Promise<TResp> | TResp,
+  options?: any,
+): (() => void) => getActiveSDK().messages.handle(channel, handler, options);
+
+export const onMessage = <TPayload = any>(
+  channel: any,
+  listener: (payload: TPayload, context: any) => Promise<void> | void,
+  options?: any,
+): (() => void) => getActiveSDK().messages.on(channel, listener, options);
+
 export default ShaleSDK;
+

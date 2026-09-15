@@ -1,0 +1,42 @@
+{
+  "extension": "db-backup",
+  "settings": {
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether automated database backup is enabled.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "backupOnStartup": {
+      "type": "boolean",
+      "description": "Whether to create a backup every time the Shale host program launches.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "backupDir": {
+      "type": "string",
+      "description": "Directory path where backups will be stored (relative to project root or absolute).",
+      "default": "./backups",
+      "examples": ["./backups", "/var/backups/shale"]
+    },
+    "filenamePrefix": {
+      "type": "string",
+      "description": "Prefix used for generated backup filenames.",
+      "default": "production-backup-",
+      "examples": ["production-backup-", "shale-backup-"]
+    },
+    "maxBackups": {
+      "type": "number",
+      "description": "Maximum number of recent backups to retain in the backup directory (0 for unlimited).",
+      "default": 10,
+      "range": { "min": 0, "max": 1000 }
+    },
+    "timestampFormat": {
+      "type": "string",
+      "description": "Format for timestamp appended to backup filename.",
+      "default": "iso",
+      "possibleValues": ["iso", "unix"],
+      "examples": ["iso", "unix"]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "extension": "web-page-parser",
+  "settings": {
+    "chunkSize": { "type": "number", "description": "Target characters per extracted text chunk.", "default": 1000, "range": { "min": 200, "max": 8000 } },
+    "maxFetchChars": { "type": "number", "description": "Maximum HTML characters fetched and parsed when browser text is unavailable.", "default": 100000, "range": { "min": 1000, "max": 1000000 } },
+    "maxImages": { "type": "number", "description": "Maximum meaningful image URLs to analyze per page.", "default": 8, "range": { "min": 0, "max": 30 } },
+    "enableLlmContext": { "type": "boolean", "description": "Generate a concise retrieval context for the page with the chat model.", "default": true },
+    "llmModel": { "type": "string", "description": "Optional chat model override.", "default": null }
+  }
+}

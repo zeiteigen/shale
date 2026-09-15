@@ -9,6 +9,7 @@ import {
   ingestImageFile,
   parseFile,
   parseImageFile,
+  parseImageFilesBatch,
   findImageFiles,
   findMarkdownFiles,
   expandNoteWithChatModel,
@@ -33,6 +34,7 @@ export {
   ingestImageFile,
   parseFile,
   parseImageFile,
+  parseImageFilesBatch,
   findImageFiles,
   findMarkdownFiles,
   expandNoteWithChatModel,
@@ -55,18 +57,23 @@ export {
 export async function run(
   sdkOverride?: ShaleSDK,
   configPath?: string,
-  forceAll: boolean = process.argv.includes("--test"),
+  forceAll?: boolean,
 ): Promise<ProcessVaultResult[]> {
   const sdk = sdkOverride ?? getSDK();
 
-  const vaults = discoverVaults(configPath);
+  const isForce =
+    forceAll ??
+    sdk.settings.get<boolean>("forceAll") ??
+    process.argv.includes("--test");
+
+  const vaults = discoverVaults(configPath, sdk);
 
   if (vaults.length === 0) {
     sdk.logger.log("No active vaults found in obsidian.json.");
     return [];
   }
 
-  if (forceAll) {
+  if (isForce) {
     sdk.logger.log("Force processing all vaults (ignoring watermarks).");
   }
 
@@ -78,7 +85,7 @@ export async function run(
   );
   const preparedVaults: PreparedVault[] = [];
   for (const vault of vaults) {
-    const prepared = await prepareVault(vault, sdk, forceAll);
+    const prepared = await prepareVault(vault, sdk, isForce);
     preparedVaults.push(prepared);
   }
 

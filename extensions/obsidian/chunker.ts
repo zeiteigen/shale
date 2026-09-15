@@ -1,8 +1,22 @@
+import { getSetting } from "@shale/sdk";
+import type { ChunkType } from "../../lib/db";
+
 export interface MarkdownChunk {
   heading: string;
   level: number;
   chunk_index: number;
+  chunk_type?: ChunkType;
   text_content: string;
+}
+
+export interface DynamicChunkOptions {
+  atomicNoteCharLimit?: number;
+  moderateNoteCharLimit?: number;
+  moderateSnippetMaxChars?: number;
+  largeNoteSnippetMaxChars?: number;
+  h3SubdivisionMinSectionChars?: number;
+  h3SnippetSubdivisionMinChars?: number;
+  largeSectionSnippetMinChars?: number;
 }
 
 /**
@@ -105,17 +119,41 @@ function splitByHeadingRegex(
 /**
  * Dynamically chunks a markdown note based on length and heading hierarchy:
  * - Empty notes (0 chars): Empty chunk list.
- * - Atomic notes (< 600 chars): Chunked as a single item.
- * - Moderate notes (600 - 2500 chars): Chunked by H1 (or H2 if no H1) or paragraph snippets.
- * - Large notes (> 2500 chars): Chunked by H2, sub-chunked by H3 and paragraph snippets.
+ * - Atomic notes (< atomicNoteCharLimit): Chunked as a single item.
+ * - Moderate notes (atomicNoteCharLimit - moderateNoteCharLimit): Chunked by H1 (or H2 if no H1) or paragraph snippets.
+ * - Large notes (> moderateNoteCharLimit): Chunked by H2, sub-chunked by H3 and paragraph snippets.
  *
  * @param content Note text content (without frontmatter)
  * @param noteTitle Title of the note
+ * @param options Optional chunking configuration overrides
  */
 export function dynamicChunkNote(
   content: string,
   noteTitle: string,
+  options?: DynamicChunkOptions,
 ): MarkdownChunk[] {
+  const atomicLimit =
+    options?.atomicNoteCharLimit ??
+    getSetting<number>("atomicNoteCharLimit", 600);
+  const moderateLimit =
+    options?.moderateNoteCharLimit ??
+    getSetting<number>("moderateNoteCharLimit", 2500);
+  const modSnippetMax =
+    options?.moderateSnippetMaxChars ??
+    getSetting<number>("moderateSnippetMaxChars", 900);
+  const largeSnippetMax =
+    options?.largeNoteSnippetMaxChars ??
+    getSetting<number>("largeNoteSnippetMaxChars", 1200);
+  const h3SectionMin =
+    options?.h3SubdivisionMinSectionChars ??
+    getSetting<number>("h3SubdivisionMinSectionChars", 1800);
+  const h3SnippetMin =
+    options?.h3SnippetSubdivisionMinChars ??
+    getSetting<number>("h3SnippetSubdivisionMinChars", 1500);
+  const largeSectionSnippetMin =
+    options?.largeSectionSnippetMinChars ??
+    getSetting<number>("largeSectionSnippetMinChars", 1500);
+
   const trimmed = content.trim();
   const len = trimmed.length;
 
@@ -132,13 +170,13 @@ export function dynamicChunkNote(
     text_content: trimmed,
   };
 
-  // 1. Atomic Notes (< 600 chars)
-  if (len < 600) {
+  // 1. Atomic Notes (< atomicLimit)
+  if (len < atomicLimit) {
     return [wholeNoteChunk];
   }
 
-  // 2. Moderate Length Notes (600 - 2500 chars)
-  if (len <= 2500) {
+  // 2. Moderate Length Notes (atomicLimit - moderateLimit)
+  if (len <= moderateLimit) {
     const hasH1 = /^#\s+/m.test(trimmed);
     const hasH2 = /^##\s+/m.test(trimmed);
 
@@ -161,7 +199,7 @@ export function dynamicChunkNote(
       }));
       return [wholeNoteChunk, ...sectionChunks];
     } else {
-      const snippets = splitIntoSnippets(trimmed, 900);
+      const snippets = splitIntoSnippets(trimmed, modSnippetMax);
       const snippetChunks = snippets.map((snip, idx) => ({
         heading: `${noteTitle} (Section ${idx + 1})`,
         level: 0,
@@ -172,7 +210,7 @@ export function dynamicChunkNote(
     }
   }
 
-  // 3. Large Notes (> 2500 chars)
+  // 3. Large Notes (> moderateLimit)
   // Primary split by H2, fallback to H1
   const hasH2 = /^##\s+/m.test(trimmed);
   const hasH1 = /^#\s+/m.test(trimmed);
@@ -188,7 +226,7 @@ export function dynamicChunkNote(
 
   for (const sec of topSections) {
     // If section is long and contains H3 headings, subdivide by H3
-    if (sec.text.length > 1800 && /^###\s+/m.test(sec.text)) {
+    if (sec.text.length > h3SectionMin && /^###\s+/m.test(sec.text)) {
       const subSections = splitByHeadingRegex(
         sec.text,
         /^###\s+/,
@@ -196,8 +234,8 @@ export function dynamicChunkNote(
         sec.heading,
       );
       for (const sub of subSections) {
-        if (sub.text.length > 1500) {
-          const snippets = splitIntoSnippets(sub.text, 1200);
+        if (sub.text.length > h3SnippetMin) {
+          const snippets = splitIntoSnippets(sub.text, largeSnippetMax);
           for (const snip of snippets) {
             chunks.push({
               heading: sub.heading,
@@ -215,9 +253,9 @@ export function dynamicChunkNote(
           });
         }
       }
-    } else if (sec.text.length > 1500) {
+    } else if (sec.text.length > largeSectionSnippetMin) {
       // Subdivide long section by snippets
-      const snippets = splitIntoSnippets(sec.text, 1200);
+      const snippets = splitIntoSnippets(sec.text, largeSnippetMax);
       for (const snip of snippets) {
         chunks.push({
           heading: sec.heading,
@@ -236,7 +274,10 @@ export function dynamicChunkNote(
     }
   }
 
-  return chunks;
+  return chunks.map((c) => ({
+    ...c,
+    chunk_type: c.chunk_type ?? ("verbatim" as ChunkType),
+  }));
 }
 
 export default dynamicChunkNote;
