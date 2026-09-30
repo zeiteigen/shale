@@ -11,45 +11,23 @@ import {
 import { createExtensionSDK, sdkStorage, findNearestManifest } from "../sdk";
 import { hasQueuedCheckpoints } from "../lib/db";
 import type { CronExtension } from "../lib/extension";
+import { startCli } from "./cli";
+
+export {
+  startCli,
+  handleCliCommand,
+  triggerCron,
+  triggerAllCrons,
+  findMatchingCrons,
+  listCrons,
+  handleSettingsCliCommand,
+  buildCandidates,
+  getBestCommandSuggestion,
+  getCompleterMatches,
+  parseCommandLine,
+} from "./cli";
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-
-if (import.meta.main) {
-  try {
-    Bun.serve({
-      port: Number(process.env.PORT) || 7425,
-      routes: {
-        "/health": () => Response.json({ status: "ok", service: "shale" }),
-        "/ingest": async (req) => {
-          try {
-            const body = await req.json();
-
-            if (!isIngestMaterial(body)) {
-              return new Response("ERR");
-            }
-
-            ingestQueue.add(body);
-            return new Response("OK");
-          } catch (err: any) {
-            console.log("Err in /ingest:", JSON.stringify(err));
-            return new Response("ERR");
-          }
-        },
-      },
-    });
-    console.log("Ingest server running on port 7425");
-  } catch (err: any) {
-    if (err?.code === "EADDRINUSE") {
-      console.warn(
-        "Port 7425 is already in use, skipping HTTP server startup in this process.",
-      );
-    } else {
-      throw err;
-    }
-  }
-}
-
-console.log("Loaded crons:", crons);
 
 const inFlightRecoveries = new Map<string, Promise<void>>();
 
@@ -192,18 +170,18 @@ export async function runCron(cron: CronExtension) {
   }
 }
 
-export async function runAllCrons() {
-  for (const cron of crons) {
-    await runCron(cron);
-  }
-}
-
 /** Run only crons explicitly marked for the host startup phase. */
 export async function runStartupCrons() {
   for (const cron of crons) {
     if (cron.run_on_startup) {
       await runCron(cron);
     }
+  }
+}
+
+export async function runAllCrons() {
+  for (const cron of crons) {
+    await runCron(cron);
   }
 }
 
@@ -214,10 +192,75 @@ for (const cron of crons) {
 }
 
 if (import.meta.main) {
-  await runStartupCrons();
-}
+  try {
+    Bun.serve({
+      port: Number(process.env.PORT) || 7425,
+      routes: {
+        "/health": () => Response.json({ status: "ok", service: "shale" }),
+        "/ingest": async (req) => {
+          try {
+            const body = await req.json();
 
-if (import.meta.main && process.argv.includes("--run-all-cron")) {
-  console.log("Running all cron scripts on startup (--run-all-cron)...");
-  await runAllCrons();
+            if (!isIngestMaterial(body)) {
+              return new Response("ERR");
+            }
+
+            const ns = extensionNamespaces.get(body.type);
+            if (!ns) {
+              return new Response("ERR");
+            }
+
+            ingestQueue.push(body);
+            return new Response("OK");
+          } catch {
+            return new Response("ERR");
+          }
+        },
+      },
+    });
+  } catch (err: any) {
+    if (err.code === "EADDRINUSE") {
+      console.warn(
+        `[server] Port ${process.env.PORT || 7425} already in use; skipping HTTP server initialization.`,
+      );
+    } else {
+      throw err;
+    }
+  }
+
+  // Handle optional one-shot CLI arguments:
+  // e.g. "bun run main/index.ts --run-all-cron" or "--cron <name>"
+  const argv = process.argv.slice(2);
+  const runAllIndex = argv.indexOf("--run-all-cron");
+  const cronIndex = argv.indexOf("--cron");
+  const noCli = argv.includes("--no-cli");
+
+  if (runAllIndex !== -1) {
+    await runAllCrons();
+    process.exit(0);
+  } else if (cronIndex !== -1 && argv[cronIndex + 1]) {
+    const target = argv[cronIndex + 1];
+    const targetCron = crons.find(
+      (c) =>
+        c.name === target ||
+        c.extensionId === target ||
+        c.script.includes(target),
+    );
+    if (!targetCron) {
+      console.error(`[cron] No cron found matching "${target}"`);
+      process.exit(1);
+    }
+    await runCron(targetCron);
+    process.exit(0);
+  }
+
+  // Start the interactive CLI unless --no-cli is provided
+  if (!noCli) {
+    startCli();
+  }
+
+  // Run startup crons in background without blocking CLI prompt
+  runStartupCrons().catch((err) => {
+    console.error("[cron] Error running startup crons:", err);
+  });
 }

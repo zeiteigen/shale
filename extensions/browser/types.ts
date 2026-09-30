@@ -18,6 +18,8 @@ export interface PageVisitPayload {
   windowId?: number;
   openerTabId?: number;
   transitionType?: string;
+  /** Only true navigation events participate in browsing sessions. */
+  recordInSession?: boolean;
   sessionId?: string;
   visitedAt?: number;
 }
@@ -60,6 +62,8 @@ export interface SessionSnapshotPayload {
     title: string;
     visitedAt: number;
     tabId?: number;
+    windowId?: number;
+    openerTabId?: number;
     transitionType?: string;
   }[];
 }
@@ -69,12 +73,17 @@ export interface TabsBatchPayload {
   syncedAt?: number;
 }
 
+export interface BrowserPingPayload {
+  type: "ping";
+}
+
 export type BrowserIngestPayload =
   | PageVisitPayload
   | TabsBatchPayload
   | HistoryBatchPayload
   | BookmarksBatchPayload
-  | SessionSnapshotPayload;
+  | SessionSnapshotPayload
+  | BrowserPingPayload;
 
 export interface PreparedPageData {
   pageData: WebPageData;
@@ -117,6 +126,7 @@ export interface WebPageData {
   windowId?: number;
   openerTabId?: number;
   transitionType?: string;
+  recordInSession?: boolean;
   sessionId?: string;
 }
 
@@ -139,6 +149,8 @@ export interface SessionVisitRecord {
   domain: string;
   visitedAt: number;
   tabId?: number;
+  windowId?: number;
+  openerTabId?: number;
   transitionType?: string;
   pageSourceId?: string;
 }

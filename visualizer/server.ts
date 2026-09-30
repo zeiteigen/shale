@@ -6,6 +6,15 @@ const sdk = createExtensionSDK("visualizer");
 const db = sdk.database;
 const distDir = join(import.meta.dir, "dist");
 
+function graphIdentityFromSourceUri(uri: string): string {
+  if (uri.startsWith("browser-history:")) return uri.slice("browser-history:".length);
+  if (uri.startsWith("browser-bookmark:")) {
+    const urlStart = uri.search(/:https?:\/\//);
+    if (urlStart >= 0) return uri.slice(urlStart + 1);
+  }
+  return uri;
+}
+
 export interface GraphData {
   nodes: Array<{
     id: number;
@@ -36,6 +45,15 @@ export function getGraphData(): GraphData {
     "SELECT id, uri, title FROM sources",
   ).all();
   const sourceByTitle = new Map(sources.map((source) => [source.title.toLowerCase(), source]));
+  const sourceByUri = new Map<string, (typeof sources)[number]>();
+  for (const source of sources) {
+    const identity = graphIdentityFromSourceUri(source.uri);
+    // Rich web-page sources are queried first and remain the preferred material
+    // when history/bookmark metadata points at the same page node.
+    if (!sourceByUri.has(identity) || /^https?:\/\//.test(source.uri)) {
+      sourceByUri.set(identity, source);
+    }
+  }
   const degree = new Map<number, number>();
 
   for (const edge of edges) {
@@ -45,7 +63,7 @@ export function getGraphData(): GraphData {
 
   return {
     nodes: entities.map((entity) => {
-      const source = sourceByTitle.get(entity.name.toLowerCase());
+      const source = sourceByUri.get(entity.name) ?? sourceByTitle.get(entity.name.toLowerCase());
       const chunks = source ? sdk.context.getRecentChunks(source.id, 5) : [];
       return {
         ...entity,
@@ -79,12 +97,17 @@ function json(data: unknown, status = 200) {
 }
 
 function enrichResults(results: ChunkSearchResult[]) {
-  const entityByTitle = db.query<{ id: number }, { $title: string }>(
-    "SELECT id FROM entities WHERE lower(name) = lower($title) LIMIT 1",
+  const entityBySource = db.query<{ id: number }, { $uri: string; $title: string }>(
+    "SELECT id FROM entities WHERE name = $uri OR lower(name) = lower($title) ORDER BY name = $uri DESC LIMIT 1",
   );
   return results.map((result) => ({
     ...result,
-    entity_id: result.source_title ? entityByTitle.get({ $title: result.source_title })?.id : undefined,
+    entity_id: result.source_title
+      ? entityBySource.get({
+          $uri: graphIdentityFromSourceUri(result.source_uri ?? ""),
+          $title: result.source_title,
+        })?.id
+      : undefined,
     preview: result.preview || result.text_content.slice(0, 280),
   }));
 }

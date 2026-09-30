@@ -24,13 +24,24 @@ function generateUUID() {
   return "sess_" + Date.now() + "_" + Math.random().toString(36).substring(2, 9);
 }
 
-// Session State
-let currentSession = {
-  sessionId: generateUUID(),
-  startTime: Date.now(),
-  lastActivityTime: Date.now(),
-  pageCount: 0,
-};
+const SESSION_STORAGE_KEY = "currentBrowserSession";
+let currentSession = null;
+
+async function loadCurrentSession() {
+  if (currentSession) return currentSession;
+  const stored = await chrome.storage.local.get([SESSION_STORAGE_KEY]);
+  currentSession = stored[SESSION_STORAGE_KEY] || {
+    sessionId: generateUUID(),
+    startTime: Date.now(),
+    lastActivityTime: Date.now(),
+    pageCount: 0,
+  };
+  return currentSession;
+}
+
+async function saveCurrentSession() {
+  await chrome.storage.local.set({ [SESSION_STORAGE_KEY]: currentSession });
+}
 
 // Initialize settings on install
 chrome.runtime.onInstalled.addListener(async () => {
@@ -62,24 +73,26 @@ chrome.runtime.onInstalled.addListener(async () => {
   chrome.alarms.create("session_heartbeat", { periodInMinutes: 5 });
 });
 
-// Update or advance browsing session based on inactivity
-async function getOrUpdateSession() {
+// Rotate a session after real inactivity. Heartbeats must never count as user
+// activity, otherwise a five-minute alarm keeps every session alive forever.
+async function getOrUpdateSession(markActivity = true) {
   const settings = await chrome.storage.local.get(["sessionIdleMinutes"]);
   const idleThresholdMs = (settings.sessionIdleMinutes || 30) * 60 * 1000;
   const now = Date.now();
+  await loadCurrentSession();
 
   if (now - currentSession.lastActivityTime > idleThresholdMs) {
-    // Start new session
     currentSession = {
       sessionId: generateUUID(),
       startTime: now,
       lastActivityTime: now,
       pageCount: 0,
     };
-  } else {
+  } else if (markActivity) {
     currentSession.lastActivityTime = now;
   }
 
+  await saveCurrentSession();
   return currentSession;
 }
 
@@ -161,7 +174,8 @@ async function extractPageDataFromTab(tab, transitionType = "active_page") {
     return null;
   }
 
-  const session = await getOrUpdateSession();
+  const recordInSession = transitionType === "navigation";
+  const session = recordInSession ? await getOrUpdateSession(true) : null;
 
   let pageData = {
     url: tab.url,
@@ -204,7 +218,8 @@ async function extractPageDataFromTab(tab, transitionType = "active_page") {
     windowId: tab.windowId,
     openerTabId: tab.openerTabId,
     transitionType,
-    sessionId: session.sessionId,
+    recordInSession,
+    sessionId: session?.sessionId,
     visitedAt: Date.now(),
   };
 }
@@ -215,7 +230,10 @@ async function ingestTab(tab, transitionType = "active_page") {
   if (!payload) return { success: false, reason: "Excluded or invalid URL" };
 
   await postToShale(payload);
-  currentSession.pageCount++;
+  if (payload.recordInSession) {
+    currentSession.pageCount++;
+    await saveCurrentSession();
+  }
 
   return { success: true, url: tab.url, title: payload.title };
 }
@@ -237,7 +255,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // Periodic alarm listener for session idle check
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "session_heartbeat") {
-    await getOrUpdateSession();
+    await getOrUpdateSession(false);
   }
 });
 
@@ -502,7 +520,6 @@ async function syncAllOpenTabs() {
       pages: validPages,
       syncedAt: Date.now(),
     });
-    currentSession.pageCount += validPages.length;
   }
 
   return { ingested: validPages.length, skipped };
@@ -514,6 +531,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     try {
       switch (request.action) {
         case "get_status": {
+          await loadCurrentSession();
           const stored = await chrome.storage.local.get([
             "serverUrl",
             "autoSyncActive",

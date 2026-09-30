@@ -6,6 +6,7 @@ import type {
   WebPageData,
 } from "./types";
 import type { BrowserExtensionSettings } from "./settings.types";
+import { sanitizeTopics, topicFromPageTitle } from "./identity";
 
 /**
  * Cleans and parses JSON output from LLM chat completions.
@@ -30,16 +31,14 @@ export function buildFallbackPageAnalysis(
   domain: string,
   excerpt: string,
 ): LLMPageAnalysis {
-  const words = title.split(/\s+/).filter((w) => w.length > 3);
-  const topics = Array.from(
-    new Set([domain, ...words.slice(0, 4).map((w) => w.replace(/[^\w]/g, ""))]),
-  ).filter(Boolean);
+  const titleTopic = topicFromPageTitle(title);
+  const topics = sanitizeTopics(titleTopic ? [titleTopic] : [], { domain });
 
   return {
     summary:
       excerpt.slice(0, 200).trim() ||
       `Web page from ${domain} titled "${title}".`,
-    topics: topics.slice(0, 5),
+    topics,
     category: "WebPage",
   };
 }
@@ -105,7 +104,10 @@ Return ONLY valid JSON matching this schema:
           .map((t) => (typeof t === "string" ? t.trim() : ""))
           .filter(Boolean)
       : [];
-    const topics = rawTopics.length > 0 ? rawTopics.slice(0, 6) : [page.domain];
+    const topics = sanitizeTopics(rawTopics, {
+      title: page.title,
+      domain: page.domain,
+    });
 
     const category =
       typeof parsed.category === "string" && parsed.category.trim()
@@ -217,11 +219,12 @@ Return ONLY valid JSON matching this schema:
           .map((t) => (typeof t === "string" ? t.trim() : ""))
           .filter(Boolean)
       : [];
-    const topics = rawTopics.length > 0 ? rawTopics.slice(0, 6) : domains;
+    const topics = sanitizeTopics(rawTopics, { title: sessionTitle });
 
+    const knownDomains = new Map(domains.map((domain) => [domain.toLocaleLowerCase(), domain]));
     const dominantDomains = Array.isArray(parsed.dominantDomains)
       ? parsed.dominantDomains
-          .map((d) => (typeof d === "string" ? d.trim() : ""))
+          .map((d) => (typeof d === "string" ? knownDomains.get(d.trim().toLocaleLowerCase()) ?? "" : ""))
           .filter(Boolean)
       : domains;
 

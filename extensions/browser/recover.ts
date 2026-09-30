@@ -1,7 +1,8 @@
 import type { CheckpointContext, ShaleSDK } from "@shale/sdk";
-import { finalizePageVisit, type PreparedPageData } from "./ingest-processor";
-import { buildSequentialEdges } from "./session-manager";
+import { finalizePageVisit } from "./ingest-processor";
+import { finalizeSession } from "./session-manager";
 import type { BrowserExtensionSettings } from "./settings.types";
+import type { PreparedPageData } from "./types";
 
 export interface RecoverResult {
   recoveredPages: number;
@@ -72,104 +73,15 @@ export async function run(
           namespace = sdk.namespace || "browser",
         } = data;
 
-        const sessionText = [
-          `Session: ${synthesis.sessionTitle}`,
-          `Summary: ${synthesis.summary}`,
-          `Topics: ${synthesis.topics.join(", ")}`,
-          `Dominant Domains: ${synthesis.dominantDomains.join(", ")}`,
-          `Pages Visited (${visits.length}):`,
-          ...visits.map(
-            (v: any, i: number) => `${i + 1}. [${v.domain}] ${v.title} (${v.url})`,
-          ),
-        ].join("\n");
-
-        const embedding = await sdk.embed(sessionText);
-        const sessionUri = `browser-session://${sessionId}`;
-
-        sdk.ingest.sourceAndChunks({
-          source: {
-            id: `session:${sessionId}`,
-            type: "web_session",
-            uri: sessionUri,
-            origin: "browser",
-            title: synthesis.sessionTitle,
-            created_at: startTime,
-            updated_at: endTime,
-          },
-          chunks: [
-            {
-              chunk_index: 0,
-              chunk_type: "synthetic",
-              text_content: sessionText,
-              embedding,
-              entity_names: [synthesis.sessionTitle, ...synthesis.topics.slice(0, 3)],
-            },
-          ],
+        await finalizeSession(sdk, {
+          sessionId,
+          startTime,
+          endTime,
+          visits,
+          synthesis,
+          checkpointId: item.id,
           namespace,
-        });
-
-        const entities: Array<{ name: string; type: string; namespace: string }> = [
-          { name: synthesis.sessionTitle, type: "WebSession", namespace },
-        ];
-        for (const topic of synthesis.topics) {
-          if (topic) entities.push({ name: topic, type: "Topic", namespace });
-        }
-        for (const domain of synthesis.dominantDomains) {
-          if (domain) entities.push({ name: domain, type: "Domain", namespace });
-        }
-
-        const edges: Array<{
-          source: string;
-          target: string;
-          relation: string;
-          weight: number;
-          metadata?: any;
-        }> = [];
-
-        for (let i = 0; i < visits.length; i++) {
-          const v = visits[i];
-          if (v.title) {
-            entities.push({ name: v.title, type: "WebPage", namespace });
-            edges.push({
-              source: synthesis.sessionTitle,
-              target: v.title,
-              relation: "CONTAINS_PAGE",
-              weight: 1.0,
-              metadata: {
-                visitOrder: i + 1,
-                visitedAt: v.visitedAt,
-                domain: v.domain,
-                url: v.url,
-              },
-            });
-          }
-        }
-
-        for (const topic of synthesis.topics) {
-          edges.push({
-            source: synthesis.sessionTitle,
-            target: topic,
-            relation: "COVERS_TOPIC",
-            weight: 0.85,
-          });
-        }
-        for (const domain of synthesis.dominantDomains) {
-          edges.push({
-            source: synthesis.sessionTitle,
-            target: domain,
-            relation: "PRIMARY_DOMAIN",
-            weight: 0.8,
-          });
-        }
-
-        const navEdges = buildSequentialEdges(visits);
-        edges.push(...navEdges);
-
-        sdk.graph.ingest({
-          namespace,
-          entities,
-          edges,
-        });
+        }, sdk.settings.getAll<BrowserExtensionSettings>());
 
         recoveredSessions++;
       }

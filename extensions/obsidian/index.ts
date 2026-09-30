@@ -61,10 +61,7 @@ export async function run(
 ): Promise<ProcessVaultResult[]> {
   const sdk = sdkOverride ?? getSDK();
 
-  const isForce =
-    forceAll ??
-    sdk.settings.get<boolean>("forceAll") ??
-    process.argv.includes("--test");
+  const isForce = forceAll ?? sdk.settings.get<boolean>("forceAll") ?? false;
 
   const vaults = discoverVaults(configPath, sdk);
 

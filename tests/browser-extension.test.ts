@@ -36,10 +36,7 @@ import {
 import { run as runRecover } from "../extensions/browser/recover";
 import { run as runCron } from "../extensions/browser/index";
 import { subscribe } from "../extensions/browser/subscribe";
-import type {
-  BrowserExtensionSettings,
-  TabsBatchPayload,
-} from "../extensions/browser/types";
+import type { TabsBatchPayload } from "../extensions/browser/types";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -289,7 +286,7 @@ describe("Browser Ingestion Extension", () => {
       expect(settings.excludePatterns).toContain("*mail.google.com*");
 
       expect(typeof settings.sessionInactivityMinutes).toBe("number");
-      expect(settings.enableLlmAnalysis).toBe(true);
+      expect(typeof settings.enableLlmAnalysis).toBe("boolean");
       expect(settings.generateSessionSummaries).toBe(true);
 
       expect(help.extension).toBe("browser");
@@ -403,7 +400,7 @@ describe("Browser Ingestion Extension", () => {
       );
       expect(fb.summary).toBe("Short excerpt");
       expect(fb.category).toBe("WebPage");
-      expect(fb.topics).toContain("sqlite.org");
+      expect(fb.topics).toEqual(["SQLite Vector Guide"]);
 
       const sfb = buildFallbackSessionAnalysis([
         {
@@ -476,7 +473,14 @@ describe("Browser Ingestion Extension", () => {
       expect(chunks.length).toBeGreaterThan(1);
       for (const chunk of chunks) {
         expect(chunk.length).toBeGreaterThan(0);
+        expect(chunk.length).toBeLessThanOrEqual(100);
       }
+    });
+
+    it("hard-limits punctuation-free DOM text", () => {
+      const chunks = chunkText(`prefix ${"x".repeat(250)} suffix`, 80);
+      expect(chunks.length).toBeGreaterThan(3);
+      expect(chunks.every((chunk) => chunk.length <= 80)).toBe(true);
     });
   });
 
@@ -535,14 +539,44 @@ describe("Browser Ingestion Extension", () => {
         .query<any, any>("SELECT * FROM entities WHERE namespace = 'browser'")
         .all();
       const entityNames = entities.map((e) => e.name);
-      expect(entityNames).toContain("Bun SQLite Documentation");
+      expect(entityNames).toContain("https://bun.sh/docs/api/sqlite");
       expect(entityNames).toContain("bun.sh");
+      expect(entities.find((entity) => entity.name === "bun.sh")?.type).toBe("Domain");
 
       // Verify Graph edges
       const edges = testDb.query<any, any>("SELECT * FROM edges").all();
       expect(edges.length).toBeGreaterThan(0);
       const edgeRelations = edges.map((e) => e.relation);
       expect(edgeRelations).toContain("BELONGS_TO_DOMAIN");
+    });
+
+    it("keeps same-titled pages distinct and rejects low-quality topic nodes", async () => {
+      (testSdk as any).queryLLM = async () => JSON.stringify({
+        summary: "Two separate pages.",
+        topics: ["of", "from", "example.com", "Useful Concept"],
+        category: "Article",
+      });
+      for (const url of ["https://example.com/one", "https://example.com/two"]) {
+        await processPageVisit(testSdk, {
+          type: "page_visit",
+          url,
+          title: "Shared title",
+          textContent: "Enough page content to pass the analysis threshold and exercise stable graph identities.",
+          recordInSession: false,
+        }, { enableLlmAnalysis: true, minContentLength: 20 });
+      }
+
+      const pages = testDb.query<any, any>(
+        "SELECT name FROM entities WHERE namespace = 'browser' AND type = 'WebPage' ORDER BY name",
+      ).all();
+      expect(pages.map((page) => page.name)).toEqual([
+        "https://example.com/one",
+        "https://example.com/two",
+      ]);
+      const topics = testDb.query<any, any>(
+        "SELECT name FROM entities WHERE namespace = 'browser' AND type = 'Topic'",
+      ).all().map((topic) => topic.name);
+      expect(topics).toEqual(["Useful Concept"]);
     });
 
     it("skips excluded domains without writing to DB", async () => {
@@ -594,16 +628,29 @@ describe("Browser Ingestion Extension", () => {
       });
       expect(r2.activeSession.visits.length).toBe(2);
       expect(r2.sequentialEdge).toEqual({
-        source: "Bun Docs",
-        target: "Bun SQLite",
+        source: "https://bun.sh/docs",
+        target: "https://bun.sh/docs/api/sqlite",
       });
 
       // Verify buildSequentialEdges
       const seqEdges = buildSequentialEdges(r2.activeSession.visits);
       expect(seqEdges.length).toBe(1);
       expect(seqEdges[0].relation).toBe("NAVIGATED_TO");
-      expect(seqEdges[0].source).toBe("Bun Docs");
-      expect(seqEdges[0].target).toBe("Bun SQLite");
+      expect(seqEdges[0].source).toBe("https://bun.sh/docs");
+      expect(seqEdges[0].target).toBe("https://bun.sh/docs/api/sqlite");
+    });
+
+    it("does not invent navigation edges across unrelated tabs", async () => {
+      const visits = [
+        { url: "https://one.example", title: "One", domain: "one.example", visitedAt: 1, tabId: 10 },
+        { url: "https://two.example", title: "Two", domain: "two.example", visitedAt: 2, tabId: 20 },
+      ];
+      expect(buildSequentialEdges(visits)).toEqual([]);
+
+      setActiveSession(testSdk, null);
+      await recordSessionVisit(testSdk, visits[0], "tabs", {});
+      const result = await recordSessionVisit(testSdk, visits[1], "tabs", {});
+      expect(result.sequentialEdge).toBeUndefined();
     });
 
     it("finalizes and commits session into WebSession entity and CONTAINS_PAGE edges", async () => {
@@ -771,6 +818,36 @@ describe("Browser Ingestion Extension", () => {
       expect(bookmarkedInEdge).toBeDefined();
     });
 
+    it("preserves rich pages, history, and bookmarks as separate sources", async () => {
+      const url = "https://example.com/shared";
+      await processPageVisit(testSdk, {
+        type: "page_visit",
+        url,
+        title: "Shared Resource",
+        textContent: "Rich live page content that must not be overwritten by metadata-only imports.",
+        recordInSession: false,
+      }, {});
+      await processHistoryBatch(testSdk, {
+        type: "history_batch",
+        items: [{ url, title: "Shared Resource", visitTime: 1000 }],
+      }, {});
+      await processBookmarksBatch(testSdk, {
+        type: "bookmarks_batch",
+        items: [{ id: "bookmark-1", url, title: "Shared Resource", folderPath: "Research" }],
+      }, {});
+
+      const sources = testDb.query<any, any>(
+        "SELECT type, uri FROM sources WHERE origin = 'browser' ORDER BY type",
+      ).all();
+      expect(sources).toHaveLength(3);
+      expect(sources.map((source) => source.type).sort()).toEqual([
+        "bookmark",
+        "browser_history",
+        "web_page",
+      ]);
+      expect(sources.find((source) => source.type === "web_page")?.uri).toBe(url);
+    });
+
     it("efficiently batch ingests large history streams with batch embeddings", async () => {
       const items = Array.from({ length: 50 }, (_, i) => ({
         url: `https://docs.rs/crate-${i}/latest`,
@@ -869,6 +946,29 @@ describe("Browser Ingestion Extension", () => {
   });
 
   describe("9. Cron & Push Ingestion Hook", () => {
+    it("coalesces duplicate page events and caps queued DOM material", async () => {
+      const makeMaterial = (title: string) => ({
+        target_processor: "browser",
+        content: JSON.stringify({
+          type: "page_visit",
+          url: "https://example.com/duplicate?utm_source=first",
+          title,
+          textContent: "x".repeat(25_000),
+          html: "h".repeat(30_000),
+          recordInSession: false,
+        }),
+        metadata: { connector: "chrome-extension", data_origin: "chrome" },
+      });
+      await subscribe(makeMaterial("Older"), testSdk);
+      await subscribe(makeMaterial("Newest"), testSdk);
+
+      const queue = testSdk.state.getJson<any[]>("pending-ingest")!;
+      expect(queue).toHaveLength(1);
+      expect(queue[0].payload.title).toBe("Newest");
+      expect(queue[0].payload.textContent).toHaveLength(20_000);
+      expect(queue[0].payload.html).toHaveLength(20_000);
+    });
+
     it("queues inbound IngestMaterial and lets the cron parse it", async () => {
       const material = {
         target_processor: "browser",

@@ -1,6 +1,6 @@
 {
   "name": "browser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ingests, embeds, and analyzes browser activity: active web pages, history, bookmarks, and explicit session groupings with LLM graph enrichment.",
   "namespace": "browser",
   "subscribe_ingest": "subscribe.ts",

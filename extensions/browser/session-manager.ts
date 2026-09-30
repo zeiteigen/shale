@@ -3,11 +3,14 @@ import type { ShaleSDK } from "@shale/sdk";
 import type {
   ActiveSessionState,
   IngestedSessionResult,
+  PreparedSessionData,
   SessionSnapshotPayload,
   SessionVisitRecord,
 } from "./types";
 import type { BrowserExtensionSettings } from "./settings.types";
 import { synthesizeSessionWithLLM } from "./llm-enricher";
+import { normalizeUrl } from "./filter";
+import { pageEntityName, sanitizeTopics, sessionEntityName } from "./identity";
 
 const ACTIVE_SESSION_STATE_KEY = "active_session_state";
 
@@ -49,10 +52,14 @@ export function buildSequentialEdges(
   for (let i = 1; i < visits.length; i++) {
     const prev = visits[i - 1];
     const curr = visits[i];
-    if (prev.title && curr.title && prev.title !== curr.title) {
+    const sameTab = prev.tabId === undefined || curr.tabId === undefined
+      ? prev.windowId === undefined || curr.windowId === undefined || prev.windowId === curr.windowId
+      : prev.tabId === curr.tabId;
+    const openedFromPrevious = curr.openerTabId !== undefined && curr.openerTabId === prev.tabId;
+    if (prev.url && curr.url && prev.url !== curr.url && (sameTab || openedFromPrevious)) {
       edges.push({
-        source: prev.title,
-        target: curr.title,
+        source: pageEntityName(prev.url),
+        target: pageEntityName(curr.url),
         relation: "NAVIGATED_TO",
         weight: 0.9,
         metadata: {
@@ -125,6 +132,13 @@ export async function finalizeSession(
   settings: Partial<BrowserExtensionSettings>,
 ): Promise<IngestedSessionResult> {
   const { sessionId, startTime, endTime, visits, synthesis, checkpointId, namespace } = prepared;
+  const sessionEntity = sessionEntityName(sessionId);
+  const actualDomains = [...new Set(visits.map((visit) => visit.domain).filter(Boolean))];
+  const actualDomainKeys = new Set(actualDomains.map((domain) => domain.toLocaleLowerCase()));
+  const dominantDomains = synthesis.dominantDomains.filter(
+    (domain) => actualDomainKeys.has(domain.toLocaleLowerCase()),
+  );
+  const topics = sanitizeTopics(synthesis.topics, { title: synthesis.sessionTitle });
 
   sdk.logger.info(
     `[browser] [Phase 2: Embedding Model] Embedding and ingesting session "${synthesis.sessionTitle}"...`,
@@ -133,15 +147,15 @@ export async function finalizeSession(
   const sessionText = [
     `Session: ${synthesis.sessionTitle}`,
     `Summary: ${synthesis.summary}`,
-    `Topics: ${synthesis.topics.join(", ")}`,
-    `Dominant Domains: ${synthesis.dominantDomains.join(", ")}`,
+    `Topics: ${topics.join(", ")}`,
+    `Dominant Domains: ${dominantDomains.join(", ")}`,
     `Pages Visited (${visits.length}):`,
     ...visits.map((v, i) => `${i + 1}. [${v.domain}] ${v.title} (${v.url})`),
   ].join("\n");
 
   const embedding = await sdk.embed(sessionText);
 
-  const sessionUri = `browser-session://${sessionId}`;
+  const sessionUri = sessionEntity;
   const sourceRes = sdk.ingest.sourceAndChunks({
     source: {
       id: `session:${sessionId}`,
@@ -158,7 +172,7 @@ export async function finalizeSession(
         chunk_type: "synthetic",
         text_content: sessionText,
         embedding,
-        entity_names: [synthesis.sessionTitle, ...synthesis.topics.slice(0, 3)],
+        entity_names: [sessionEntity, ...topics.slice(0, 3)],
       },
     ],
     namespace,
@@ -166,18 +180,16 @@ export async function finalizeSession(
 
   // Prepare graph entities
   const entities: Array<{ name: string; type: string; namespace: string }> = [
-    { name: synthesis.sessionTitle, type: "WebSession", namespace },
+    { name: sessionEntity, type: "WebSession", namespace },
   ];
 
   // Topic entities
-  for (const topic of synthesis.topics) {
-    if (topic) {
-      entities.push({ name: topic, type: "Topic", namespace });
-    }
+  for (const topic of topics) {
+    entities.push({ name: topic, type: "Topic", namespace });
   }
 
   // Dominant domain entities
-  for (const domain of synthesis.dominantDomains) {
+  for (const domain of dominantDomains) {
     if (domain) {
       entities.push({ name: domain, type: "Domain", namespace });
     }
@@ -194,11 +206,12 @@ export async function finalizeSession(
 
   for (let i = 0; i < visits.length; i++) {
     const v = visits[i];
-    if (v.title) {
-      entities.push({ name: v.title, type: "WebPage", namespace });
+    if (v.url) {
+      const pageEntity = pageEntityName(v.url);
+      entities.push({ name: pageEntity, type: "WebPage", namespace });
       edges.push({
-        source: synthesis.sessionTitle,
-        target: v.title,
+        source: sessionEntity,
+        target: pageEntity,
         relation: "CONTAINS_PAGE",
         weight: 1.0,
         metadata: {
@@ -213,9 +226,9 @@ export async function finalizeSession(
   }
 
   // Topic coverage edges
-  for (const topic of synthesis.topics) {
+  for (const topic of topics) {
     edges.push({
-      source: synthesis.sessionTitle,
+      source: sessionEntity,
       target: topic,
       relation: "COVERS_TOPIC",
       weight: 0.85,
@@ -223,9 +236,9 @@ export async function finalizeSession(
   }
 
   // Dominant domain edges
-  for (const domain of synthesis.dominantDomains) {
+  for (const domain of dominantDomains) {
     edges.push({
-      source: synthesis.sessionTitle,
+      source: sessionEntity,
       target: domain,
       relation: "PRIMARY_DOMAIN",
       weight: 0.8,
@@ -251,7 +264,7 @@ export async function finalizeSession(
     sessionId,
     title: synthesis.sessionTitle,
     summary: synthesis.summary,
-    topics: synthesis.topics,
+    topics,
     pageCount: visits.length,
     edgesCount: graphRes.edgesInserted,
   };
@@ -341,13 +354,25 @@ export async function recordSessionVisit(
   let sequentialEdge: { source: string; target: string } | undefined;
   if (active.visits.length > 0) {
     const prev = active.visits[active.visits.length - 1];
-    if (prev.title && visit.title && prev.title !== visit.title) {
-      sequentialEdge = { source: prev.title, target: visit.title };
+    const sameTab = prev.tabId === undefined || visit.tabId === undefined
+      ? prev.windowId === undefined || visit.windowId === undefined || prev.windowId === visit.windowId
+      : prev.tabId === visit.tabId;
+    const openedFromPrevious = visit.openerTabId !== undefined && visit.openerTabId === prev.tabId;
+    if (prev.url !== visit.url && (sameTab || openedFromPrevious)) {
+      sequentialEdge = {
+        source: pageEntityName(prev.url),
+        target: pageEntityName(visit.url),
+      };
     }
   }
 
-  // Append visit and update activity timestamp
-  active.visits.push(visit);
+  // Repeated capture events for the same tab and URL update the visit instead
+  // of creating artificial self-navigation and bloated session narratives.
+  const duplicateIndex = active.visits.findIndex(
+    (existing) => existing.url === visit.url && existing.tabId === visit.tabId,
+  );
+  if (duplicateIndex >= 0) active.visits[duplicateIndex] = visit;
+  else active.visits.push(visit);
   active.lastActivityTime = now;
   setActiveSession(sdk, active);
 
@@ -397,14 +422,11 @@ export async function ingestSessionSnapshot(
   }
 
   const visits: SessionVisitRecord[] = payload.pages.map((p) => {
-    let domain = "";
-    try {
-      domain = new URL(p.url).hostname;
-    } catch {}
+    const normalized = normalizeUrl(p.url);
     return {
-      url: p.url,
+      url: normalized.isValid ? normalized.cleanUrl : p.url,
       title: p.title,
-      domain,
+      domain: normalized.domain,
       visitedAt: p.visitedAt,
       tabId: p.tabId,
       transitionType: p.transitionType,

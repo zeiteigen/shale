@@ -1,4 +1,3 @@
-import { randomUUIDv7 } from "bun";
 import type { ShaleSDK } from "@shale/sdk";
 import type {
   BookmarksBatchPayload,
@@ -16,6 +15,13 @@ import type { BrowserExtensionSettings } from "./settings.types";
 import { evaluateUrl } from "./filter";
 import { analyzePageWithLLM } from "./llm-enricher";
 import {
+  bookmarkSourceUri,
+  browserSourceId,
+  historySourceUri,
+  pageEntityName,
+  sanitizeTopics,
+} from "./identity";
+import {
   ingestSessionSnapshot,
   recordSessionVisit,
 } from "./session-manager";
@@ -24,46 +30,55 @@ import {
  * Splits text into chunks of target character size on sentence or paragraph boundaries.
  */
 export function chunkText(text: string, targetChunkSize: number = 1000): string[] {
-  const clean = text.trim();
+  const limit = Math.max(64, Math.floor(targetChunkSize));
+  const clean = text.replace(/\r\n?/g, "\n").trim();
   if (!clean) return [""];
-  if (clean.length <= targetChunkSize) {
+  if (clean.length <= limit) {
     return [clean];
   }
 
   const chunks: string[] = [];
-  const paragraphs = clean.split(/\n\s*\n/);
   let currentChunk = "";
+  const append = (piece: string) => {
+    const value = piece.trim();
+    if (!value) return;
+    const separator = currentChunk ? " " : "";
+    if (currentChunk.length + separator.length + value.length <= limit) {
+      currentChunk += separator + value;
+      return;
+    }
+    if (currentChunk) chunks.push(currentChunk), currentChunk = "";
+    if (value.length <= limit) {
+      currentChunk = value;
+      return;
+    }
 
-  for (const para of paragraphs) {
-    if ((currentChunk + "\n\n" + para).length <= targetChunkSize) {
-      currentChunk = currentChunk ? currentChunk + "\n\n" + para : para;
-    } else {
-      if (currentChunk) {
-        chunks.push(currentChunk.trim());
-        currentChunk = "";
-      }
-      if (para.length > targetChunkSize) {
-        // Break paragraph by sentences
-        const sentences = para.match(/[^.!?]+[.!?]+(\s|$)/g) || [para];
-        for (const sent of sentences) {
-          if ((currentChunk + " " + sent).length <= targetChunkSize) {
-            currentChunk = currentChunk ? currentChunk + " " + sent : sent;
-          } else {
-            if (currentChunk) chunks.push(currentChunk.trim());
-            currentChunk = sent;
-          }
+    // A DOM can contain enormous punctuation-free runs. Split those on words,
+    // then hard-split any single token so the configured limit is guaranteed.
+    for (const word of value.split(/\s+/)) {
+      if (word.length > limit) {
+        if (currentChunk) chunks.push(currentChunk), currentChunk = "";
+        for (let offset = 0; offset < word.length; offset += limit) {
+          const part = word.slice(offset, offset + limit);
+          if (part.length === limit) chunks.push(part);
+          else currentChunk = part;
         }
+      } else if (!currentChunk) {
+        currentChunk = word;
+      } else if (currentChunk.length + word.length + 1 <= limit) {
+        currentChunk += ` ${word}`;
       } else {
-        currentChunk = para;
+        chunks.push(currentChunk);
+        currentChunk = word;
       }
     }
-  }
+  };
 
-  if (currentChunk) {
-    chunks.push(currentChunk.trim());
+  for (const block of clean.split(/\n+/)) {
+    for (const sentence of block.match(/[^.!?]+(?:[.!?]+|$)/g) ?? [block]) append(sentence);
   }
-
-  return chunks.length > 0 ? chunks : [clean.slice(0, targetChunkSize)];
+  if (currentChunk) chunks.push(currentChunk);
+  return chunks.length > 0 ? chunks : [clean.slice(0, limit)];
 }
 
 /**
@@ -140,6 +155,7 @@ export async function preparePageVisit(
     windowId: payload.windowId,
     openerTabId: payload.openerTabId,
     transitionType: payload.transitionType,
+    recordInSession: payload.recordInSession,
     sessionId: payload.sessionId,
   };
 
@@ -197,9 +213,13 @@ export async function finalizePageVisit(
 
   // Phase 2 Chunking & Embeddings
   const chunkSize = settings.chunkSize ?? 1000;
-  const rawChunks = prepared.parsedChunks?.length
-    ? prepared.parsedChunks
-    : chunkText(rawContent, chunkSize);
+  const rawChunks = chunkText(
+    prepared.parsedChunks?.length ? prepared.parsedChunks.join("\n\n") : rawContent,
+    chunkSize,
+  ).filter(Boolean);
+  const topics = settings.extractTopics === false
+    ? []
+    : sanitizeTopics(analysis.topics, { title, domain });
 
   const referenceLines = [
     ...(pageData.author ? [`Author: ${pageData.author}`] : []),
@@ -216,7 +236,7 @@ export async function finalizePageVisit(
 
   const chunkRecords = [
     {
-      text_content: `Page: ${title}\nDomain: ${domain}\nSummary: ${analysis.summary}\nContext: ${prepared.contextualSummary ?? ""}\nTopics: ${analysis.topics.join(", ")}`,
+      text_content: `Page: ${title}\nURL: ${cleanUrl}\nDomain: ${domain}\nSummary: ${analysis.summary}\nContext: ${prepared.contextualSummary ?? ""}${topics.length ? `\nTopics: ${topics.join(", ")}` : ""}`,
       chunk_type: "synthetic" as const,
     },
     ...rawChunks.map((text_content) => ({ text_content, chunk_type: "verbatim" as const })),
@@ -227,7 +247,8 @@ export async function finalizePageVisit(
 
   const embeddings = await sdk.embed(chunksToEmbed);
 
-  const sourceId = `web:${Buffer.from(cleanUrl).toString("base64url").slice(0, 64)}`;
+  const sourceId = browserSourceId("web", cleanUrl);
+  const pageEntity = pageEntityName(cleanUrl);
   const sourceRes = sdk.ingest.sourceAndChunks({
     source: {
       id: sourceId,
@@ -243,21 +264,19 @@ export async function finalizePageVisit(
       chunk_type: chunk.chunk_type,
       text_content: chunk.text_content,
       embedding: embeddings[i],
-      entity_names: i === 0 ? [title, ...analysis.topics.slice(0, 3)] : undefined,
+      entity_names: i === 0 ? [pageEntity, ...topics.slice(0, 3)] : undefined,
     })),
     namespace,
   });
 
   // Prepare Knowledge Graph Entities & Edges
   const entities: Array<{ name: string; type: string; namespace: string }> = [
-    { name: title, type: "WebPage", namespace },
+    { name: pageEntity, type: "WebPage", namespace },
     { name: domain, type: "Domain", namespace },
   ];
 
-  for (const topic of analysis.topics) {
-    if (topic && topic !== title) {
-      entities.push({ name: topic, type: "Topic", namespace });
-    }
+  for (const topic of topics) {
+    entities.push({ name: topic, type: "Topic", namespace });
   }
 
   const edges: Array<{
@@ -268,7 +287,7 @@ export async function finalizePageVisit(
     metadata?: any;
   }> = [
     {
-      source: title,
+      source: pageEntity,
       target: domain,
       relation: "BELONGS_TO_DOMAIN",
       weight: 1.0,
@@ -276,15 +295,13 @@ export async function finalizePageVisit(
     },
   ];
 
-  for (const topic of analysis.topics) {
-    if (topic && topic !== title) {
-      edges.push({
-        source: title,
-        target: topic,
-        relation: "HAS_TOPIC",
-        weight: 0.85,
-      });
-    }
+  for (const topic of topics) {
+    edges.push({
+      source: pageEntity,
+      target: topic,
+      relation: "HAS_TOPIC",
+      weight: 0.85,
+    });
   }
 
   // Session Grouping: record visit into active session
@@ -294,19 +311,18 @@ export async function finalizePageVisit(
     domain,
     visitedAt,
     tabId: pageData.tabId,
+    windowId: pageData.windowId,
+    openerTabId: pageData.openerTabId,
     transitionType: pageData.transitionType,
     pageSourceId: sourceRes.sourceId,
   };
 
-  const sessionUpdate = await recordSessionVisit(
-    sdk,
-    visitRecord,
-    pageData.sessionId,
-    settings,
-  );
+  const sessionUpdate = pageData.recordInSession === false
+    ? null
+    : await recordSessionVisit(sdk, visitRecord, pageData.sessionId, settings);
 
   // If there is a sequential edge from previous page in session, link in graph
-  if (sessionUpdate.sequentialEdge) {
+  if (sessionUpdate?.sequentialEdge) {
     edges.push({
       source: sessionUpdate.sequentialEdge.source,
       target: sessionUpdate.sequentialEdge.target,
@@ -334,9 +350,9 @@ export async function finalizePageVisit(
     entitiesCount: graphRes.entitiesInserted,
     edgesCount: graphRes.edgesInserted,
     summary: analysis.summary,
-    topics: analysis.topics,
     category: analysis.category,
-    sessionId: sessionUpdate.activeSession.sessionId,
+    topics,
+    sessionId: sessionUpdate?.activeSession.sessionId,
   };
 }
 
@@ -426,6 +442,8 @@ export async function processHistoryBatch(
     visitCount?: number;
     textContent: string;
     sourceId: string;
+    sourceUri: string;
+    pageEntity: string;
   }> = [];
 
   for (const item of payload.items) {
@@ -440,7 +458,7 @@ export async function processHistoryBatch(
     const textContent = `Page: ${title}\nDomain: ${filter.domain}\nURL: ${filter.cleanUrl}\nVisited: ${new Date(
       visitTime,
     ).toISOString()}${item.visitCount ? `\nVisit Count: ${item.visitCount}` : ""}`;
-    const sourceId = `history:${Buffer.from(filter.cleanUrl).toString("base64url").slice(0, 64)}`;
+    const sourceId = browserSourceId("history", filter.cleanUrl);
 
     validItems.push({
       title,
@@ -449,6 +467,8 @@ export async function processHistoryBatch(
       visitCount: item.visitCount,
       textContent,
       sourceId,
+      sourceUri: historySourceUri(filter.cleanUrl),
+      pageEntity: pageEntityName(filter.cleanUrl),
     });
   }
 
@@ -482,7 +502,7 @@ export async function processHistoryBatch(
       source: {
         id: v.sourceId,
         type: "browser_history",
-        uri: v.filter.cleanUrl,
+        uri: v.sourceUri,
         origin: "browser",
         title: v.title,
         created_at: v.visitTime,
@@ -494,19 +514,19 @@ export async function processHistoryBatch(
           chunk_type: "verbatim",
           text_content: v.textContent,
           embedding: embeddings[i],
-          entity_names: [v.title, v.filter.domain],
+          entity_names: [v.pageEntity, v.filter.domain],
         },
       ],
       namespace,
     });
 
     entities.push(
-      { name: v.title, type: "WebPage", namespace },
+      { name: v.pageEntity, type: "WebPage", namespace },
       { name: v.filter.domain, type: "Domain", namespace },
     );
 
     edges.push({
-      source: v.title,
+      source: v.pageEntity,
       target: v.filter.domain,
       relation: "BELONGS_TO_DOMAIN",
       weight: 0.9,
@@ -541,6 +561,8 @@ export async function processBookmarksBatch(
     dateAdded: number;
     textContent: string;
     sourceId: string;
+    sourceUri: string;
+    pageEntity: string;
   }> = [];
 
   for (const item of payload.items) {
@@ -559,7 +581,8 @@ export async function processBookmarksBatch(
     const folder = (item.folderPath || "Bookmarks Bar").trim();
     const dateAdded = item.dateAdded || Date.now();
     const textContent = `Bookmark: ${title}\nFolder: ${folder}\nDomain: ${filter.domain}\nURL: ${filter.cleanUrl}`;
-    const sourceId = `bookmark:${Buffer.from(filter.cleanUrl).toString("base64url").slice(0, 64)}`;
+    const sourceUri = bookmarkSourceUri(item.id, filter.cleanUrl);
+    const sourceId = browserSourceId("bookmark", sourceUri);
 
     validItems.push({
       title,
@@ -568,6 +591,8 @@ export async function processBookmarksBatch(
       dateAdded,
       textContent,
       sourceId,
+      sourceUri,
+      pageEntity: pageEntityName(filter.cleanUrl),
     });
   }
 
@@ -601,7 +626,7 @@ export async function processBookmarksBatch(
       source: {
         id: v.sourceId,
         type: "bookmark",
-        uri: v.filter.cleanUrl,
+        uri: v.sourceUri,
         origin: "browser",
         title: v.title,
         created_at: v.dateAdded,
@@ -613,27 +638,27 @@ export async function processBookmarksBatch(
           chunk_type: "verbatim",
           text_content: v.textContent,
           embedding: embeddings[i],
-          entity_names: [v.title, v.folder],
+          entity_names: [v.pageEntity, v.folder],
         },
       ],
       namespace,
     });
 
     entities.push(
-      { name: v.title, type: "WebPage", namespace },
+      { name: v.pageEntity, type: "WebPage", namespace },
       { name: v.folder, type: "BookmarkFolder", namespace },
       { name: v.filter.domain, type: "Domain", namespace },
     );
 
     edges.push(
       {
-        source: v.title,
+        source: v.pageEntity,
         target: v.folder,
         relation: "BOOKMARKED_IN",
         weight: 1.0,
       },
       {
-        source: v.title,
+        source: v.pageEntity,
         target: v.filter.domain,
         relation: "BELONGS_TO_DOMAIN",
         weight: 1.0,

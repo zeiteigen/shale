@@ -7,12 +7,13 @@ The **Shale Browser Ingestion Extension** ingests, embeds, enriches, and indexes
 ## Features
 
 - **Active Web Page Ingestion**: Ingests visited pages with title, clean body text, metadata, and full-text/vector index.
+- **Canonical Graph Identity**: Uses normalized URLs for `WebPage` nodes and session URIs for `WebSession` nodes, so duplicate titles never merge unrelated records.
 - **Privacy & Collision Avoidance Filters**:
   - Excludes social media platforms (`x.com`, `reddit.com`, `instagram.com`, `facebook.com`, `tiktok.com`, `linkedin.com`, `youtube.com`) to leave room for specialized social media ingestion extensions.
   - Excludes sensitive URLs (`*mail.google.com*`, `*accounts.google.com*`, `*bank*`, `*login*`).
   - Automatically strips URL tracking parameters (`utm_*`, `fbclid`, `gclid`).
 - **Explicit Web Session Grouping**:
-  - Clustered web activity within a single browsing session.
+  - Clusters true navigation events within a single browsing session; snapshots and manual captures stay page-local.
   - Creates `WebSession` knowledge graph entities.
   - Links sequential navigation transitions (`Page A -> NAVIGATED_TO -> Page B`).
   - Links sessions to visited pages (`WebSession -> CONTAINS_PAGE -> WebPage`).
@@ -22,6 +23,7 @@ The **Shale Browser Ingestion Extension** ingests, embeds, enriches, and indexes
 - **Bookmarks & History**:
   - Ingests bookmark trees with folder hierarchies (`WebPage -> BOOKMARKED_IN -> BookmarkFolder`).
   - Ingests browser history batches with domain relationships.
+  - Keeps bookmark/history sources separate from rich page captures while connecting them to the same canonical page node.
 - **Crash Recovery**:
   - Uses the two-phase local GPU optimization pattern with checkpoints to guarantee zero lost LLM tokens during unexpected exits.
   - The host runs the browser cron once during startup, recovering checkpoints first and then draining every durable ingest item already queued.
@@ -56,7 +58,7 @@ bun run settings tui browser
 | `excludePatterns` | `string[]` | Sensitive/auth patterns | Wildcard URL patterns to exclude |
 | `excludePrivateBrowsing` | `boolean` | `true` | Ignore private/incognito windows |
 | `sessionInactivityMinutes`| `number` | `30` | Inactivity threshold before starting a new session |
-| `enableLlmAnalysis` | `boolean` | `true` | Generate page/session summaries and topics |
+| `enableLlmAnalysis` | `boolean` | `false` | Generate page/session summaries and topics |
 | `generateSessionSummaries`| `boolean` | `true` | Synthesize browsing sessions into narrative summaries |
 | `extractTopics` | `boolean` | `true` | Extract topic entities for the graph |
 | `chunkSize` | `number` | `1000` | Target character chunk size for vectors |
@@ -68,9 +70,9 @@ bun run settings tui browser
 
 ```mermaid
 graph TD
-    WS["WebSession (e.g. 'Researching SQLite Vector Extensions')"]
-    WP1["WebPage: 'sqlite-vec Guide'"]
-    WP2["WebPage: 'FTS5 Full-Text Search'"]
+    WS["WebSession: browser-session://stable-id"]
+    WP1["WebPage: https://github.com/.../sqlite-vec"]
+    WP2["WebPage: https://sqlite.org/fts5.html"]
     D1["Domain: github.com"]
     D2["Domain: sqlite.org"]
     T1["Topic: SQLite"]

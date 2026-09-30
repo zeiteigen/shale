@@ -245,6 +245,7 @@ function App() {
 
   function selectResult(result: SearchResult) {
     const node = data?.nodes.find((item) => item.id === result.entity_id)
+      || data?.nodes.find((item) => item.sourceUri === result.source_uri)
       || data?.nodes.find((item) => item.name === result.source_title);
     if (node) setSelected(node);
   }

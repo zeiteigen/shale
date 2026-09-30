@@ -1,291 +1,151 @@
-# AGENTS.md: Developer & Agent Guide to Shale
+# Agent Guidelines & System Architecture
 
-Welcome to **Shale**. This document provides AI agents and human contributors with a complete architectural breakdown, operational guide, and development manual for understanding, modifying, and extending the codebase.
-
----
-
-## 1. Executive Summary & Product Vision
-
-### What is Shale?
-**Shale** is a local-first personal knowledge intelligence layer and cognitive memory engine for AI assistants and power users. It unifies disparate streams of personal data—Obsidian markdown vaults, browser browsing sessions/tabs, images, technical diagrams, and document collections—into an integrated **hybrid search and knowledge graph database**.
-
-### Core Tenets
-1. **Local-First & Privacy Preserving**: Runs entirely on your machine. All storage is local SQLite (`bun:sqlite`), vector indexing is powered locally by `sqlite-vec`, and lexical search runs on SQLite FTS5.
-2. **Two-Phase Local GPU Optimization**: Built specifically to avoid VRAM thrashing on consumer hardware. Local LLMs (e.g. Ollama or vLLM running on an 8GB–24GB GPU) cannot rapidly alternate between large Chat models and Embedding models without severe model reload latency. Shale enforces strict phase separation: all Chat model operations run first (Phase 1, zero embeddings), followed by a single model transition and batch embedding of all accumulated chunks (Phase 2, zero chat calls).
-3. **Verbatim vs. Synthetic Chunk Typing**: Differentiates strictly between raw source text (`verbatim`) and AI-generated text (`synthetic` expansions, summaries, narratives, conceptual interpretations).
-4. **Multimodal by Design**: Ingests notes, web pages, and images. Images are analyzed using multimodal vision models, decomposing visuals into layout/visual components (`verbatim`) and underlying conceptual meaning (`synthetic`).
-5. **Modular Extension Architecture**: Capabilities are isolated as self-contained extensions with schema-validated settings, crash recovery checkpoints, cron jobs, and a type-safe cross-extension message bus.
+This document outlines the core conventions, architecture patterns, and best practices for developing and maintaining the Shale codebase.
 
 ---
 
-## 2. Technology Stack
+## 1. Core Principles
 
-- **Runtime & Package Manager**: [Bun](https://bun.sh/) ($\ge$ 1.1)
-- **Language**: TypeScript (strict mode)
-- **Database**: `bun:sqlite` with:
-  - `sqlite-vec` (SIMD-accelerated 4096-dimensional vector search)
-  - `fts5` with porter stemming (lexical BM25 full-text search)
-  - `STRICT` table mode and foreign keys enabled
-- **NLP / Utilities**: `stopword` for keyword extraction and stopword stripping
-- **CLI & Configuration**: `@clack/prompts`, `commander`
-- **Testing**: `bun:test`
+1. **Local-First & Resource Conscious**: Shale operates on local SQLite databases and local LLM endpoints (or remote fallback endpoints). Extensions must be performant, non-blocking, and cleanly isolate long-running workloads.
+2. **Strict Two-Phase Local GPU Optimization Pattern**: Local consumer GPUs frequently cannot keep both large vision/chat LLMs (e.g. Qwen 2.5 7B) and embedding models (e.g. BGE-M3) resident in VRAM simultaneously. When processing documents or media batches:
+   - **Phase 1: Chat Model**: Perform all chat/multimodal completions first without issuing any embedding requests.
+   - **Phase 2: Embedding Model**: Ingest, chunk, and batch-embed all texts and metadata strictly after Phase 1 has completed.
+3. **Resilient Hot-Reloading & State Isolation**:
+   - Settings are read dynamically on the fly from disk without sticky in-memory caches.
+   - Extensions use persistent watermarks and transactional checkpoints to guarantee recovery upon crashes or interruptions.
+4. **Cross-Extension Decoupling**: Extensions communicate via a unified, typed cross-extension message bus (`lib/messages.ts`, `sdk/messages.ts`), avoiding direct import coupling.
 
 ---
 
-## 3. Directory Layout & Architecture
+## 2. Directory Structure
 
 ```
 shale/
-├── AGENTS.md                   # This guide
-├── EXTENSION_SYSTEM.md         # Comprehensive extension system specification
-├── package.json                # Project dependencies, exports, and npm scripts
-├── bun.lock                    # Bun lockfile
-│
-├── lib/                        # Low-Level Core & Host Infrastructure
-│   ├── db-init.ts              # SQLite connection, schema creation, migrations, triggers
-│   ├── db.ts                   # Core database operations, types, and strict transactions
-│   ├── ai.ts                   # Direct OpenAI-compatible LLM & Embedder HTTP clients
-│   ├── messages.ts             # Cross-extension message bus engine (MessageBus)
-│   ├── messages.types.ts       # Type-safe built-in channels & request/response schemas
-│   ├── extension.ts            # Extension manifest validation and schema types
-│   └── ingest.types.ts         # Ingest queue types and validation
-│
-├── sdk/                        # Public Extension SDK Layer (@shale/sdk)
-│   ├── index.ts                # ShaleSDK class, ambient proxy exports, factory functions
-│   ├── types.ts                # SDK public type definitions (chunks, search, sources)
-│   ├── ingest.ts               # Atomic source and chunk ingestion API
-│   ├── search.ts               # Hybrid, Vector, and BM25 search engines
-│   ├── context.ts              # Context hydrator (resolves chunk + source + graph neighborhood)
-│   ├── graph.ts                # Knowledge graph operations (entities and directed edges)
-│   ├── embed.ts                # Vector embedding client and dimensional normalization
-│   ├── checkpoint.ts           # Crash recovery checkpoint manager
-│   ├── state.ts                # Extension state and watermark store
-│   ├── settings.ts             # Extension settings reader/writer with schema validation
-│   └── messages.ts             # Scoped cross-extension messaging client (ExtensionMessages)
-│
-├── main/                       # Host Runtime & Daemon
-│   ├── index.ts                # Bun HTTP server (/ingest on port 7425), cron scheduler
-│   ├── load-extensions.ts      # Extension loader, setup runner, manifest scanner
-│   ├── ingest-router.ts        # Routes incoming ingest queue payloads to subscriber extensions
-│   └── ingest-queue.ts         # Memory buffer and queue for async ingest payloads
-│
-├── extensions/                 # Pluggable Extensions
-│   ├── obsidian/               # Obsidian vault sync, atomic note expansion, markdown chunking
-│   ├── browser/                # Web visits, session narrative aggregation, history/bookmarks
-│   ├── process-image/          # Multimodal image analysis (verbatim layout + synthetic meaning)
-│   ├── source-linker/          # Cross-source entity citation and semantic graph linker
-│   └── db-backup/              # SQLite hot database backup and automated rotation
-│
-├── scripts/                    # Developer Tooling & CLI Utilities
-│   ├── settings.ts             # Interactive and headless settings CLI (`bun run settings`)
-│   ├── serve-visualizer.ts     # Local HTTP server for knowledge graph visualizer
-│   └── browser-chrome-extension/# Chrome browser extension for capturing web visits
-│
-├── visualizer/                 # Frontend UI for inspecting sources, chunks, and graph
-│   └── index.html              # Interactive 2D/3D force graph and chunk browser
-│
-└── tests/                      # 17 Comprehensive Test Suites (246 tests)
-    ├── db-schema.test.ts
-    ├── search.test.ts
-    ├── sdk.test.ts
-    ├── cross-extension-messaging.test.ts
-    ├── process-image-extension.test.ts
-    ├── obsidian-plugin.test.ts
-    ├── browser-extension.test.ts
-    ├── ... (other feature suites)
+├── lib/                     # Low-level core infrastructure (database, vector index, message bus, models)
+│   ├── db.ts                # SQLite database setup, vector tables, schema migrations
+│   ├── messages.ts          # Core pub/sub and request/response message broker
+│   ├── ai.ts                # LLM and embedding API clients
+│   ├── vector.ts            # High-performance vector cosine similarity search
+│   └── extension.ts         # Extension interfaces and cron definitions
+├── sdk/                     # High-level developer SDK (@shale/sdk)
+│   ├── index.ts             # SDK entry point, ambient scope, factory
+│   ├── settings.ts          # SettingsManager (reads settings.json fresh on every call)
+│   ├── state.ts             # StateManager for extension watermarks and kv-state
+│   ├── ingest.ts            # Document chunking, hashing, and database ingestion
+│   ├── search.ts            # Hybrid search engine (Vector + BM25 + Reciprocal Rank Fusion)
+│   ├── messages.ts          # Type-safe messaging interface for extensions
+│   ├── llm.ts               # LLM querying interface with thinking tokens & multimodal support
+│   └── checkpoint.ts        # Recovery checkpoint manager for multi-phase tasks
+├── extensions/              # Autonomous modular extensions
+│   ├── obsidian/            # Obsidian vault ingestion, frontmatter/wikilink parsing, note chunking
+│   ├── browser/             # Chrome browser tab sync, session clustering, history/bookmarks ingestion
+│   ├── process-image/       # Multimodal visual extraction (layout, OCR, synthetic meaning chunks)
+│   ├── source-linker/       # Cross-source entity discovery and knowledge graph linker
+│   └── db-backup/           # Automated background SQLite database hot backups
+├── main/                    # Host daemon and orchestration
+│   ├── index.ts             # Main process entry, Bun.serve HTTP server, startup runner
+│   ├── cli.ts               # Interactive CLI, manual cron triggers, settings commands, ghost suggestions & tab autocompletion
+│   └── load-extensions.ts   # Auto-discovery of manifests, crons, hooks, and message handlers
+├── scripts/                 # Developer tools, CLIs, browser extensions
+│   ├── settings.ts          # Settings CLI and Clack TUI runner
+│   └── browser-chrome-extension/ # Chrome extension for pushing browser tabs to Shale
+└── tests/                   # Automated Bun test suites
 ```
 
 ---
 
-## 4. Core Systems & Deep Dives
+## 3. Extension Development Standards
 
-### 4.1 Database Layer (`lib/db-init.ts`, `lib/db.ts`)
+Every extension lives in `extensions/<extension-name>` and adheres to the following layout:
 
-All persistent data resides in SQLite. Tables use SQLite `STRICT` mode:
-
-| Table | Purpose | Key Columns / Constraints |
-|---|---|---|
-| `sources` | Root document or file | `id TEXT PRIMARY KEY`, `type TEXT`, `uri TEXT`, `title TEXT`, `hash TEXT`, `updated_at INT` |
-| `chunks` | Text fragments for retrieval | `id INTEGER PRIMARY KEY`, `source_id REFERENCES sources`, `chunk_type TEXT CHECK(IN ('verbatim', 'synthetic'))`, `text_content TEXT` |
-| `vector_index` | `vec0` virtual table | `rowid INTEGER PRIMARY KEY`, `embedding float[4096]` (stores normalized 4096-d vectors) |
-| `chunks_fts` | `fts5` virtual table | Full-text porter-stemmed index synced to `chunks` via `AFTER INSERT`/`DELETE` triggers |
-| `entities` | Knowledge graph nodes | `id INTEGER PRIMARY KEY`, `name TEXT UNIQUE`, `type TEXT`, `namespace TEXT` |
-| `edges` | Directed graph relationships | `id INTEGER PRIMARY KEY`, `source TEXT`, `target TEXT`, `relation TEXT`, `weight REAL`, `metadata TEXT` |
-| `checkpoints` | Crash recovery state | `id TEXT PRIMARY KEY`, `extension_id TEXT`, `key TEXT`, `data TEXT (JSON)` |
-| `extension_state`| Watermarks & key-values | `extension_id TEXT`, `state_key TEXT`, `value TEXT`, `PRIMARY KEY (extension_id, state_key)` |
-
-#### Automatic Migration
-On boot, `lib/db-init.ts` inspects table columns and runs migrations (e.g. `ALTER TABLE chunks ADD COLUMN chunk_type...`) wrapped in error-tolerant blocks.
-
----
-
-### 4.2 Verbatim vs. Synthetic Chunks
-
-To prevent AI "hallucinations" or summaries from being confused with primary ground truth:
-- **`verbatim`**: Direct words from the source. Examples:
-  - Markdown note body text chunks.
-  - Raw HTML/text scraped from a web page body.
-  - Multimodal vision description of physical layout, colors, shapes, and visible text.
-  - Raw browser bookmarks and history titles.
-- **`synthetic`**: AI-generated reasoning, expansions, or overviews. Examples:
-  - Chat LLM conceptual expansions of short atomic notes.
-  - Web page summaries and extracted topics.
-  - Browsing session synthesis narratives.
-  - Multimodal vision explanation of underlying conceptual meaning and significance.
-
-Search queries across Vector, BM25, and Hybrid modes support filtering via `filterChunkType?: "verbatim" | "synthetic"`.
-
----
-
-### 4.3 The Two-Phase Local GPU Optimization Pattern
-
-When running local models (e.g. Ollama or vLLM with Llama-3 8B and Nomic-Embed), loading both models simultaneously frequently exceeds consumer GPU VRAM. Alternating between them for every file causes thrashing (10–30s model reload per item).
-
-Shale enforces a two-phase pipeline across all extensions and bulk operations:
-
-```mermaid
-graph TD
-    subgraph Phase1 ["Phase 1: Chat Model Only (Zero Embeddings)"]
-        A1["Scan Delta & Watermarks"] --> A2["Note Expansions (LLM)"]
-        A2 --> A3["Image Descriptions (Vision LLM)"]
-        A3 --> A4["Page Summaries (LLM)"]
-        A4 --> A5["Persist Checkpoints to SQLite"]
-    end
-
-    subgraph VRAMTransition ["Single GPU Memory Transition"]
-        T1["Unload Chat Model / Load Embedding Model"]
-    end
-
-    subgraph Phase2 ["Phase 2: Embedding Model Only (Zero Chat Calls)"]
-        B1["Batch Embed All Chunks (sdk.embedBatch)"] --> B2["Atomically Ingest Sources & Chunks"]
-        B2 --> B3["Commit Graph Entities & Edges"]
-        B3 --> B4["Delete Checkpoints & Advance Watermarks"]
-    end
-
-    Phase1 --> VRAMTransition --> Phase2
+```
+extensions/<name>/
+├── manifest.json            # Extension metadata, crons, capabilities, hooks
+├── settings.json            # Active user settings (read on the fly)
+├── settings.help.json       # Settings schema, validation rules, descriptions, defaults
+├── settings.types.ts        # TypeScript types representing settings.json
+├── index.ts                 # Main extension entry (registers message handlers, startup logic)
+├── recover.ts               # (Optional) Checkpoint recovery script
+└── README.md                # Extension documentation
 ```
 
-- **Invariant**: In Phase 1, `deferEmbedding: true` is passed to all parsers and message channels. No embedding requests are allowed.
-- **Invariant**: In Phase 2, all chunks collected across all items are flattened and sent in a single batch embed call (`sdk.embedBatch(texts)`). No Chat model calls are allowed.
+### Manifest Specifications (`manifest.json`)
+
+```json
+{
+  "name": "extension-name",
+  "description": "Human-readable description of extension capabilities",
+  "version": "1.0.0",
+  "crons": [
+    {
+      "name": "cron-job-name",
+      "schedule": "0 */6 * * *",
+      "script": "index.ts",
+      "run_on_startup": true
+    }
+  ],
+  "checkpoint_recover": "recover.ts",
+  "hooks": {
+    "ingest": "index.ts"
+  }
+}
+```
 
 ---
 
-### 4.4 Cross-Extension Messaging (`lib/messages.ts`, `sdk/messages.ts`, `lib/messages.types.ts`)
+## 4. Configuration & Settings Hot-Reloading
 
-Extensions can interact without direct file coupling using the messaging bus.
-
-#### Communication Styles
-1. **Request / Response**: `await sdk.messages.request(channel, payload, options)`
-   - Single handler matching via predicate `canHandle(payload)` and priority order.
-   - Timeout enforcement (`timeoutMs`, default 30s).
-   - Point-to-point targeting (`target: "extension-name"`).
-2. **Publish / Subscribe Events**: `await sdk.messages.publish(channel, payload)`
-   - Concurrent broadcast via `Promise.allSettled` to ensure listener error isolation.
-
-#### Built-in Type-Safe Channels
-
-| Channel | Kind | Purpose |
-|---|---|---|
-| `file:process` | Request | Parse single file (or batch if `files`/`filePaths` provided) |
-| `files:process` *(alias `file:process-batch`)* | Request | Bulk file parsing adhering to the 2-stage GPU optimization |
-| `file:can-process` | Request | Discover if any extension can process a given file path/type |
-| `files:can-process` | Request | Bulk capability check for an array of file paths |
-| `content:summarize` | Request | Centralized text summarization via Chat LLM |
-| `content:summarize-batch` | Request | Bulk text summarization via Chat LLM |
-| `source:ingested` | Event | Broadcast whenever a source document is committed to DB |
-| `graph:link-entities` | Request | Establish cross-extension relationships between entities |
-| `system:backup` | Request | Trigger SQLite hot backup |
-| `search:query` | Request | Execute unified semantic/hybrid searches |
-
-Arbitrary string channels (e.g. `editor:sync`, `custom:action`) are also supported with generic type parameters.
+- **On-The-Fly Reading**: `SettingsManager` in `sdk/settings.ts` reads `settings.json` freshly from disk on every invocation of `.get()` or `.getAll()`. There is no persistent in-memory cache.
+- **Dynamic CLI Updates**: Changes made through `settings set` (or the interactive daemon CLI) write directly to `settings.json` and are immediately visible to all running extension routines without restarting the host process.
+- **Validation Schema**: Always pair settings with `settings.help.json` defining `type`, `description`, `default`, `range` (min/max), and optional `possibleValues`.
 
 ---
 
-### 4.5 Search & Retrieval Engine (`sdk/search.ts`)
+## 5. Cross-Extension Messaging
 
-The search engine supports three execution modes:
+Extensions should never directly import files or internal classes from other extensions. Instead, use the message bus:
 
-1. **Hybrid Search (Default / Recommended)**:
-   - Queries vector embeddings and BM25 index concurrently.
-   - Fuses results using **Reciprocal Rank Fusion (RRF)** (default, $k=60$), normalized linear scoring, or custom scoring functions.
-   - Configurable weights (`vectorWeight: 0.7`, `bm25Weight: 0.3`).
-2. **Vector Only Search**:
-   - Computes query vector (or accepts pre-existing chunk ID for KNN chunk-to-chunk search).
-   - Queries `vector_index` using `vec_distance_cosine()`.
-   - Filters by similarity threshold (`minSimilarity`).
-3. **BM25 Only Search**:
-   - Extracts keywords using Unicode token matching and stopword filtering (`stopword` package + `"not"` handling).
-   - Queries `chunks_fts` with disjunctive or sum-scored fusion across extracted keywords.
-   - Falls back to raw tokens if all query terms are stopwords (e.g. "To be or not to be").
-
----
-
-### 4.6 Extension Specifications & Lifecycle
-
-An extension lives in `extensions/<name>/` and adheres to `EXTENSION_SYSTEM.md`:
-
-1. **`manifest.json`**:
-   ```json
-   {
-     "name": "my-extension",
-     "namespace": "my-ns",
-     "setup_script": "setup.ts",
-     "checkpoint_recover": "recover.ts",
-     "crons": [{ "schedule": "*/15 * * * *", "script": "index.ts" }]
-   }
-   ```
-2. **Settings**:
-   - `settings.json`: Default key-value pairs.
-   - `settings.help.json`: Descriptions, constraints, validation types (`string`, `number`, `boolean`, `array`).
-3. **`setup.ts`**: Run once on system boot to register cross-extension message handlers.
-4. **`index.ts`**: Invoked by cron or manual triggers to execute tasks.
-5. **`recover.ts`**: Invoked on boot when unfinished checkpoints exist for this extension.
-
----
-
-## 5. Development Conventions & Rules for Agents
-
-When editing or extending Shale, strictly adhere to these rules:
-
-### 1. SQLite Queries & Multiline Strings
-In Bun SQLite, passing a multiline template string with a leading newline to `db.run(\`\n...\`)` can silently treat the first statement as a blank no-op. Always `.trim()` SQL strings or use `db.query(...).run()`.
-
-### 2. Two-Phase GPU Pattern Compliance
-Never interleave Chat and Embedding calls. If you write code that processes items in batches:
-- Run all LLM queries in Phase 1 (with `deferEmbedding: true`).
-- Execute a single batch embedding call in Phase 2 (`sdk.embedBatch(chunks)`).
-
-### 3. Mocking Embeddings in Tests
-In `bun:test`, mock OpenAI endpoints must inspect `body.input`. If `body.input` is an array (e.g. 2 or 6 chunks), return an array of `body.input.length` embeddings. Returning a single embedding when an array is requested causes `zero-length vectors are not supported` errors.
-
-### 4. Stopwords
-The `stopword` package's English dictionary intentionally omits `"not"`. Shale's keyword extractor uses `DEFAULT_STOP_WORDS = new Set([...eng, "not"])`. Keep this intact so search tests and keyword fallbacks work correctly.
-
-### 5. Ambient Proxies & SDK Scope
-Extensions can use either the explicit `sdk` argument or the ambient proxy exports:
+### Request / Response (Point-to-Point)
 ```typescript
-import { ingest, search, state, messages, logger } from "@shale/sdk";
+// Sender
+const result = await sdk.messages.request("file:process", {
+  filePath: "/path/to/diagram.png",
+  options: { deferEmbedding: true },
+});
+
+// Receiver (in extension index.ts)
+sdk.messages.handle("file:process", async (req) => {
+  return await processFile(req.filePath, req.options);
+}, {
+  priority: 10,
+  canHandle: (req) => isImageFile(req.filePath),
+});
 ```
-These proxies automatically resolve to the active extension's context using Bun's `AsyncLocalStorage` (`sdkStorage`).
+
+### Event Broadcasting (Pub / Sub)
+```typescript
+// Publisher
+await sdk.messages.publish("source:ingested", {
+  sourceId: "source-123",
+  namespace: "obsidian",
+});
+
+// Subscriber
+sdk.messages.on("source:ingested", async (event) => {
+  console.log("Source ingested:", event.sourceId);
+});
+```
 
 ---
 
-## 6. Common Commands & Workflows
+## 6. CLI & Operations
 
-### Run Test Suite
+### Standalone Settings CLI
 ```bash
-# Run all 17 test suites (must be 100% passing)
-bun test
+# List all extensions and their settings status
+bun run settings list-extensions
 
-# Run a specific test suite
-bun test tests/process-image-extension.test.ts
-bun test tests/cross-extension-messaging.test.ts
-bun test tests/search.test.ts
-```
-
-### Manage Extension Settings
-```bash
-# List all settings for an extension
+# View settings for an extension
 bun run settings list obsidian
 
 # Describe a specific setting
@@ -295,11 +155,42 @@ bun run settings describe obsidian includeImages
 bun run settings set obsidian includeImages true
 ```
 
-### Launch Host & Visualizer
+### Launch Host & Interactive Daemon CLI
+When starting the host daemon, an interactive CLI runs over `process.stdin`:
 ```bash
-# Run Shale host daemon (loads extensions, starts HTTP /ingest on :7425)
+# Run Shale host daemon (loads extensions, starts HTTP /ingest on :7425, opens CLI)
 bun run main/index.ts
 
+# Optional flags:
+bun run main/index.ts --run-all-cron   # Run all crons once on boot
+bun run main/index.ts --no-cli         # Disable interactive CLI (headless/background mode)
+```
+
+#### Running Commands in the Daemon CLI:
+- **Cron Commands**:
+  - **`cron list`** (or `crons`): List all registered cron jobs with extension names, schedules, and scripts.
+  - **`cron run <name>`** (or `run <name>`, `trigger <name>`): Manually trigger a specific registered cron job by name or extension ID.
+  - **`cron run all`** (or `run all`): Trigger all registered cron jobs sequentially.
+- **Extension Settings Commands**:
+  - **`settings list-extensions`** (or `settings extensions`): List discovered extensions and settings file status.
+  - **`settings list <extension>`** (or `settings ls <extension>`): Display all active settings for an extension.
+  - **`settings get <extension> [key]`**: Retrieve a specific setting value or formatted JSON of all settings.
+  - **`settings set <extension> <key> <value>`**: Update a setting with immediate validation against `settings.help.json` and hot-reload.
+  - **`settings describe <extension> [key]`**: Display parameter specifications, types, defaults, ranges, and allowed options.
+  - **`settings reset <extension> [key]`**: Reset a specific setting or all settings to defaults defined in `settings.help.json`.
+  - **`settings tui [extension]`**: Launch interactive Clack Terminal User Interface (TUI).
+  - **`settings`** (or `settings help`): Display extension settings command reference.
+- **Host & System Commands**:
+  - **`status`**: Inspect host daemon status, port, uptime, memory, and loaded extensions.
+  - **`help`** (or `?`): Show list of available commands.
+  - **`exit`** (or `quit`): Gracefully shut down the daemon.
+
+#### Typing Suggestions & Tab Autocompletion:
+- **Real-time Suggestions**: As you type into the interactive CLI prompt in a terminal, matching command suggestions appear automatically in muted gray ghost text (`shale> sett` → `ings`).
+- **Tab Autocompletion**: Pressing `Tab` (or `Right Arrow` at the end of the line) instantly accepts and autocompletes the active suggestion into your command buffer.
+
+### Launch Visualizer
+```bash
 # Launch knowledge graph visualizer web server
 bun run scripts/serve-visualizer.ts
 ```

@@ -17,7 +17,7 @@ A Chrome extension to ingest active web pages, browser history, bookmarks, and b
   - Manual trigger button available anytime for testing, partial re-syncs, or recovering from connection errors.
   - "Reset Onboarding State" button to easily reset sync flags for development and testing.
 - **Live Active Page Sync**: Captures pages as you browse, extracts clean readable content, and sends them to the Shale server.
-- **Explicit Session Grouping**: Tracks navigation trails and clusters page visits within cohesive research sessions (`WebSession`).
+- **Explicit Session Grouping**: Tracks real navigation trails within cohesive research sessions (`WebSession`). Manual captures and open-tab snapshots are indexed without being mistaken for navigation.
 - **History Sync**: Ingests your recent browser history with domain relationships and deduplication.
 - **Bookmarks Sync**: Extracts your bookmark hierarchy into `BookmarkFolder` knowledge graph entities.
 - **Privacy & Collision Avoidance**: Automatically excludes social media apps (Twitter/X, Reddit, Instagram, Facebook, TikTok, LinkedIn) and private sites (Google Account login, webmail, banking) with customizable rules.
@@ -56,6 +56,8 @@ When you first open the extension popup:
 - **History:** URL, title, last visit time, visit count, and typed count.
 
 Chrome's bookmarks and history APIs do not provide archived page HTML or images. To capture rich content for those URLs, open the pages and use **Capture this page** or **Capture open tabs**.
+
+Page captures, history records, and bookmarks are stored as separate source records, while all three point to the same canonical URL node in the graph. This preserves rich captured content during later history/bookmark syncs. Session state also survives Manifest V3 service-worker restarts.
 
 ---
 

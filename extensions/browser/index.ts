@@ -8,6 +8,7 @@ import {
 } from "./ingest-queue";
 import { processBrowserPayload, processTabsBatch } from "./ingest-processor";
 import type { PageVisitPayload } from "./types";
+import { normalizeUrl } from "./filter";
 
 export interface SessionAggregatorResult {
   finalizedSessionTitle: string | null;
@@ -39,7 +40,7 @@ export async function run(
       `Parsing ${queued.length} queued browser payload(s) as one cron batch...`,
     );
     const processedIds = new Set<string>();
-    const pages: PageVisitPayload[] = [];
+    const pageByUrl = new Map<string, PageVisitPayload>();
     const pageIds = new Set<string>();
     const others: typeof queued = [];
     for (const item of queued) {
@@ -47,12 +48,20 @@ export async function run(
         item.payload.type === "page_visit" ||
         item.payload.type === "active_page"
       ) {
-        pages.push(item.payload);
+        const normalized = normalizeUrl(item.payload.url);
+        const key = normalized.isValid ? normalized.cleanUrl : item.payload.url;
+        const existing = pageByUrl.get(key);
+        if (!existing || (item.payload.visitedAt ?? 0) >= (existing.visitedAt ?? 0)) {
+          pageByUrl.set(key, item.payload);
+        }
         pageIds.add(item.id);
       } else {
         others.push(item);
       }
     }
+    const pages = [...pageByUrl.values()].sort(
+      (a, b) => (a.visitedAt ?? 0) - (b.visitedAt ?? 0),
+    );
     try {
       if (pages.length) {
         await processTabsBatch(sdk, { type: "tabs_batch", pages }, settings);
