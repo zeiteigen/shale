@@ -135,6 +135,10 @@ function createTestDb(): Database {
     ) STRICT;
   `);
 
+  db.run(`CREATE TABLE checkpoints (
+    id TEXT PRIMARY KEY, extension_id TEXT NOT NULL, checkpoint_key TEXT NOT NULL DEFAULT 'default',
+    data TEXT NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'queued'
+  ) STRICT;`);
   return db;
 }
 
@@ -273,31 +277,31 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
   describe("4. End-to-End Vault Processing via SDK", () => {
     it("processes vault notes, graph edges, and watermarks", async () => {
       const db = createTestDb();
-      const mockFetch: typeof fetch = async () => {
+      const mockFetch: import("../lib/ai").FetchFn = async (_url, init) => {
+        if (!JSON.parse(String(init?.body)).input)
+          return Response.json({ choices: [{ message: { content: "" } }] });
         return new Response(
           JSON.stringify({
             object: "list",
-            data: [
-              {
-                object: "embedding",
-                index: 0,
-                embedding: new Array(1536).fill(0.01),
-              },
-              {
-                object: "embedding",
-                index: 1,
-                embedding: new Array(1536).fill(0.02),
-              },
-            ],
+            data: Array.from(
+              { length: JSON.parse(String(init?.body)).input.length },
+              (_, index) => ({ index, embedding: new Array(1536).fill(0.01) }),
+            ),
             model: "mock-model",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
-        timeoutMs: 1000,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+            timeoutMs: 1000,
+          },
+        },
       });
 
       // Create a test vault folder
@@ -335,7 +339,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
         .query<{
           type: string;
           title: string;
-        }>("SELECT type, title FROM sources ORDER BY type ASC, title ASC")
+        }, []>("SELECT type, title FROM sources ORDER BY type ASC, title ASC")
         .all();
 
       // Should have markdown_note
@@ -345,7 +349,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
 
       // Verify Graph Edges
       const edges = db
-        .query<{ source: string; target: string; relation: string }>(
+        .query<{ source: string; target: string; relation: string }, []>(
           `
           SELECT s.name AS source, t.name AS target, e.relation
           FROM edges e
@@ -398,26 +402,31 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
 
     it("processes vault using ambient SDK scope without passing sdk parameter", async () => {
       const db = createTestDb();
-      const mockFetch: typeof fetch = async () => {
+      const mockFetch: import("../lib/ai").FetchFn = async (_url, init) => {
+        if (!JSON.parse(String(init?.body)).input)
+          return Response.json({ choices: [{ message: { content: "" } }] });
         return new Response(
           JSON.stringify({
             object: "list",
-            data: [
-              {
-                object: "embedding",
-                index: 0,
-                embedding: new Array(1536).fill(0.05),
-              },
-            ],
+            data: Array.from(
+              { length: JSON.parse(String(init?.body)).input.length },
+              (_, index) => ({ index, embedding: new Array(1536).fill(0.05) }),
+            ),
             model: "mock-model",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
-        timeoutMs: 1000,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+            timeoutMs: 1000,
+          },
+        },
       });
 
       const vaultDir = mkdtempSync(join(tmpdir(), "vault-ambient-"));
@@ -444,7 +453,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       const source = db
         .query<{
           title: string;
-        }>("SELECT title FROM sources WHERE title = 'AmbientNote'")
+        }, []>("SELECT title FROM sources WHERE title = 'AmbientNote'")
         .get();
       expect(source?.title).toBe("AmbientNote");
     });
@@ -477,26 +486,31 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
 
     it("ingestFile invokes parseFile and performs SDK ingestion", async () => {
       const db = createTestDb();
-      const mockFetch: typeof fetch = async () => {
+      const mockFetch: import("../lib/ai").FetchFn = async (_url, init) => {
+        if (!JSON.parse(String(init?.body)).input)
+          return Response.json({ choices: [{ message: { content: "" } }] });
         return new Response(
           JSON.stringify({
             object: "list",
-            data: [
-              {
-                object: "embedding",
-                index: 0,
-                embedding: new Array(1536).fill(0.01),
-              },
-            ],
+            data: Array.from(
+              { length: JSON.parse(String(init?.body)).input.length },
+              (_, index) => ({ index, embedding: new Array(1536).fill(0.01) }),
+            ),
             model: "mock-model",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
-        timeoutMs: 1000,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+            timeoutMs: 1000,
+          },
+        },
       });
 
       const tempDir = mkdtempSync(join(tmpdir(), "ingest-test-"));
@@ -527,12 +541,12 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       const count = db
         .query<{
           count: number;
-        }>("SELECT COUNT(*) as count FROM sources WHERE title = 'IngestDoc'")
+        }, []>("SELECT COUNT(*) as count FROM sources WHERE title = 'IngestDoc'")
         .get();
       expect(count?.count).toBe(1);
     });
 
-    it("preserves stack trace order: processVault --> ingestFile --> parseFile", async () => {
+    it("reports unreadable files and retains their watermark for retry", async () => {
       const db = createTestDb();
       const sdk = createExtensionSDK("obsidian parser", "obsidian", db);
 
@@ -559,48 +573,46 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       };
 
       try {
-        await processVault(vaultInfo, sdk);
+        await expect(processVault(vaultInfo, sdk)).rejects.toThrow(
+          "watermark retained",
+        );
       } finally {
         chmodSync(unreadableMd, 0o666);
         console.error = originalError;
       }
 
       expect(capturedError).not.toBeNull();
-      const stack = capturedError!.stack ?? "";
-      expect(stack).toContain("parseFile");
-      expect(stack).toContain("ingestFile");
-      expect(stack).toContain("processVault");
-
-      const parseIndex = stack.indexOf("parseFile");
-      const ingestIndex = stack.indexOf("ingestFile");
-      const vaultIndex = stack.indexOf("processVault");
-
-      expect(parseIndex).toBeLessThan(ingestIndex);
-      expect(ingestIndex).toBeLessThan(vaultIndex);
+      expect(capturedError!.message).toContain("Unreadable.md");
+      expect(sdk.state.getWatermark(`vault:${tempDir}:mtime`)).toBeNull();
     });
 
     it("handles stub notes with only frontmatter or empty body cleanly without throwing", async () => {
       const db = createTestDb();
-      const mockFetch: typeof fetch = async () => {
+      const mockFetch: import("../lib/ai").FetchFn = async (_url, init) => {
+        if (!JSON.parse(String(init?.body)).input)
+          return Response.json({ choices: [{ message: { content: "" } }] });
         return new Response(
           JSON.stringify({
             object: "list",
-            data: [
-              {
-                object: "embedding",
-                index: 0,
-                embedding: new Array(1536).fill(0.01),
-              },
-            ],
+            data: Array.from(
+              { length: JSON.parse(String(init?.body)).input.length },
+              (_, index) => ({ index, embedding: new Array(1536).fill(0.01) }),
+            ),
             model: "mock-model",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
-        timeoutMs: 1000,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+            timeoutMs: 1000,
+          },
+        },
       });
 
       const tempDir = mkdtempSync(join(tmpdir(), "stub-test-"));
@@ -690,7 +702,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
       let capturedChatPrompt = "";
       let capturedImageInput: any = null;
 
-      const dualMockFetch: typeof fetch = async (url: any, init: any) => {
+      const dualMockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = String(url);
         const body = init?.body ? JSON.parse(init.body) : {};
 
@@ -742,9 +754,15 @@ Vector clocks and conflict-free replicated data types track causality across asy
         );
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: dualMockFetch,
-        timeoutMs: 2000,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: dualMockFetch,
+            timeoutMs: 2000,
+          },
+        },
       });
 
       const tempDir = mkdtempSync(join(tmpdir(), "img-test-"));
@@ -788,7 +806,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
         .query<{
           type: string;
           title: string;
-        }>("SELECT type, title FROM sources WHERE title = 'architecture.png'")
+        }, []>("SELECT type, title FROM sources WHERE title = 'architecture.png'")
         .get();
       expect(source?.type).toBe("image");
 
@@ -797,7 +815,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
           chunk_index: number;
           chunk_type: string;
           text_content: string;
-        }>(
+        }, []>(
           "SELECT chunk_index, chunk_type, text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'architecture.png') ORDER BY chunk_index ASC",
         )
         .all();
@@ -810,7 +828,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
 
     it("connects notes to images with FEATURES_IMAGE edge when referenced in notes", async () => {
       const db = createTestDb();
-      const mockFetch: typeof fetch = async (url: any, init: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const body = init?.body ? JSON.parse(init.body) : {};
         const inputCount = Array.isArray(body.input) ? body.input.length : 1;
         return new Response(
@@ -826,9 +844,15 @@ Vector clocks and conflict-free replicated data types track causality across asy
         );
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
-        timeoutMs: 1000,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+            timeoutMs: 1000,
+          },
+        },
       });
 
       const tempDir = mkdtempSync(join(tmpdir(), "feat-img-test-"));
@@ -860,7 +884,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
       const db = createTestDb();
       let capturedPrompt = "";
 
-      const mockFetch: typeof fetch = async (url: any, init: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = String(url);
         const body = init?.body ? JSON.parse(init.body) : {};
 
@@ -898,9 +922,15 @@ Vector clocks and conflict-free replicated data types track causality across asy
         );
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
-        timeoutMs: 1500,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+            timeoutMs: 1500,
+          },
+        },
       });
 
       const tempDir = mkdtempSync(join(tmpdir(), "expand-test-"));
@@ -935,7 +965,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
           chunk_index: number;
           chunk_type: string;
           text_content: string;
-        }>(
+        }, []>(
           "SELECT chunk_index, chunk_type, text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'Legitimacy') ORDER BY chunk_index ASC",
         )
         .all();
@@ -959,7 +989,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
       const db = createTestDb();
       let chatCalls = 0;
 
-      const mockFetch: typeof fetch = async (url: any, init: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = String(url);
         if (urlStr.includes("/chat/completions")) {
           chatCalls++;
@@ -980,48 +1010,71 @@ Vector clocks and conflict-free replicated data types track causality across asy
         return new Response(
           JSON.stringify({
             object: "list",
-            data: [{ object: "embedding", index: 0, embedding: new Array(1536).fill(0.01) }],
+            data: Array.from(
+              { length: JSON.parse(String(init?.body)).input.length },
+              (_, index) => ({ index, embedding: new Array(1536).fill(0.01) }),
+            ),
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+          },
+        },
       });
 
       const tempDir = mkdtempSync(join(tmpdir(), "word-limit-test-"));
 
       // 1. Long note with 260 words (>= 250 words)
-      const longWords = Array.from({ length: 260 }, (_, i) => `word${i}`).join(" ");
+      const longWords = Array.from({ length: 260 }, (_, i) => `word${i}`).join(
+        " ",
+      );
       const longNotePath = join(tempDir, "LongNote.md");
       writeFileSync(longNotePath, longWords);
 
       const parsedLong = await parseFile(longNotePath, sdk);
       // Long note must NOT be expanded
       expect(countWords(longWords)).toBe(260);
-      expect(parsedLong.chunks.some((c) => c.heading?.includes("Expanded Context"))).toBe(false);
+      expect(
+        parsedLong.chunks.some((c) => c.heading?.includes("Expanded Context")),
+      ).toBe(false);
       expect(chatCalls).toBe(0);
 
       // 2. Note with exactly 250 words (>= 250 words)
-      const exact250Words = Array.from({ length: 250 }, (_, i) => `term${i}`).join(" ");
+      const exact250Words = Array.from(
+        { length: 250 },
+        (_, i) => `term${i}`,
+      ).join(" ");
       const exact250NotePath = join(tempDir, "Exact250Note.md");
       writeFileSync(exact250NotePath, exact250Words);
 
       const parsed250 = await parseFile(exact250NotePath, sdk);
       expect(countWords(exact250Words)).toBe(250);
-      expect(parsed250.chunks.some((c) => c.heading?.includes("Expanded Context"))).toBe(false);
+      expect(
+        parsed250.chunks.some((c) => c.heading?.includes("Expanded Context")),
+      ).toBe(false);
       expect(chatCalls).toBe(0);
 
       // 3. Short note with 50 words (< 250 words)
-      const shortWords = Array.from({ length: 50 }, (_, i) => `concept${i}`).join(" ");
+      const shortWords = Array.from(
+        { length: 50 },
+        (_, i) => `concept${i}`,
+      ).join(" ");
       const shortNotePath = join(tempDir, "ShortNote.md");
       writeFileSync(shortNotePath, shortWords);
 
       const parsedShort = await parseFile(shortNotePath, sdk);
       // Short note MUST be expanded
       expect(countWords(shortWords)).toBe(50);
-      expect(parsedShort.chunks.some((c) => c.heading?.includes("Expanded Context"))).toBe(true);
+      expect(
+        parsedShort.chunks.some((c) => c.heading?.includes("Expanded Context")),
+      ).toBe(true);
       expect(chatCalls).toBe(1);
     });
 
@@ -1029,7 +1082,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
       const db = createTestDb();
       const capturedSystemPrompts: string[] = [];
 
-      const mockFetch: typeof fetch = async (url: any, init: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const body = init?.body ? JSON.parse(init.body) : {};
         if (body.messages) {
           const sys = body.messages.find((m: any) => m.role === "system");
@@ -1050,11 +1103,19 @@ Vector clocks and conflict-free replicated data types track causality across asy
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
-        return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
+        return new Response(JSON.stringify({ object: "list", data: [] }), {
+          status: 200,
+        });
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+          },
+        },
       });
 
       // Check helper calculations
@@ -1087,7 +1148,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
     it("allows note chunking/parsing to execute with zero embedding calls", async () => {
       let embeddingCallsMade = 0;
 
-      const mockFetch: typeof fetch = async (url: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         if (String(url).includes("/embeddings")) {
           embeddingCallsMade++;
         }
@@ -1122,15 +1183,21 @@ Furthermore, batches of chunks can be embedded together rather than one note at 
       const db = createTestDb();
       let embeddingCalls = 0;
 
-      const mockFetch: typeof fetch = async () => {
+      const mockFetch: import("../lib/ai").FetchFn = async () => {
         embeddingCalls++;
         return new Response(JSON.stringify({ object: "list", data: [] }), {
           status: 200,
         });
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+          },
+        },
       });
 
       const tempDir = mkdtempSync(join(tmpdir(), "precomputed-test-"));
@@ -1152,7 +1219,7 @@ Furthermore, batches of chunks can be embedded together rather than one note at 
       const db = createTestDb();
       const callLog: Array<"chat" | "embedding"> = [];
 
-      const mockFetch: typeof fetch = async (url: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = url.toString();
         if (urlStr.includes("/chat/completions")) {
           callLog.push("chat");
@@ -1174,20 +1241,13 @@ Furthermore, batches of chunks can be embedded together rather than one note at 
           return new Response(
             JSON.stringify({
               object: "list",
-              data: [
-                {
-                  index: 0,
+              data: Array.from(
+                { length: JSON.parse(String(init?.body)).input.length },
+                (_, index) => ({
+                  index,
                   embedding: new Array(4096).fill(0.01),
-                },
-                {
-                  index: 1,
-                  embedding: new Array(4096).fill(0.02),
-                },
-                {
-                  index: 2,
-                  embedding: new Array(4096).fill(0.03),
-                },
-              ],
+                }),
+              ),
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
@@ -1195,8 +1255,14 @@ Furthermore, batches of chunks can be embedded together rather than one note at 
         return new Response("Not found", { status: 404 });
       };
 
-      const sdk = createExtensionSDK("obsidian parser", "obsidian", db, {
-        fetchFn: mockFetch,
+      const sdk = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+          },
+        },
       });
 
       const tempDir = mkdtempSync(join(tmpdir(), "twophase-vault-"));

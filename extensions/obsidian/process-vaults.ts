@@ -21,8 +21,6 @@ import {
   ingestFile,
   ingestImageFile,
   embedContextualChunks,
-  generateFallbackEmbedding,
-  generateFallbackEmbeddings,
   buildNoteGraphElements,
   type IngestFileResult,
   type IngestImageResult,
@@ -56,8 +54,6 @@ export {
   ingestFile,
   ingestImageFile,
   embedContextualChunks,
-  generateFallbackEmbedding,
-  generateFallbackEmbeddings,
   buildNoteGraphElements,
   type IngestFileResult,
   type IngestImageResult,
@@ -198,8 +194,10 @@ export function filterModifiedFiles(
  * 1. Discovers and filters modified markdown notes and images.
  */
 export interface PreparedVault {
+  checkpointId?: string;
   vault: VaultInfo;
   maxMtime: number;
+  preparationFailed?: boolean;
   vaultEntityName: string;
   entities: Array<{ name: string; type: string }>;
   edges: Array<{ source: string; target: string; relation: string }>;
@@ -301,36 +299,25 @@ export async function prepareVault(
           edges: fileResult.edges,
         });
 
-        // If the note has an AI summary / expanded chunk, save a checkpoint for crash recovery
-        const hasExpandedSummary = fileResult.parsedFile.chunks.some((c) =>
-          c.heading?.includes("(Expanded Context)"),
+        sdk.saveCheckpoint(
+          {
+            type: "ai_summary",
+            vault: { name: vault.name, path: vault.path },
+            filePath,
+            noteTitle: fileResult.parsedFile.noteTitle,
+            parsedFile: fileResult.parsedFile,
+            entities: [
+              { name: vaultEntityName, type: "Vault" },
+              ...fileResult.entities,
+            ],
+            edges: fileResult.edges,
+            mtime: statSync(filePath).mtimeMs,
+          },
+          { id: `ai_summary:${filePath}`, key: `ai_summary:${filePath}` },
         );
-        if (hasExpandedSummary && sdk?.saveCheckpoint) {
-          try {
-            sdk.saveCheckpoint(
-              {
-                type: "ai_summary",
-                vault: { name: vault.name, path: vault.path },
-                filePath,
-                noteTitle: fileResult.parsedFile.noteTitle,
-                noteUri: fileResult.parsedFile.noteUri,
-                updatedAt: fileResult.parsedFile.updatedAt,
-                parsedFile: fileResult.parsedFile,
-                entities: [{ name: vaultEntityName, type: "Vault" }, ...fileResult.entities],
-                edges: fileResult.edges,
-                mtime: statSync(filePath).mtimeMs,
-              },
-              { id: `ai_summary:${filePath}`, key: `ai_summary:${filePath}` },
-            );
-          } catch (cpErr) {
-            sdk.logger.warn(
-              `Failed to save checkpoint for note "${fileResult.parsedFile.noteTitle}":`,
-              cpErr,
-            );
-          }
-        }
       }
     } catch (noteErr) {
+      prepared.preparationFailed = true;
       sdk.logger.error(`Failed to process note at ${filePath}:`, noteErr);
     }
   }
@@ -375,11 +362,43 @@ export async function prepareVault(
             });
           }
         } catch (imgErr) {
+          prepared.preparationFailed = true;
           sdk.logger.error(`Failed to process image at ${imagePath}:`, imgErr);
         }
       }
     }
   }
+
+  if (prepared.parsedImages.length !== modifiedImages.length)
+    prepared.preparationFailed = true;
+  for (const image of prepared.parsedImages) {
+    sdk.saveCheckpoint(
+      {
+        type: "image_analysis",
+        vault: { name: vault.name, path: vault.path },
+        filePath: image.filePath,
+        parsedImage: image.parsedImage,
+        entities: image.entities,
+        edges: image.edges,
+        mtime: statSync(image.filePath).mtimeMs,
+      },
+      {
+        id: `image_analysis:${image.filePath}`,
+        key: `image_analysis:${image.filePath}`,
+      },
+    );
+  }
+
+  prepared.checkpointId = `vault_batch:${vault.path}`;
+  sdk.saveCheckpoint(
+    {
+      type: "vault_batch",
+      vault: { name: vault.name, path: vault.path },
+      maxMtime,
+      preparationFailed: prepared.preparationFailed ?? false,
+    },
+    { id: prepared.checkpointId, key: prepared.checkpointId },
+  );
 
   sdk.logger.log(
     `[Phase 1: Chat Model] Finished Chat model operations for "${vault.name}" (${prepared.parsedNotes.length} note(s), ${prepared.parsedImages.length} image(s)).`,
@@ -400,6 +419,8 @@ export async function finalizeVault(
   const sdk = sdkOverride ?? getSDK();
 
   if (prepared.parsedNotes.length === 0 && prepared.parsedImages.length === 0) {
+    if (prepared.preparationFailed)
+      throw new Error("Vault preparation failed; watermark retained for retry");
     return {
       vaultName: prepared.vault.name,
       notesProcessed: 0,
@@ -417,6 +438,8 @@ export async function finalizeVault(
   let totalChunksCreated = 0;
   let notesProcessed = 0;
   let imagesProcessed = 0;
+  let failures = prepared.preparationFailed ? 1 : 0;
+  const resolvedCheckpoints: string[] = [];
 
   const entities: Array<{ name: string; type: string }> = [
     ...prepared.entities,
@@ -456,11 +479,9 @@ export async function finalizeVault(
       edges.push(...note.edges);
       notesProcessed++;
 
-      // Successfully ingested into database; resolve/delete checkpoint
-      try {
-        sdk.deleteCheckpoint?.(`ai_summary:${note.filePath}`);
-      } catch {}
+      resolvedCheckpoints.push(`ai_summary:${note.filePath}`);
     } catch (err) {
+      failures++;
       sdk.logger.error(
         `Failed to embed and ingest note at ${note.filePath}:`,
         err,
@@ -506,7 +527,9 @@ export async function finalizeVault(
       entities.push(...img.entities);
       edges.push(...img.edges);
       imagesProcessed++;
+      resolvedCheckpoints.push(`image_analysis:${img.filePath}`);
     } catch (err) {
+      failures++;
       sdk.logger.error(
         `Failed to embed and ingest image at ${img.filePath}:`,
         err,
@@ -516,12 +539,18 @@ export async function finalizeVault(
 
   // 3. Commit Graph entities & edges
   const edgesCreated = commitVaultGraph(sdk, entities, edges);
+  for (const id of resolvedCheckpoints) sdk.deleteCheckpoint(id);
+  if (failures)
+    throw new Error(
+      `Vault finalization has ${failures} failure(s); watermark retained for retry`,
+    );
 
   // 4. Advance Watermark
   if (prepared.maxMtime > 0) {
     const watermarkKey = `vault:${prepared.vault.path}:mtime`;
     sdk.state.setWatermark(String(prepared.maxMtime), watermarkKey);
   }
+  if (prepared.checkpointId) sdk.deleteCheckpoint(prepared.checkpointId);
 
   sdk.logger.log(
     `Vault "${prepared.vault.name}" processed successfully (${notesProcessed} notes, ${imagesProcessed} images). Watermark advanced to ${prepared.maxMtime}.`,
@@ -548,8 +577,10 @@ export async function processVault(
   forceAll: boolean = false,
 ): Promise<ProcessVaultResult> {
   const sdk = sdkOverride ?? getSDK();
-  const prepared = await prepareVault(vault, sdk, forceAll);
-  return finalizeVault(prepared, sdk);
+  return sdk.models.batch(
+    () => prepareVault(vault, sdk, forceAll),
+    (prepared) => finalizeVault(prepared, sdk),
+  );
 }
 
 export default processVault;

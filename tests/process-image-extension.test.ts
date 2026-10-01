@@ -1,11 +1,7 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import * as sqliteVec from "sqlite-vec";
-import {
-  mkdtempSync,
-  writeFileSync,
-  readFileSync,
-} from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -200,15 +196,19 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       let capturedPrompt = "";
       let capturedImageUrl = "";
 
-      const mockFetch: typeof fetch = async (url: any, init: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = String(url);
         const body = init?.body ? JSON.parse(init.body) : {};
 
         if (urlStr.includes("/chat/completions") || body.messages) {
           const userMsg = body.messages.find((m: any) => m.role === "user");
           if (Array.isArray(userMsg?.content)) {
-            const textPart = userMsg.content.find((p: any) => p.type === "text");
-            const imgPart = userMsg.content.find((p: any) => p.type === "image_url");
+            const textPart = userMsg.content.find(
+              (p: any) => p.type === "text",
+            );
+            const imgPart = userMsg.content.find(
+              (p: any) => p.type === "image_url",
+            );
             capturedPrompt = textPart?.text ?? "";
             capturedImageUrl = imgPart?.image_url?.url ?? "";
           }
@@ -247,16 +247,14 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       };
 
       // Create process-image SDK
-      const imageExtSDK = createExtensionSDK(
-        "process-image",
-        "images",
-        db,
-        { fetchFn: mockFetch, timeoutMs: 2000 },
-        undefined,
-        "process-image",
-        join(import.meta.dir, "../extensions/process-image"),
-        bus,
-      );
+      const imageExtSDK = createExtensionSDK("process-image", {
+        namespace: "images",
+        database: db,
+        models: { connection: { fetchFn: mockFetch, timeoutMs: 2000 } },
+        extensionName: "process-image",
+        extensionDir: join(import.meta.dir, "../extensions/process-image"),
+        messageBus: bus,
+      });
 
       // Register process-image handlers on bus
       await setupProcessImage(imageExtSDK);
@@ -300,9 +298,13 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       expect(response.description).toContain("MapReduce execution graph");
       expect(response.chunks.length).toBe(2);
       expect(response.chunks[0].chunk_type).toBe("verbatim");
-      expect(response.chunks[0].text_content).toContain("Directed acyclic graph with three tiers");
+      expect(response.chunks[0].text_content).toContain(
+        "Directed acyclic graph with three tiers",
+      );
       expect(response.chunks[1].chunk_type).toBe("synthetic");
-      expect(response.chunks[1].text_content).toContain("MapReduce execution graph");
+      expect(response.chunks[1].text_content).toContain(
+        "MapReduce execution graph",
+      );
 
       // Verify prompt coverage
       expect(capturedPrompt).toContain("Physical layout and visual elements");
@@ -310,7 +312,11 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       expect(capturedImageUrl).toContain("data:image/png;base64,");
 
       // Verify graph entity and edge
-      expect(response.entities.some((e) => e.name === "data_pipeline.png" && e.type === "Image")).toBe(true);
+      expect(
+        response.entities.some(
+          (e) => e.name === "data_pipeline.png" && e.type === "Image",
+        ),
+      ).toBe(true);
       expect(
         response.edges.some(
           (e) =>
@@ -327,7 +333,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       const bus = createMessageBus();
       const db = createTestDb();
 
-      const mockFetch: typeof fetch = async (url: any, init: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = String(url);
         const body = init?.body ? JSON.parse(init.body) : {};
 
@@ -366,29 +372,25 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       };
 
       // 1. Initialize process-image extension
-      const imageExtSDK = createExtensionSDK(
-        "process-image",
-        "images",
-        db,
-        { fetchFn: mockFetch, timeoutMs: 2000 },
-        undefined,
-        "process-image",
-        join(import.meta.dir, "../extensions/process-image"),
-        bus,
-      );
+      const imageExtSDK = createExtensionSDK("process-image", {
+        namespace: "images",
+        database: db,
+        models: { connection: { fetchFn: mockFetch, timeoutMs: 2000 } },
+        extensionName: "process-image",
+        extensionDir: join(import.meta.dir, "../extensions/process-image"),
+        messageBus: bus,
+      });
       await setupProcessImage(imageExtSDK);
 
       // 2. Initialize obsidian extension
-      const obsidianSDK = createExtensionSDK(
-        "obsidian parser",
-        "obsidian",
-        db,
-        { fetchFn: mockFetch, timeoutMs: 2000 },
-        undefined,
-        "obsidian parser",
-        join(import.meta.dir, "../extensions/obsidian"),
-        bus,
-      );
+      const obsidianSDK = createExtensionSDK("obsidian parser", {
+        namespace: "obsidian",
+        database: db,
+        models: { connection: { fetchFn: mockFetch, timeoutMs: 2000 } },
+        extensionName: "obsidian parser",
+        extensionDir: join(import.meta.dir, "../extensions/obsidian"),
+        messageBus: bus,
+      });
 
       const tempDir = mkdtempSync(join(tmpdir(), "obs-img-test-"));
       const imgPath = join(tempDir, "event_bus.png");
@@ -411,14 +413,18 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
 
       // Verify SQLite records
       const source = db
-        .query<{ type: string; title: string }>(
+        .query<{ type: string; title: string }, []>(
           "SELECT type, title FROM sources WHERE title = 'event_bus.png'",
         )
         .get();
       expect(source?.type).toBe("image");
 
       const chunks = db
-        .query<{ chunk_index: number; chunk_type: string; text_content: string }>(
+        .query<{
+          chunk_index: number;
+          chunk_type: string;
+          text_content: string;
+        }, []>(
           "SELECT chunk_index, chunk_type, text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'event_bus.png') ORDER BY chunk_index ASC",
         )
         .all();
@@ -454,7 +460,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
 
       // Verify in entities table
       const entity = db
-        .query<{ name: string; type: string }>(
+        .query<{ name: string; type: string }, []>(
           "SELECT name, type FROM entities WHERE name = 'event_bus.png'",
         )
         .get();
@@ -479,7 +485,16 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       );
       await setupProcessImage(imageExtSDK);
 
-      const callerSDK = createExtensionSDK("caller", "caller", db, undefined, undefined, undefined, undefined, bus);
+      const callerSDK = createExtensionSDK(
+        "caller",
+        "caller",
+        db,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        bus,
+      );
 
       const res = await callerSDK.messages.request("files:can-process", {
         filePaths: ["chart1.png", "photo.jpeg", "notes.md", "vector.svg"],
@@ -498,7 +513,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       const db = createTestDb();
       const callLog: string[] = [];
 
-      const mockFetch: typeof fetch = async (url: any, init: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = String(url);
         if (urlStr.includes("/chat/completions")) {
           callLog.push("chat");
@@ -508,7 +523,8 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
                 {
                   message: {
                     role: "assistant",
-                    content: "Physical Layout: Flow diagram. Underlying Meaning: Sequential processing logic.",
+                    content:
+                      "Physical Layout: Flow diagram. Underlying Meaning: Sequential processing logic.",
                   },
                 },
               ],
@@ -528,19 +544,26 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         return new Response("Not found", { status: 404 });
       };
 
-      const imageExtSDK = createExtensionSDK(
-        "process-image",
-        "images",
-        db,
-        { fetchFn: mockFetch },
-        undefined,
-        "process-image",
-        join(import.meta.dir, "../extensions/process-image"),
-        bus,
-      );
+      const imageExtSDK = createExtensionSDK("process-image", {
+        namespace: "images",
+        database: db,
+        models: { connection: { fetchFn: mockFetch } },
+        extensionName: "process-image",
+        extensionDir: join(import.meta.dir, "../extensions/process-image"),
+        messageBus: bus,
+      });
       await setupProcessImage(imageExtSDK);
 
-      const callerSDK = createExtensionSDK("caller", "caller", db, undefined, undefined, undefined, undefined, bus);
+      const callerSDK = createExtensionSDK(
+        "caller",
+        "caller",
+        db,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        bus,
+      );
 
       const tempDir = mkdtempSync(join(tmpdir(), "bulk-img-test-"));
       const img1 = join(tempDir, "img1.png");
@@ -584,7 +607,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       let batchEmbeddingCount = 0;
       let totalEmbedTextsReceived = 0;
 
-      const mockFetch: typeof fetch = async (url: any, init: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = String(url);
         const body = init?.body ? JSON.parse(init.body) : {};
 
@@ -596,7 +619,8 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
                 {
                   message: {
                     role: "assistant",
-                    content: "Physical Layout: Grid of nodes. Underlying Meaning: Network topology.",
+                    content:
+                      "Physical Layout: Grid of nodes. Underlying Meaning: Network topology.",
                   },
                 },
               ],
@@ -622,19 +646,26 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         return new Response("Not found", { status: 404 });
       };
 
-      const imageExtSDK = createExtensionSDK(
-        "process-image",
-        "images",
-        db,
-        { fetchFn: mockFetch },
-        undefined,
-        "process-image",
-        join(import.meta.dir, "../extensions/process-image"),
-        bus,
-      );
+      const imageExtSDK = createExtensionSDK("process-image", {
+        namespace: "images",
+        database: db,
+        models: { connection: { fetchFn: mockFetch } },
+        extensionName: "process-image",
+        extensionDir: join(import.meta.dir, "../extensions/process-image"),
+        messageBus: bus,
+      });
       await setupProcessImage(imageExtSDK);
 
-      const callerSDK = createExtensionSDK("caller", "caller", db, undefined, undefined, undefined, undefined, bus);
+      const callerSDK = createExtensionSDK(
+        "caller",
+        "caller",
+        db,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        bus,
+      );
 
       const tempDir = mkdtempSync(join(tmpdir(), "twophase-bulk-"));
       const imgA = join(tempDir, "nodeA.png");
@@ -686,7 +717,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       const bus = createMessageBus();
       const db = createTestDb();
 
-      const mockFetch: typeof fetch = async (url: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any) => {
         const urlStr = String(url);
         if (urlStr.includes("/chat/completions")) {
           return new Response(
@@ -695,7 +726,8 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
                 {
                   message: {
                     role: "assistant",
-                    content: "Physical Layout: Bar chart. Underlying Meaning: Revenue growth.",
+                    content:
+                      "Physical Layout: Bar chart. Underlying Meaning: Revenue growth.",
                   },
                 },
               ],
@@ -706,16 +738,14 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         return new Response("Not found", { status: 404 });
       };
 
-      const imageExtSDK = createExtensionSDK(
-        "process-image",
-        "images",
-        db,
-        { fetchFn: mockFetch },
-        undefined,
-        "process-image",
-        join(import.meta.dir, "../extensions/process-image"),
-        bus,
-      );
+      const imageExtSDK = createExtensionSDK("process-image", {
+        namespace: "images",
+        database: db,
+        models: { connection: { fetchFn: mockFetch } },
+        extensionName: "process-image",
+        extensionDir: join(import.meta.dir, "../extensions/process-image"),
+        messageBus: bus,
+      });
       await setupProcessImage(imageExtSDK);
 
       const obsidianSDK = createExtensionSDK(
@@ -735,7 +765,10 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       writeFileSync(chart1, "CHART1");
       writeFileSync(chart2, "CHART2");
 
-      const parsedBatch = await obsidianParseImageFilesBatch([chart1, chart2], obsidianSDK);
+      const parsedBatch = await obsidianParseImageFilesBatch(
+        [chart1, chart2],
+        obsidianSDK,
+      );
 
       expect(parsedBatch.length).toBe(2);
       expect(parsedBatch[0].imageTitle).toBe("revenue_q1.png");

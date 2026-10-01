@@ -1,4 +1,6 @@
 import type { ShaleSDK } from "@shale/sdk";
+import { acceptedLink } from "./link-decision";
+import { pairCheckpointId } from "./link-batch";
 import type {
   SourceCandidatePair,
   LLMLinkAnalysis,
@@ -190,7 +192,7 @@ export async function analyzeSourcePairWithLLM(
   sdk: ShaleSDK,
   options?: LLMAnalyzerOptions,
 ): Promise<DiscoveredLink | null> {
-  const checkpointId = `link_analysis:${pair.sourceA.id}:${pair.sourceB.id}`;
+  const checkpointId = pairCheckpointId(pair);
 
   // Check if this pair was already evaluated in a prior uncommitted checkpoint
   const existingCp = sdk.checkpoint
@@ -203,21 +205,7 @@ export async function analyzeSourcePairWithLLM(
       `Reusing checkpointed LLM analysis for "${pair.sourceA.title}" <-> "${pair.sourceB.title}"`,
     );
 
-    if (!cached.analysis.shouldLink) {
-      return null;
-    }
-
-    return {
-      sourceIdA: pair.sourceA.id,
-      sourceTitleA: pair.sourceA.title,
-      sourceIdB: pair.sourceB.id,
-      sourceTitleB: pair.sourceB.title,
-      relation: cached.analysis.relation,
-      reason: cached.analysis.reason,
-      weight: cached.analysis.weight,
-      knnSimilarity: cached.knnSimilarity ?? pair.knnSimilarity,
-      entityResolutions: cached.analysis.entityResolutions ?? [],
-    };
+    return acceptedLink(cached, sdk);
   }
 
   const chunksCount =
@@ -282,7 +270,7 @@ export async function analyzeSourcePairWithLLM(
       `LLM query failed for pair "${pair.sourceA.title}" <-> "${pair.sourceB.title}":`,
       err?.message || err,
     );
-    return null;
+    throw err;
   }
 
   const analysis = parseLLMResponse(rawResponse, defaultRelation);
@@ -298,6 +286,7 @@ export async function analyzeSourcePairWithLLM(
       sourceA: { id: pair.sourceA.id, title: pair.sourceA.title },
       sourceB: { id: pair.sourceB.id, title: pair.sourceB.title },
       analysis,
+      accepted: analysis.shouldLink && analysis.weight >= minConfidence,
       knnSimilarity: pair.knnSimilarity,
       updatedAt: Math.max(pair.sourceA.updated_at, pair.sourceB.updated_at),
     },

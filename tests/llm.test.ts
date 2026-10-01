@@ -366,10 +366,14 @@ describe("LLM Querying & Multimodal Integration", () => {
         );
       };
 
-      const sdk = createExtensionSDK("test-llm-ext", undefined, undefined, {
-        apiKey: "shared-key",
-        baseUrl: "https://mock-ai.com/v1",
-        fetchFn: mockFetch,
+      const sdk = createExtensionSDK("test-llm-ext", {
+        models: {
+          connection: {
+            apiKey: "shared-key",
+            baseUrl: "https://mock-ai.com/v1",
+            fetchFn: mockFetch,
+          },
+        },
       });
 
       expect(sdk.llm).toBeInstanceOf(LLMClient);
@@ -397,8 +401,12 @@ describe("LLM Querying & Multimodal Integration", () => {
         );
       };
 
-      const sdk = createExtensionSDK("test-ambient-ext", undefined, undefined, {
-        fetchFn: mockFetch,
+      const sdk = createExtensionSDK("test-ambient-ext", {
+        models: {
+          connection: {
+            fetchFn: mockFetch,
+          },
+        },
       });
 
       const reply = await runWithSDK(sdk, async () => {
@@ -460,15 +468,14 @@ describe("LLM Querying & Multimodal Integration", () => {
         );
       };
 
-      const sdk = createExtensionSDK(
-        "reasoning-test-ext",
-        undefined,
-        undefined,
-        {
-          apiKey: "sk-key",
-          fetchFn: mockFetch,
+      const sdk = createExtensionSDK("reasoning-test-ext", {
+        models: {
+          connection: {
+            apiKey: "sk-key",
+            fetchFn: mockFetch,
+          },
         },
-      );
+      });
 
       await sdk.queryLLM("Query test");
       expect(interceptedBody.reasoning_effort).toBe("low");
@@ -575,7 +582,7 @@ describe("LLM Querying & Multimodal Integration", () => {
   });
 
   describe("Thinking Tokens & Reasoning Budget Configuration", () => {
-    it("defaults max_thinking_tokens and thinking_budget to 512 in chat completions payload", async () => {
+    it("sends the default budget using only max_thinking_tokens", async () => {
       let interceptedBody: any = null;
       const mockFetch: FetchFn = async (_url, init) => {
         interceptedBody = JSON.parse(init?.body as string);
@@ -593,7 +600,7 @@ describe("LLM Querying & Multimodal Integration", () => {
       });
 
       expect(interceptedBody.max_thinking_tokens).toBe(512);
-      expect(interceptedBody.thinking_budget).toBe(512);
+      expect(interceptedBody.thinking_budget).toBeUndefined();
     });
 
     it("defaults max_thinking_tokens to 512 at SDK level via sdk.queryLLM and sdk.llm.complete", async () => {
@@ -608,15 +615,14 @@ describe("LLM Querying & Multimodal Integration", () => {
         );
       };
 
-      const sdk = createExtensionSDK(
-        "thinking-test-ext",
-        undefined,
-        undefined,
-        {
-          apiKey: "sk-key",
-          fetchFn: mockFetch,
+      const sdk = createExtensionSDK("thinking-test-ext", {
+        models: {
+          connection: {
+            apiKey: "sk-key",
+            fetchFn: mockFetch,
+          },
         },
-      );
+      });
 
       await sdk.queryLLM("Query test");
       expect(interceptedBody.max_thinking_tokens).toBe(512);
@@ -643,7 +649,7 @@ describe("LLM Querying & Multimodal Integration", () => {
         maxThinkingTokens: 256,
       });
       expect(interceptedBody.max_thinking_tokens).toBe(256);
-      expect(interceptedBody.thinking_budget).toBe(256);
+      expect(interceptedBody.thinking_budget).toBeUndefined();
 
       // snake_case
       await queryLLM("Test 1024", {

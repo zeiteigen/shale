@@ -2,8 +2,9 @@ import { Database } from "bun:sqlite";
 import * as sqliteVec from "sqlite-vec";
 
 import { join } from "node:path";
+import { ensureCosineIndex } from "./cosine-index";
 
-const db = new Database(join(import.meta.dir, "../production.db"));
+const db = new Database(process.env.SHALE_DB_PATH || join(import.meta.dir, "../production.db"));
 
 db.run("PRAGMA journal_mode = WAL;");
 db.run("PRAGMA foreign_keys = ON;");
@@ -52,9 +53,11 @@ try {
 // Note: Virtual tables do not use 'STRICT' mode
 db.run(`
   CREATE VIRTUAL TABLE IF NOT EXISTS vector_index USING vec0(
-    embedding float[4096]
+    embedding float[4096] distance_metric=cosine
   );
 `);
+
+ensureCosineIndex(db);
 
 // Initialize BM25 virtual table with stopword and porter
 db.run(`

@@ -44,12 +44,13 @@ export function chunkWebText(text: string, size = 1000): string[] {
   return chunks.length ? chunks : [text.trim()].filter(Boolean);
 }
 
-export async function parseWebPage(sdk: ShaleSDK, request: WebPageParseRequest): Promise<WebPageParseResponse> {
+export async function parseWebPage(sdk: ShaleSDK, request: WebPageParseRequest, signal?: AbortSignal): Promise<WebPageParseResponse> {
+  signal?.throwIfAborted();
   const settings = sdk.settings.getAll<{ chunkSize?: number; maxFetchChars?: number; maxImages?: number; enableLlmContext?: boolean; llmModel?: string | null }>();
   let html = request.html ?? "";
   let text = request.textContent?.trim() ?? "";
   if (!text && !html) {
-    const response = await fetch(request.url);
+    const response = await fetch(request.url, { signal });
     if (!response.ok) throw new Error(`Could not fetch page (${response.status})`);
     html = (await response.text()).slice(0, settings.maxFetchChars ?? 100000);
   }
@@ -64,19 +65,19 @@ export async function parseWebPage(sdk: ShaleSDK, request: WebPageParseRequest):
   let contextualSummary = `Web page “${title}” from ${new URL(request.url).hostname}. ${text.slice(0, 500)}`;
   if (settings.enableLlmContext !== false && text.length) {
     try {
-      contextualSummary = (await sdk.queryLLM(`Write a concise retrieval context for this web page. State its subject, intended audience, and the relation between its main sections. Do not invent facts.\n\nTitle: ${title}\nURL: ${request.url}\n\nContent:\n${text.slice(0, 6000)}`, { model: settings.llmModel ?? undefined, maxTokens: 300 })).trim() || contextualSummary;
-    } catch (error) { sdk.logger.warn(`Web-page contextualization failed for ${request.url}:`, error); }
+      contextualSummary = (await sdk.queryLLM(`Write a concise retrieval context for this web page. State its subject, intended audience, and the relation between its main sections. Do not invent facts.\n\nTitle: ${title}\nURL: ${request.url}\n\nContent:\n${text.slice(0, 6000)}`, { model: settings.llmModel ?? undefined, maxTokens: 300, signal })).trim() || contextualSummary;
+    } catch (error) { signal?.throwIfAborted(); sdk.logger.warn(`Web-page contextualization failed for ${request.url}:`, error); }
   }
   const imageChunks: WebPageParseResponse["imageChunks"] = [];
   if (request.includeImages !== false && imageUrls.length) {
     for (const imageUrl of imageUrls) {
       try {
-        const image = await sdk.messages.request<ProcessFileResponse>("file:process", { filePath: imageUrl, fileType: "image", contextEntity: title, options: { deferEmbedding: true } }, { target: "process-image" });
+        const image = await sdk.messages.request<ProcessFileResponse>("file:process", { filePath: imageUrl, fileType: "image", contextEntity: title, options: { deferEmbedding: true } }, { target: "process-image", timeoutMs: 300000, signal });
         if (image.success) imageChunks.push(...image.chunks.map((chunk) => ({
           text_content: chunk.text_content,
-          chunk_type: chunk.chunk_type,
+          chunk_type: chunk.chunk_type ?? "verbatim",
         })));
-      } catch (error) { sdk.logger.debug(`Image parser unavailable or failed for ${imageUrl}: ${String(error)}`); }
+      } catch (error) { signal?.throwIfAborted(); sdk.logger.debug(`Image parser unavailable or failed for ${imageUrl}: ${String(error)}`); }
     }
   }
   return { title, text, chunks, contextualSummary, imageUrls, imageChunks };

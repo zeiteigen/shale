@@ -6,6 +6,7 @@
     "./sdk/*": "./sdk/*"
   },
   "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p tests/tsconfig.json && tsc -p tests/types/tsconfig.json && tsc -p visualizer/tsconfig.json",
     "settings": "bun scripts/settings.ts",
     "queue:view": "bun run scripts/browser-queue-viewer.ts",
     "visualizer": "cd visualizer && bun run dev && cd .."
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
-    "@types/stopword": "^2.0.3"
+    "@types/stopword": "^2.0.3",
+    "typescript": "7.0.2"
   }
 }

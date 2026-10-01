@@ -113,6 +113,7 @@ export async function findKnnCandidatePairs(
           }
         }
       } catch (err: any) {
+        if (!String(err?.message).includes("not found or has no embedding")) throw err;
         // If chunk has no embedding in vector_index yet, skip chunk
         sdk.logger.debug(
           `KNN search skipped for chunk ${chunk.id} in source "${source.title}":`,

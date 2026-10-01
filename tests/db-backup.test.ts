@@ -134,7 +134,7 @@ describe("db-backup Extension", () => {
     expect(integrity.integrity_check).toBe("ok");
 
     const rows = backupDb
-      .query<{ id: number; name: string }>("SELECT * FROM items;")
+      .query<{ id: number; name: string }, []>("SELECT * FROM items;")
       .all();
     expect(rows.length).toBe(2);
     expect(rows[0].name).toBe("item1");

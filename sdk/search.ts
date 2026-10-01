@@ -1,10 +1,18 @@
 import { Database } from "bun:sqlite";
 import { eng, removeStopwords } from "stopword";
 import defaultDb from "../lib/db-init";
+import { ensureCosineIndex } from "../lib/cosine-index";
+import { getIndexDimension, vectorBuffer } from "../lib/embedding-index";
+import {
+  assertEmbeddingProfile,
+  embeddingProfile,
+  readEmbeddingProfile,
+} from "../lib/embedding-profile";
 import {
   EmbedderClient,
   normalizeVectorDimensions,
   type EmbedderOptions,
+  type EmbeddingClient,
 } from "./embed";
 import type {
   BM25KeywordFusionStrategy,
@@ -120,10 +128,9 @@ export function extractKeywords(
  */
 export class ChunkSearcher {
   private readonly db: Database;
-  private readonly embedder: EmbedderClient;
-  private cachedTargetDim: number | null = null;
+  private readonly embedder: EmbeddingClient;
 
-  constructor(database?: Database, embedder?: EmbedderClient) {
+  constructor(database?: Database, embedder?: EmbeddingClient) {
     this.db = database ?? defaultDb;
     this.embedder = embedder ?? new EmbedderClient();
   }
@@ -132,30 +139,7 @@ export class ChunkSearcher {
    * Discovers the target embedding dimension configured in sqlite-vec vector_index virtual table.
    */
   getTargetDimension(): number {
-    if (this.cachedTargetDim !== null) {
-      return this.cachedTargetDim;
-    }
-    try {
-      const row = this.db
-        .query<
-          {
-            sql: string;
-          },
-          []
-        >(
-          "SELECT sql FROM sqlite_master WHERE name = 'vector_index' AND type = 'table'",
-        )
-        .get();
-      if (row?.sql) {
-        const match = row.sql.match(/float\[(\d+)\]/i);
-        if (match && match[1]) {
-          this.cachedTargetDim = parseInt(match[1], 10);
-          return this.cachedTargetDim;
-        }
-      }
-    } catch {}
-    this.cachedTargetDim = 4096;
-    return this.cachedTargetDim;
+    return getIndexDimension(this.db);
   }
 
   /**
@@ -165,7 +149,7 @@ export class ChunkSearcher {
     const targetDim = this.getTargetDimension();
     const rawArray = Array.isArray(vec) ? vec : Array.from(vec);
     const normalized = normalizeVectorDimensions(rawArray, targetDim);
-    return new Uint8Array(new Float32Array(normalized).buffer);
+    return vectorBuffer(normalized, targetDim);
   }
 
   /**
@@ -176,6 +160,7 @@ export class ChunkSearcher {
   async vector(options: VectorSearchOptions): Promise<ChunkSearchResult[]> {
     const limit = options.limit ?? 10;
     if (limit <= 0) return [];
+    ensureCosineIndex(this.db);
 
     let queryBuffer: Uint8Array;
     let excludeChunkId: number | null = null;
@@ -183,10 +168,9 @@ export class ChunkSearcher {
     if (options.chunkId !== undefined) {
       // KNN search from pre-existing chunk
       const row = this.db
-        .query<
-          { embedding: Uint8Array },
-          { $id: number }
-        >("SELECT embedding FROM vector_index WHERE rowid = $id")
+        .query<{ embedding: Uint8Array }, { $id: number }>(
+          "SELECT embedding FROM vector_index WHERE rowid = $id",
+        )
         .get({ $id: options.chunkId });
 
       if (!row || !row.embedding) {
@@ -200,12 +184,21 @@ export class ChunkSearcher {
         excludeChunkId = options.chunkId;
       }
     } else if (options.vector) {
+      const profile =
+        options.embeddingProfile ?? embeddingProfile(options.vector);
+      if (profile) assertEmbeddingProfile(this.db, profile);
+      else if (readEmbeddingProfile(this.db))
+        throw new Error(
+          "A precomputed search vector requires its embeddingProfile",
+        );
       queryBuffer = this.prepareVectorBuffer(options.vector);
     } else if (options.query) {
       const vector = await this.embedder.embed(
         options.query,
         options.embedderOptions,
       );
+      const profile = embeddingProfile(vector);
+      if (profile) assertEmbeddingProfile(this.db, profile);
       queryBuffer = this.prepareVectorBuffer(vector);
     } else {
       throw new Error(
@@ -213,7 +206,9 @@ export class ChunkSearcher {
       );
     }
 
-    // Fetch extra candidate if self needs to be excluded
+    // Joined filters must constrain the distance query before limiting results.
+    const filtered = Boolean(options.filterSourceId || options.filterChunkType);
+    const distance = filtered ? "vec_distance_cosine(v.embedding, $query)" : "v.distance";
     const fetchK = excludeChunkId !== null ? limit + 1 : limit;
 
     let sql = `
@@ -223,20 +218,20 @@ export class ChunkSearcher {
         c.chunk_index, 
         c.chunk_type,
         c.text_content, 
-        v.distance,
+        ${distance} AS distance,
         (1.0 - vec_distance_cosine(v.embedding, $query)) AS cosine_similarity,
         s.title AS source_title,
         s.uri AS source_uri
       FROM vector_index v
       JOIN chunks c ON c.id = v.rowid
       LEFT JOIN sources s ON c.source_id = s.id
-      WHERE v.embedding MATCH $query AND k = $fetchK
+      WHERE ${filtered ? "1 = 1" : "v.embedding MATCH $query AND k = $fetchK"}
     `;
 
     const params: Record<string, any> = {
       $query: queryBuffer,
-      $fetchK: fetchK,
     };
+    if (!filtered) params.$fetchK = fetchK;
 
     if (options.filterSourceId) {
       sql += ` AND (c.source_id = $sourceId OR s.id = $sourceId OR s.uri = $sourceId)`;
@@ -248,7 +243,19 @@ export class ChunkSearcher {
       params.$filterChunkType = options.filterChunkType;
     }
 
-    sql += ` ORDER BY v.distance`;
+    if (filtered && excludeChunkId !== null) {
+      sql += " AND v.rowid != $excludeId";
+      params.$excludeId = excludeChunkId;
+    }
+    if (filtered && options.minSimilarity !== undefined) {
+      sql += ` AND (1.0 - ${distance}) >= $minSimilarity`;
+      params.$minSimilarity = options.minSimilarity;
+    }
+    sql += " ORDER BY distance, c.id";
+    if (filtered) {
+      sql += " LIMIT $limit";
+      params.$limit = limit;
+    }
 
     const rows = this.db.query<any, any>(sql).all(params);
 
@@ -261,7 +268,7 @@ export class ChunkSearcher {
       const rawCosine =
         typeof row.cosine_similarity === "number"
           ? row.cosine_similarity
-          : 1.0 - (row.distance * row.distance) / 2.0;
+          : 1.0 - row.distance;
 
       // Clamp cosine similarity to [-1.0, 1.0] to guard against floating-point epsilon
       const cosineSimilarity = Math.max(-1.0, Math.min(1.0, rawCosine));

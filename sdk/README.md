@@ -2,6 +2,8 @@
 
 The Shale SDK is an abstraction layer that enables extensions (cron jobs, ingest handlers, processors) to interact safely with the Shale core data layer without manipulating raw SQL rows.
 
+See [Cross-extension messages](MESSAGES.md) for routing, receiver scope, request cancellation, and subscription cleanup.
+
 ## Modules
 
 ### 1. State Management (`sdk.state`)
@@ -48,13 +50,15 @@ Generates vector embeddings using any OpenAI-compatible endpoint (OpenAI, Ollama
 - `sdk.embed(texts: string[], options?: EmbedderOptions): Promise<number[][]>`
 - `embed(text | texts, options?: EmbedderOptions): Promise<number[] | number[][]>` (standalone function)
 
+See [Model configuration and batches](MODELS.md) for independent chat/embedding profiles, GPU scheduling, and index migration.
+
 Configured via `.env`:
 
 - `OPENAI_API_KEY`: API key for the embedding provider.
 - `OPENAI_BASE_URL`: Base URL (default: `https://api.openai.com/v1`).
-- `OPENAI_ENDPOINT`: Optional full endpoint URL (e.g., `https://api.openai.com/v1/embeddings`).
+- `EMBEDDING_ENDPOINT`: Optional full embedding endpoint URL. Use `OPENAI_CHAT_ENDPOINT` for chat.
 - `OPENAI_EMBEDDING_MODEL`: Model name (default: `text-embedding-3-small`).
-- `EMBEDDING_DIMENSIONS`: Dimension normalization/padding (default: 4096 for SQLite vec0).
+- `EMBEDDING_DIMENSIONS`: Storage padding (default: 4096 for SQLite vec0); larger vectors are rejected.
 
 ### 6. Chunk Search (`sdk.search` / `search`)
 
@@ -224,3 +228,12 @@ export async function run() {
   sdk.state.setWatermark(latestId, "channel-general");
 }
 ```
+## Runtime and recovery guarantees
+
+- Model request options accept an `AbortSignal`. File and web parser handlers pass message cancellation through to the model transport. GPU batches wait for outstanding chat requests before entering embedding.
+- Recovery scripts own checkpoint resolution. Call `context.resolve(id)` only after committing that checkpoint's work; the host retains any unresolved rows, including partially completed batches.
+- Source-linker saves complete candidate batches before analysis. `maxPairsPerRun` bounds analysis per invocation; remaining pairs persist for subsequent runs. Failed requests retain their work, and discovery watermarks advance only when the batch is complete.
+- Source entities use `source:<source ID>` as their graph identity. Titles remain display labels. Ingesting an updated URI without an explicit ID preserves its existing source ID. Existing ambiguous title-based links cannot be reconstructed without re-analysis.
+- Vector indexes use cosine distance. Older Euclidean indexes migrate transactionally on startup/search, preserving vector bytes, chunk IDs, and embedding provenance; no model inference is needed. Filtered searches calculate distances within the matching source/type set before limiting results.
+- HTTP ingest and visualizer servers bind to `127.0.0.1`. The visualizer rejects external origins and hostnames. Invalid ingest requests return non-success HTTP statuses; accepted requests return 202.
+- `bun test` uses a temporary database via its preload. `SHALE_DB_PATH` overrides the database path for isolated tools/hosts. `bun run typecheck` checks host, tests, message contracts, and UI separately.

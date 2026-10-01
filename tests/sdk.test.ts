@@ -344,7 +344,7 @@ describe("Shale SDK Architecture", () => {
           relation: string;
           weight: number;
           metadata: string | null;
-        }>(
+        }, []>(
           "SELECT source_entity_id, target_entity_id, relation, weight, metadata FROM edges ORDER BY relation ASC",
         )
         .all();
@@ -411,7 +411,7 @@ describe("Shale SDK Architecture", () => {
       const source = db
         .query<{
           title: string;
-        }>("SELECT title FROM sources WHERE id = 'doc-1'")
+        }, []>("SELECT title FROM sources WHERE id = 'doc-1'")
         .get();
       expect(source?.title).toBe("Architecture Guide");
 
@@ -419,7 +419,7 @@ describe("Shale SDK Architecture", () => {
       const chunks = db
         .query<{
           text_content: string;
-        }>(
+        }, []>(
           "SELECT text_content FROM chunks WHERE source_id = 'doc-1' ORDER BY chunk_index ASC",
         )
         .all();
@@ -427,7 +427,7 @@ describe("Shale SDK Architecture", () => {
 
       // Verify vector index
       const vecCount = db
-        .query<{ c: number }>("SELECT count(*) as c FROM vector_index")
+        .query<{ c: number }, []>("SELECT count(*) as c FROM vector_index")
         .get()!.c;
       expect(vecCount).toBe(2);
 
@@ -442,7 +442,7 @@ describe("Shale SDK Architecture", () => {
         .query<{
           chunk_id: number;
           entity_id: number;
-        }>("SELECT chunk_id, entity_id FROM chunk_entities")
+        }, []>("SELECT chunk_id, entity_id FROM chunk_entities")
         .all();
       expect(links.length).toBe(3); // 1 for "Architecture", 2 for "Database" & "Trigger"
     });
@@ -477,12 +477,12 @@ describe("Shale SDK Architecture", () => {
       const sourceCount = db
         .query<{
           c: number;
-        }>("SELECT count(*) as c FROM sources WHERE id = 'doc-bad'")
+        }, []>("SELECT count(*) as c FROM sources WHERE id = 'doc-bad'")
         .get()!.c;
       const chunkCount = db
         .query<{
           c: number;
-        }>("SELECT count(*) as c FROM chunks WHERE source_id = 'doc-bad'")
+        }, []>("SELECT count(*) as c FROM chunks WHERE source_id = 'doc-bad'")
         .get()!.c;
 
       expect(sourceCount).toBe(0);

@@ -23,8 +23,8 @@ export async function setup(sdkOverride?: ShaleSDK): Promise<void> {
   // 1. Register "file:process" channel handler for single or bulk image files
   sdk.messages.handle(
     "file:process",
-    async (req: ProcessFileRequest) => {
-      return processImageFile(req, sdk);
+    async (req: ProcessFileRequest, context) => {
+      return processImageFile(req, sdk, context.signal);
     },
     {
       name: "process-image",
@@ -48,8 +48,8 @@ export async function setup(sdkOverride?: ShaleSDK): Promise<void> {
   );
 
   // 2. Register "files:process" and "file:process-batch" bulk channel handlers
-  const batchHandler = async (req: ProcessFilesBatchRequest) => {
-    return processImageFilesBatch(req, sdk);
+  const batchHandler = async (req: ProcessFilesBatchRequest, context: import("../../lib/messages.types").MessageContext) => {
+    return processImageFilesBatch(req, sdk, context.signal);
   };
   const batchCanHandle = (req: ProcessFilesBatchRequest) => {
     if (req.fileType === "image") return true;

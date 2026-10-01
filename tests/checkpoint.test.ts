@@ -166,6 +166,7 @@ describe("Extension Checkpoint & Recovery System", () => {
           // Delay slightly to simulate asynchronous recovery work
           await new Promise((resolve) => setTimeout(resolve, 50));
           executionLog.push("recovered:" + sdkContext.checkpoints[0].key);
+          for (const checkpoint of sdkContext.checkpoints) sdkContext.resolve(checkpoint.id);
         }
         `,
       );
@@ -349,8 +350,7 @@ describe("Extension Checkpoint & Recovery System", () => {
         namespace: "test-ns",
       };
 
-      // Should not throw unhandled exception
-      await runCron(cron);
+      await expect(runCron(cron)).rejects.toThrow("Crash during recovery");
 
       // Checkpoint must NOT be deleted because recovery failed
       expect(hasQueuedCheckpoints(testExtId)).toBe(true);

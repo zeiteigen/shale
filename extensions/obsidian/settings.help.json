@@ -186,12 +186,6 @@
       "default": 3,
       "range": { "min": 0, "max": 20 }
     },
-    "fallbackEmbeddingDimensions": {
-      "type": "number",
-      "description": "Dimension size of fallback embedding vectors when embedding model is unreachable.",
-      "default": 4096,
-      "range": { "min": 64, "max": 16384 }
-    },
     "namespace": {
       "type": "string",
       "description": "Namespace for sources, chunks, and graph elements.",

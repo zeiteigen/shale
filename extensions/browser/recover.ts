@@ -39,7 +39,11 @@ export async function run(
 
     try {
       if (data.type === "browser_page_analysis") {
-        const { pageData, analysis, namespace = sdk.namespace || "browser" } = data;
+        const {
+          pageData,
+          analysis,
+          namespace = sdk.namespace || "browser",
+        } = data;
         if (!pageData || !analysis) {
           throw new Error("Malformed browser page checkpoint");
         }
@@ -56,6 +60,7 @@ export async function run(
           parsedChunks: data.parsedChunks,
           contextualSummary: data.contextualSummary,
           imageChunks: data.imageChunks,
+          sessionUpdate: data.sessionUpdate,
         };
         await finalizePageVisit(
           sdk,
@@ -73,15 +78,19 @@ export async function run(
           namespace = sdk.namespace || "browser",
         } = data;
 
-        await finalizeSession(sdk, {
-          sessionId,
-          startTime,
-          endTime,
-          visits,
-          synthesis,
-          checkpointId: item.id,
-          namespace,
-        }, sdk.settings.getAll<BrowserExtensionSettings>());
+        await finalizeSession(
+          sdk,
+          {
+            sessionId,
+            startTime,
+            endTime,
+            visits,
+            synthesis,
+            checkpointId: item.id,
+            namespace,
+          },
+          sdk.settings.getAll<BrowserExtensionSettings>(),
+        );
 
         recoveredSessions++;
       }

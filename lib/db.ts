@@ -489,9 +489,9 @@ export function updateCheckpointStatus(id: string, status: string): boolean {
 export function getChronologicalChunks(
   sourceIdOrUri: string,
   limit: number = 20,
-): ChunkWithoutEmbedding[] {
+): Chunk[] {
   const stmt = db.query<
-    ChunkWithoutEmbedding,
+    Chunk,
     { $idOrUri: string; $limit: number }
   >(`
     SELECT * FROM (

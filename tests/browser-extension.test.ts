@@ -3,7 +3,12 @@ import { Database } from "bun:sqlite";
 import * as sqliteVec from "sqlite-vec";
 import { join } from "node:path";
 import { isTExtensionManifest, type ExtensionManifest } from "../lib/extension";
-import { createExtensionSDK, type ShaleSDK, createMessageBus, MessageBus } from "../sdk";
+import {
+  createExtensionSDK,
+  type ShaleSDK,
+  createMessageBus,
+  MessageBus,
+} from "../sdk";
 import {
   evaluateUrl,
   matchesExcludeDomains,
@@ -36,6 +41,7 @@ import {
 import { run as runRecover } from "../extensions/browser/recover";
 import { run as runCron } from "../extensions/browser/index";
 import { subscribe } from "../extensions/browser/subscribe";
+import type { BrowserExtensionSettings } from "../extensions/browser/settings.types";
 import type { TabsBatchPayload } from "../extensions/browser/types";
 
 function createTestDb(): Database {
@@ -512,7 +518,9 @@ describe("Browser Ingestion Extension", () => {
 
       // Verify chunks table
       const chunks = testDb
-        .query<any, any>("SELECT * FROM chunks WHERE source_id = ? ORDER BY chunk_index ASC")
+        .query<any, any>(
+          "SELECT * FROM chunks WHERE source_id = ? ORDER BY chunk_index ASC",
+        )
         .all(source.id);
       expect(chunks.length).toBeGreaterThanOrEqual(1);
       expect(chunks[0].chunk_type).toBe("synthetic");
@@ -541,7 +549,9 @@ describe("Browser Ingestion Extension", () => {
       const entityNames = entities.map((e) => e.name);
       expect(entityNames).toContain("https://bun.sh/docs/api/sqlite");
       expect(entityNames).toContain("bun.sh");
-      expect(entities.find((entity) => entity.name === "bun.sh")?.type).toBe("Domain");
+      expect(entities.find((entity) => entity.name === "bun.sh")?.type).toBe(
+        "Domain",
+      );
 
       // Verify Graph edges
       const edges = testDb.query<any, any>("SELECT * FROM edges").all();
@@ -551,31 +561,45 @@ describe("Browser Ingestion Extension", () => {
     });
 
     it("keeps same-titled pages distinct and rejects low-quality topic nodes", async () => {
-      (testSdk as any).queryLLM = async () => JSON.stringify({
-        summary: "Two separate pages.",
-        topics: ["of", "from", "example.com", "Useful Concept"],
-        category: "Article",
-      });
-      for (const url of ["https://example.com/one", "https://example.com/two"]) {
-        await processPageVisit(testSdk, {
-          type: "page_visit",
-          url,
-          title: "Shared title",
-          textContent: "Enough page content to pass the analysis threshold and exercise stable graph identities.",
-          recordInSession: false,
-        }, { enableLlmAnalysis: true, minContentLength: 20 });
+      (testSdk as any).queryLLM = async () =>
+        JSON.stringify({
+          summary: "Two separate pages.",
+          topics: ["of", "from", "example.com", "Useful Concept"],
+          category: "Article",
+        });
+      for (const url of [
+        "https://example.com/one",
+        "https://example.com/two",
+      ]) {
+        await processPageVisit(
+          testSdk,
+          {
+            type: "page_visit",
+            url,
+            title: "Shared title",
+            textContent:
+              "Enough page content to pass the analysis threshold and exercise stable graph identities.",
+            recordInSession: false,
+          },
+          { enableLlmAnalysis: true, minContentLength: 20 },
+        );
       }
 
-      const pages = testDb.query<any, any>(
-        "SELECT name FROM entities WHERE namespace = 'browser' AND type = 'WebPage' ORDER BY name",
-      ).all();
+      const pages = testDb
+        .query<any, any>(
+          "SELECT name FROM entities WHERE namespace = 'browser' AND type = 'WebPage' ORDER BY name",
+        )
+        .all();
       expect(pages.map((page) => page.name)).toEqual([
         "https://example.com/one",
         "https://example.com/two",
       ]);
-      const topics = testDb.query<any, any>(
-        "SELECT name FROM entities WHERE namespace = 'browser' AND type = 'Topic'",
-      ).all().map((topic) => topic.name);
+      const topics = testDb
+        .query<any, any>(
+          "SELECT name FROM entities WHERE namespace = 'browser' AND type = 'Topic'",
+        )
+        .all()
+        .map((topic) => topic.name);
       expect(topics).toEqual(["Useful Concept"]);
     });
 
@@ -642,8 +666,20 @@ describe("Browser Ingestion Extension", () => {
 
     it("does not invent navigation edges across unrelated tabs", async () => {
       const visits = [
-        { url: "https://one.example", title: "One", domain: "one.example", visitedAt: 1, tabId: 10 },
-        { url: "https://two.example", title: "Two", domain: "two.example", visitedAt: 2, tabId: 20 },
+        {
+          url: "https://one.example",
+          title: "One",
+          domain: "one.example",
+          visitedAt: 1,
+          tabId: 10,
+        },
+        {
+          url: "https://two.example",
+          title: "Two",
+          domain: "two.example",
+          visitedAt: 2,
+          tabId: 20,
+        },
       ];
       expect(buildSequentialEdges(visits)).toEqual([]);
 
@@ -688,7 +724,9 @@ describe("Browser Ingestion Extension", () => {
         .query<any, any>("SELECT * FROM sources WHERE type = 'web_session'")
         .get();
       expect(sessionSource).toBeDefined();
-      expect(sessionSource.uri).toContain("browser-session://session-test-commit");
+      expect(sessionSource.uri).toContain(
+        "browser-session://session-test-commit",
+      );
 
       const sessionChunk = testDb
         .query<any, any>("SELECT * FROM chunks WHERE source_id = ?")
@@ -704,9 +742,7 @@ describe("Browser Ingestion Extension", () => {
 
       // Verify CONTAINS_PAGE edges
       const containsEdges = testDb
-        .query<any, any>(
-          "SELECT * FROM edges WHERE relation = 'CONTAINS_PAGE'",
-        )
+        .query<any, any>("SELECT * FROM edges WHERE relation = 'CONTAINS_PAGE'")
         .all();
       expect(containsEdges.length).toBe(2);
     });
@@ -778,7 +814,9 @@ describe("Browser Ingestion Extension", () => {
       expect(res.skippedCount).toBe(1);
 
       const mdnSource = testDb
-        .query<any, any>("SELECT * FROM sources WHERE uri LIKE '%developer.mozilla.org%'")
+        .query<any, any>(
+          "SELECT * FROM sources WHERE uri LIKE '%developer.mozilla.org%'",
+        )
         .get();
       expect(mdnSource).toBeDefined();
       expect(mdnSource.type).toBe("browser_history");
@@ -820,32 +858,56 @@ describe("Browser Ingestion Extension", () => {
 
     it("preserves rich pages, history, and bookmarks as separate sources", async () => {
       const url = "https://example.com/shared";
-      await processPageVisit(testSdk, {
-        type: "page_visit",
-        url,
-        title: "Shared Resource",
-        textContent: "Rich live page content that must not be overwritten by metadata-only imports.",
-        recordInSession: false,
-      }, {});
-      await processHistoryBatch(testSdk, {
-        type: "history_batch",
-        items: [{ url, title: "Shared Resource", visitTime: 1000 }],
-      }, {});
-      await processBookmarksBatch(testSdk, {
-        type: "bookmarks_batch",
-        items: [{ id: "bookmark-1", url, title: "Shared Resource", folderPath: "Research" }],
-      }, {});
+      await processPageVisit(
+        testSdk,
+        {
+          type: "page_visit",
+          url,
+          title: "Shared Resource",
+          textContent:
+            "Rich live page content that must not be overwritten by metadata-only imports.",
+          recordInSession: false,
+        },
+        {},
+      );
+      await processHistoryBatch(
+        testSdk,
+        {
+          type: "history_batch",
+          items: [{ url, title: "Shared Resource", visitTime: 1000 }],
+        },
+        {},
+      );
+      await processBookmarksBatch(
+        testSdk,
+        {
+          type: "bookmarks_batch",
+          items: [
+            {
+              id: "bookmark-1",
+              url,
+              title: "Shared Resource",
+              folderPath: "Research",
+            },
+          ],
+        },
+        {},
+      );
 
-      const sources = testDb.query<any, any>(
-        "SELECT type, uri FROM sources WHERE origin = 'browser' ORDER BY type",
-      ).all();
+      const sources = testDb
+        .query<any, any>(
+          "SELECT type, uri FROM sources WHERE origin = 'browser' ORDER BY type",
+        )
+        .all();
       expect(sources).toHaveLength(3);
       expect(sources.map((source) => source.type).sort()).toEqual([
         "bookmark",
         "browser_history",
         "web_page",
       ]);
-      expect(sources.find((source) => source.type === "web_page")?.uri).toBe(url);
+      expect(sources.find((source) => source.type === "web_page")?.uri).toBe(
+        url,
+      );
     });
 
     it("efficiently batch ingests large history streams with batch embeddings", async () => {
@@ -866,7 +928,9 @@ describe("Browser Ingestion Extension", () => {
       expect(res.skippedCount).toBe(0);
 
       const sourcesCount = testDb
-        .query<any, any>("SELECT count(*) as count FROM sources WHERE type = 'browser_history'")
+        .query<any, any>(
+          "SELECT count(*) as count FROM sources WHERE type = 'browser_history'",
+        )
         .get();
       expect(sourcesCount.count).toBe(50);
     });
@@ -883,7 +947,8 @@ describe("Browser Ingestion Extension", () => {
             cleanUrl: "https://sqlite.org/wasi.html",
             domain: "sqlite.org",
             title: "SQLite WASI",
-            textContent: "SQLite compiled to WebAssembly for browser environments.",
+            textContent:
+              "SQLite compiled to WebAssembly for browser environments.",
             visitedAt: 1700000000000,
           },
           analysis: {
@@ -976,7 +1041,8 @@ describe("Browser Ingestion Extension", () => {
           type: "page_visit",
           url: "https://example.com/test-subscribe",
           title: "Subscribe Test Page",
-          textContent: "Testing push ingestion pipeline through subscribe hook.",
+          textContent:
+            "Testing push ingestion pipeline through subscribe hook.",
         }),
         metadata: {
           connector: "chrome-extension",
@@ -987,7 +1053,11 @@ describe("Browser Ingestion Extension", () => {
       await subscribe(material, testSdk);
 
       // The HTTP hook is deliberately cheap: no source exists until the cron drains it.
-      expect(testDb.query<any, any>("SELECT * FROM sources WHERE uri = ?").get("https://example.com/test-subscribe")).toBeNull();
+      expect(
+        testDb
+          .query<any, any>("SELECT * FROM sources WHERE uri = ?")
+          .get("https://example.com/test-subscribe"),
+      ).toBeNull();
       const cronResult = await runCron(testSdk);
       expect(cronResult.processedPayloads).toBe(1);
       const source = testDb
@@ -1004,10 +1074,80 @@ describe("Browser Ingestion Extension", () => {
   });
 
   describe("10. Strict Two-Phase Local GPU Optimization Pattern", () => {
+    it("synthesizes a closing session before the page batch starts embedding", async () => {
+      const calls: string[] = [];
+      const sdk = createExtensionSDK("session-phases", {
+        database: testDb,
+        messageBus: testBus,
+        models: {
+          connection: {
+            baseUrl: "http://localhost:11434/v1",
+            maxRetries: 0,
+            fetchFn: async (url: any, init: any) => {
+              const body = JSON.parse(String(init?.body));
+              if (String(url).endsWith("/embeddings")) {
+                calls.push("embedding");
+                return Response.json({
+                  data: body.input.map((_: string, index: number) => ({
+                    index,
+                    embedding: new Array(4096).fill(0.01),
+                  })),
+                });
+              }
+              calls.push("chat");
+              return Response.json({
+                choices: [
+                  {
+                    message: {
+                      content: JSON.stringify({
+                        summary: "Prepared summary",
+                        topics: [],
+                        category: "Documentation",
+                        sessionTitle: "Synthesized closed session",
+                        dominantDomains: ["example.com"],
+                      }),
+                    },
+                  },
+                ],
+              });
+            },
+          },
+        },
+      });
+      await processTabsBatch(
+        sdk,
+        {
+          type: "tabs_batch",
+          pages: [1, 2, 3].map((i) => ({
+            type: "page_visit",
+            url: `https://example.com/${i}`,
+            title: `Page ${i}`,
+            textContent:
+              "Detailed technical documentation for semantic retrieval. ".repeat(
+                4,
+              ),
+            sessionId: i === 3 ? "new-session" : "old-session",
+            visitedAt: Date.now() + i,
+          })),
+        },
+        { enableLlmAnalysis: true, generateSessionSummaries: true },
+      );
+      expect(calls.filter((call) => call === "chat").length).toBe(4);
+      expect(calls.lastIndexOf("chat")).toBeLessThan(
+        calls.indexOf("embedding"),
+      );
+      expect(
+        testDb
+          .query<{ title: string }, []>(
+            "SELECT title FROM sources WHERE type = 'web_session'",
+          )
+          .get()?.title,
+      ).toBe("Synthesized closed session");
+    });
     it("enforces strict two-phase execution: all chat model requests complete before any embedding request starts", async () => {
       const callLog: Array<"chat" | "embedding"> = [];
 
-      const mockFetch: typeof fetch = async (url: any) => {
+      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = url.toString();
         if (urlStr.includes("/chat/completions")) {
           callLog.push("chat");
@@ -1033,12 +1173,13 @@ describe("Browser Ingestion Extension", () => {
           return new Response(
             JSON.stringify({
               object: "list",
-              data: [
-                { index: 0, embedding: new Array(4096).fill(0.01) },
-                { index: 1, embedding: new Array(4096).fill(0.02) },
-                { index: 2, embedding: new Array(4096).fill(0.03) },
-                { index: 3, embedding: new Array(4096).fill(0.04) },
-              ],
+              data: Array.from(
+                { length: JSON.parse(String(init?.body)).input.length },
+                (_, index) => ({
+                  index,
+                  embedding: new Array(4096).fill(0.01),
+                }),
+              ),
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
@@ -1046,16 +1187,12 @@ describe("Browser Ingestion Extension", () => {
         return new Response("Not found", { status: 404 });
       };
 
-      const twoPhaseSdk = createExtensionSDK(
-        "browser two-phase",
-        "browser",
-        testDb,
-        { fetchFn: mockFetch },
-        undefined,
-        undefined,
-        undefined,
-        testBus,
-      );
+      const twoPhaseSdk = createExtensionSDK("browser two-phase", {
+        namespace: "browser",
+        database: testDb,
+        models: { connection: { fetchFn: mockFetch } },
+        messageBus: testBus,
+      });
 
       // Simulated batch of 3 open tabs (with text > minContentLength of 100 chars)
       const tabsPayload: TabsBatchPayload = {

@@ -70,7 +70,7 @@ describe("main/index cron runner and --run-all-cron", () => {
     expect(content).toBe("executed-via-default:test-ext-default");
   });
 
-  it("handles errors gracefully without crashing", async () => {
+  it("propagates execution failures to its caller", async () => {
     const cron = {
       name: "test-cron-fail",
       schedule: "* * * * *",
@@ -79,12 +79,21 @@ describe("main/index cron runner and --run-all-cron", () => {
       namespace: "test-ns-fail",
     };
 
-    // Should not throw
-    await expect(runCron(cron)).resolves.toBeUndefined();
+    await expect(runCron(cron)).rejects.toThrow();
   });
 
   it("exports runAllCrons which iterates through all loaded crons", async () => {
     expect(typeof runAllCrons).toBe("function");
+  });
+
+  it("reports a real cron script exception as CLI failure", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "cron-real-failure-"));
+    const script = join(directory, "failure.ts");
+    writeFileSync(script, 'export async function run() { throw new Error("Cron task failed"); }');
+    const cron = { name: "real-failure", schedule: "* * * * *", script, extensionId: "failure-test" };
+    const result = await triggerCron("real-failure", { cronList: [cron], runCronFn: runCron });
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("Cron task failed");
   });
 
   it("manually triggers a specific cron script via triggerCron", async () => {

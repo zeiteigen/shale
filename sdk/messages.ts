@@ -1,256 +1,143 @@
-import {
-  MessageBus,
-  defaultMessageBus,
-} from "../lib/messages";
+import { MessageBus, defaultMessageBus } from "../lib/messages";
 import type {
-  MessageContext,
   MessageRequestOptions,
   MessagePublishOptions,
-  HandlerRegistrationOptions,
-  ListenerRegistrationOptions,
   MessageRequestHandler,
   MessageListener,
-  BuiltinChannelDefinitions,
-  BuiltinRequestChannels,
-  BuiltinEventChannels,
+  HandlerRegistrationOptions,
+  ListenerRegistrationOptions,
 } from "../lib/messages.types";
+import type {
+  RequestMessage,
+  HandleMessage,
+  PublishMessage,
+  OnMessage,
+} from "./message-api";
 import type { Logger } from "./logger";
 
-/**
- * Extension-scoped client for Shale cross-extension messaging.
- * Automatically attributes messages to the calling extension and provides
- * type safety for built-in channels as well as arbitrary topics.
- */
+export type MessageScope = <T>(work: () => T) => T;
+
+/** Extension identity, callback scope, and subscription ownership. */
 export class ExtensionMessages {
-  readonly extensionId: string;
   readonly bus: MessageBus;
-  private readonly logger?: Logger;
+  private readonly subscriptions = new Set<() => void>();
 
   constructor(
-    extensionId: string,
+    readonly extensionId: string,
     bus?: MessageBus,
-    logger?: Logger,
+    // Retained for compatibility with existing constructor calls.
+    _logger?: Logger,
+    private readonly runInScope: MessageScope = (work) => work(),
   ) {
-    this.extensionId = extensionId;
     this.bus = bus ?? defaultMessageBus;
-    this.logger = logger;
   }
 
-  /**
-   * Sends a request expecting a response over a built-in or arbitrary channel.
-   * Built-in channels are fully type-safe with automatic payload and return type inference.
-   */
-  async request<K extends BuiltinRequestChannels>(
-    channel: K,
-    payload: BuiltinChannelDefinitions[K]["request"],
-    options?: MessageRequestOptions,
-  ): Promise<BuiltinChannelDefinitions[K]["response"]>;
-  async request<TResp = any, TReq = any>(
-    channel: string,
-    payload: TReq,
-    options?: MessageRequestOptions,
-  ): Promise<TResp>;
-  async request(
+  readonly request: RequestMessage = (
     channel: string,
     payload: any,
     options?: MessageRequestOptions,
-  ): Promise<any> {
-    const enrichedOptions: MessageRequestOptions = {
+  ) =>
+    this.bus.request(channel, payload, {
+      ...options,
       senderId: this.extensionId,
-      ...options,
-    };
-    return this.bus.request(channel, payload, enrichedOptions);
-  }
+    });
+  readonly send: RequestMessage = this.request;
 
-  /**
-   * Alias for request().
-   */
-  async send<K extends BuiltinRequestChannels>(
-    channel: K,
-    payload: BuiltinChannelDefinitions[K]["request"],
-    options?: MessageRequestOptions,
-  ): Promise<BuiltinChannelDefinitions[K]["response"]>;
-  async send<TResp = any, TReq = any>(
+  readonly handle: HandleMessage = (
     channel: string,
-    payload: TReq,
-    options?: MessageRequestOptions,
-  ): Promise<TResp>;
-  async send(
-    channel: string,
-    payload: any,
-    options?: MessageRequestOptions,
-  ): Promise<any> {
-    return this.request(channel as any, payload, options);
-  }
+    handler: MessageRequestHandler,
+    options?: HandlerRegistrationOptions,
+  ) =>
+    this.track(
+      this.bus.handle(
+        channel,
+        (payload, context) => this.runInScope(() => handler(payload, context)),
+        {
+          ...options,
+          name: options?.name ?? this.extensionId,
+          extensionId: this.extensionId,
+          canHandle: options?.canHandle
+            ? (payload, context) =>
+                this.runInScope(() => options.canHandle!(payload, context))
+            : undefined,
+        },
+      ),
+    );
 
-  /**
-   * Registers a request handler for a built-in or arbitrary channel.
-   */
-  handle<K extends BuiltinRequestChannels>(
-    channel: K,
-    handler: (
-      payload: BuiltinChannelDefinitions[K]["request"],
-      context: MessageContext,
-    ) =>
-      | Promise<BuiltinChannelDefinitions[K]["response"]>
-      | BuiltinChannelDefinitions[K]["response"],
-    options?: HandlerRegistrationOptions<BuiltinChannelDefinitions[K]["request"]>,
-  ): () => void;
-  handle<TReq = any, TResp = any>(
-    channel: string,
-    handler: MessageRequestHandler<TReq, TResp>,
-    options?: HandlerRegistrationOptions<TReq>,
-  ): () => void;
-  handle(
-    channel: string,
-    handler: (payload: any, context: MessageContext) => any,
-    options?: HandlerRegistrationOptions<any>,
-  ): () => void {
-    const enrichedOptions = {
-      name: options?.name ?? this.extensionId,
-      extensionId: this.extensionId,
-      ...options,
-    };
-    return this.bus.handle(channel, handler, enrichedOptions);
-  }
-
-  /**
-   * Broadcasts an event to all subscribers on a built-in or arbitrary channel.
-   */
-  async publish<K extends BuiltinEventChannels>(
-    channel: K,
-    payload: BuiltinChannelDefinitions[K]["payload"],
-    options?: MessagePublishOptions,
-  ): Promise<void>;
-  async publish<TPayload = any>(
-    channel: string,
-    payload: TPayload,
-    options?: MessagePublishOptions,
-  ): Promise<void>;
-  async publish(
+  readonly publish: PublishMessage = (
     channel: string,
     payload: any,
     options?: MessagePublishOptions,
-  ): Promise<void> {
-    const enrichedOptions: MessagePublishOptions = {
+  ) =>
+    this.bus.publish(channel, payload, {
+      ...options,
       senderId: this.extensionId,
-      ...options,
-    };
-    return this.bus.publish(channel, payload, enrichedOptions);
-  }
+    });
+  readonly emit: PublishMessage = this.publish;
 
-  /**
-   * Alias for publish().
-   */
-  async emit<K extends BuiltinEventChannels>(
-    channel: K,
-    payload: BuiltinChannelDefinitions[K]["payload"],
-    options?: MessagePublishOptions,
-  ): Promise<void>;
-  async emit<TPayload = any>(
+  readonly on: OnMessage = (
     channel: string,
-    payload: TPayload,
-    options?: MessagePublishOptions,
-  ): Promise<void>;
-  async emit(
+    listener: MessageListener,
+    options?: ListenerRegistrationOptions,
+  ) => this.subscribe(false, channel, listener, options);
+  readonly once: OnMessage = (
     channel: string,
-    payload: any,
-    options?: MessagePublishOptions,
-  ): Promise<void> {
-    return this.publish(channel as any, payload, options);
-  }
+    listener: MessageListener,
+    options?: ListenerRegistrationOptions,
+  ) => this.subscribe(true, channel, listener, options);
 
-  /**
-   * Subscribes to events on a channel.
-   */
-  on<K extends BuiltinEventChannels>(
-    channel: K,
-    listener: (
-      payload: BuiltinChannelDefinitions[K]["payload"],
-      context: MessageContext,
-    ) => void | Promise<void>,
-    options?: ListenerRegistrationOptions,
-  ): () => void;
-  on<TPayload = any>(
-    channel: string,
-    listener: MessageListener<TPayload>,
-    options?: ListenerRegistrationOptions,
-  ): () => void;
-  on(
-    channel: string,
-    listener: (payload: any, context: MessageContext) => any,
-    options?: ListenerRegistrationOptions,
-  ): () => void {
-    const enrichedOptions = {
-      name: options?.name ?? this.extensionId,
-      extensionId: this.extensionId,
-      ...options,
-    };
-    return this.bus.on(channel, listener, enrichedOptions);
-  }
-
-  /**
-   * Subscribes to a single event on a channel.
-   */
-  once<K extends BuiltinEventChannels>(
-    channel: K,
-    listener: (
-      payload: BuiltinChannelDefinitions[K]["payload"],
-      context: MessageContext,
-    ) => void | Promise<void>,
-    options?: ListenerRegistrationOptions,
-  ): () => void;
-  once<TPayload = any>(
-    channel: string,
-    listener: MessageListener<TPayload>,
-    options?: ListenerRegistrationOptions,
-  ): () => void;
-  once(
-    channel: string,
-    listener: (payload: any, context: MessageContext) => any,
-    options?: ListenerRegistrationOptions,
-  ): () => void {
-    const enrichedOptions = {
-      name: options?.name ?? this.extensionId,
-      extensionId: this.extensionId,
-      ...options,
-    };
-    return this.bus.once(channel, listener, enrichedOptions);
-  }
-
-  /**
-   * Returns whether a channel has any registered request handlers.
-   */
   hasHandler(channel: string): boolean {
     return this.bus.hasHandler(channel);
   }
-
-  /**
-   * Returns whether a channel has any registered event listeners.
-   */
   hasListeners(channel: string): boolean {
     return this.bus.hasListeners(channel);
   }
-
-  /**
-   * Returns all channels currently registered on the bus.
-   */
   getChannels(): string[] {
     return this.bus.getChannels();
   }
 
-  /**
-   * Clears all registered handlers and listeners on the underlying bus.
-   */
+  /** Removes only registrations created through this SDK client. In-flight work continues. */
   clear(): void {
-    this.bus.clear();
+    for (const unsubscribe of this.subscriptions) unsubscribe();
+  }
+  reset(): void {
+    this.clear();
+  }
+  dispose(): void {
+    this.clear();
   }
 
-  /**
-   * Resets the underlying bus.
-   */
-  reset(): void {
-    this.bus.reset();
+  private track(remove: () => void): () => void {
+    const unsubscribe = () => {
+      this.subscriptions.delete(unsubscribe);
+      remove();
+    };
+    this.subscriptions.add(unsubscribe);
+    return unsubscribe;
+  }
+
+  private subscribe(
+    once: boolean,
+    channel: string,
+    listener: MessageListener,
+    options?: ListenerRegistrationOptions,
+  ): () => void {
+    let unsubscribe!: () => void;
+    const callback: MessageListener = (payload, context) => {
+      if (once) unsubscribe();
+      return this.runInScope(() => listener(payload, context));
+    };
+    const registration = {
+      ...options,
+      name: options?.name ?? this.extensionId,
+      extensionId: this.extensionId,
+    };
+    unsubscribe = this.track(
+      once
+        ? this.bus.once(channel, callback, registration)
+        : this.bus.on(channel, callback, registration),
+    );
+    return unsubscribe;
   }
 }
 

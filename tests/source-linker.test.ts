@@ -512,13 +512,13 @@ describe("Source Linker Extension", () => {
 
       // Verify entities in knowledge graph
       const entities = db
-        .query<{ name: string; type: string }>(
+        .query<{ name: string; type: string }, []>(
           "SELECT name, type FROM entities ORDER BY name ASC",
         )
         .all();
       expect(entities.map((e) => e.name)).toEqual([
-        "Adam Optimizer",
-        "Gradient Descent",
+        "source:src-opt-1",
+        "source:src-opt-2",
       ]);
 
       // Verify edges in knowledge graph
@@ -529,7 +529,7 @@ describe("Source Linker Extension", () => {
           relation: string;
           weight: number;
           metadata: string;
-        }>("SELECT relation, weight, metadata FROM edges")
+        }, []>("SELECT relation, weight, metadata FROM edges")
         .all();
 
       expect(edges.length).toBe(2);
@@ -627,14 +627,14 @@ describe("Source Linker Extension", () => {
 
       expect(recResult.recoveredCount).toBe(1);
       expect(recResult.edgesCommitted).toBe(2); // Bidirectional
-      expect(recResult.watermarkAdvancedTo).toBe(5000);
+      expect(recResult.watermarkAdvancedTo).toBe(0);
 
       // Checkpoints should now be resolved and cleared
       expect(sdk.hasCheckpoints()).toBe(false);
 
       // Verify edges were created in database
       const edges = db
-        .query<{ relation: string; metadata: string }>(
+        .query<{ relation: string; metadata: string }, []>(
           "SELECT relation, metadata FROM edges",
         )
         .all();
@@ -645,8 +645,8 @@ describe("Source Linker Extension", () => {
         "System architecture specifies database design constraints.",
       );
 
-      // Watermark advanced
-      expect(sdk.state.getWatermark(WATERMARK_KEY)).toBe("5000");
+      // An individual decision does not prove completion of a discovery batch.
+      expect(sdk.state.getWatermark(WATERMARK_KEY)).toBeNull();
     });
   });
 });

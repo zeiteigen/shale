@@ -1,5 +1,9 @@
-import { statSync } from "node:fs";
-import { getSDK, logger, type ShaleSDK, type CheckpointContext } from "@shale/sdk";
+import {
+  getSDK,
+  logger,
+  type ShaleSDK,
+  type CheckpointContext,
+} from "@shale/sdk";
 import { embedContextualChunks, commitVaultGraph } from "./process-vaults";
 
 export interface RecoverResult {
@@ -34,11 +38,20 @@ export async function run(
   );
 
   let recoveredNotes = 0;
+  let failures = 0;
+  const batches = context.checkpoints.filter(
+    (cp) => cp.data?.type === "vault_batch",
+  );
   const vaultMaxMtime = new Map<string, { path: string; maxMtime: number }>();
 
   for (const cp of context.checkpoints) {
     const data = cp.data;
-    if (!data || data.type !== "ai_summary" || !data.parsedFile) {
+    if (data?.type === "vault_batch") continue;
+    if (
+      !data ||
+      !["ai_summary", "image_analysis"].includes(data.type) ||
+      !(data.parsedFile || data.parsedImage)
+    ) {
       // Not a full note AI summary checkpoint, resolve and continue
       context.resolve(cp.id);
       continue;
@@ -49,43 +62,40 @@ export async function run(
       parsedFile,
       entities = [],
       edges = [],
-      mtime = 0,
-      filePath,
     } = data;
 
     try {
+      const parsed = parsedFile ?? data.parsedImage;
       sdk.logger.log(
-        `[Recovery] Finalizing note "${parsedFile.noteTitle}" with cached AI summary...`,
+        `[Recovery] Finalizing note "${parsed.noteTitle ?? parsed.imageTitle}" with cached AI summary...`,
       );
 
       // Embed the contextual chunks (which include the AI summary expansion)
       const embeddings = await embedContextualChunks(
         sdk,
-        parsedFile.contextualChunks,
-        parsedFile.noteTitle,
+        parsed.contextualChunks,
+        parsed.noteTitle ?? parsed.imageTitle,
       );
 
       // Commit note source and chunks to SQLite
       sdk.ingest.sourceAndChunks({
         source: {
-          type: "markdown_note",
-          uri: parsedFile.noteUri,
+          type: parsedFile ? "markdown_note" : "image",
+          uri: parsed.noteUri ?? parsed.imageUri,
           origin: "obsidian",
-          title: parsedFile.noteTitle,
-          updated_at: parsedFile.updatedAt,
+          title: parsed.noteTitle ?? parsed.imageTitle,
+          updated_at: parsed.updatedAt,
         },
-        chunks: parsedFile.contextualChunks.map(
-          (chunk: any, idx: number) => ({
-            chunk_index: chunk.chunk_index,
-            chunk_type:
-              chunk.chunk_type ??
-              (chunk.heading?.includes("(Expanded Context)")
-                ? "synthetic"
-                : "verbatim"),
-            text_content: chunk.text_content,
-            embedding: embeddings[idx],
-          }),
-        ),
+        chunks: parsed.contextualChunks.map((chunk: any, idx: number) => ({
+          chunk_index: chunk.chunk_index,
+          chunk_type:
+            chunk.chunk_type ??
+            (chunk.heading?.includes("(Expanded Context)")
+              ? "synthetic"
+              : "verbatim"),
+          text_content: chunk.text_content,
+          embedding: embeddings[idx],
+        })),
         namespace: "obsidian",
       });
 
@@ -100,33 +110,33 @@ export async function run(
       }
 
       // Track watermark advancement for this vault
-      let resolvedMtime = mtime;
-      if (filePath) {
-        try {
-          resolvedMtime = Math.max(resolvedMtime, statSync(filePath).mtimeMs);
-        } catch {}
-      }
 
-      if (vault?.path && resolvedMtime > 0) {
-        const current = vaultMaxMtime.get(vault.path)?.maxMtime ?? 0;
-        if (resolvedMtime > current) {
-          vaultMaxMtime.set(vault.path, {
-            path: vault.path,
-            maxMtime: resolvedMtime,
-          });
-        }
-      }
+      // Individual checkpoints do not prove that the discovery batch finished.
+      // Without its batch record, retain the old watermark and rescan the vault.
 
       recoveredNotes++;
       context.resolve(cp.id);
       sdk.logger.log(
-        `[Recovery] Successfully recovered note "${parsedFile.noteTitle}".`,
+        `[Recovery] Successfully recovered note "${parsed.noteTitle ?? parsed.imageTitle}".`,
       );
     } catch (err) {
+      failures++;
       sdk.logger.error(
         `[Recovery] Failed to recover checkpoint for note "${data.noteTitle}":`,
         err,
       );
+    }
+  }
+
+  if (failures)
+    throw new Error(`Obsidian recovery failed for ${failures} checkpoint(s)`);
+
+  for (const batch of batches) {
+    if (!batch.data.preparationFailed) {
+      vaultMaxMtime.set(batch.data.vault.path, {
+        path: batch.data.vault.path,
+        maxMtime: batch.data.maxMtime,
+      });
     }
   }
 
@@ -141,6 +151,8 @@ export async function run(
       );
     }
   }
+
+  for (const batch of batches) context.resolve(batch.id);
 
   sdk.logger.log(
     `[Recovery] Checkpoint recovery finished. Recovered ${recoveredNotes} note(s).`,

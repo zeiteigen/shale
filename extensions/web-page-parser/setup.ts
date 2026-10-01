@@ -4,7 +4,7 @@ import type { WebPageParseRequest } from "./types";
 
 export async function setup(sdkOverride?: ShaleSDK): Promise<void> {
   const sdk = sdkOverride ?? getSDK(import.meta.dir);
-  sdk.messages.handle("web:parse", (request: WebPageParseRequest) => parseWebPage(sdk, request), {
+  sdk.messages.handle("web:parse", (request: WebPageParseRequest, context) => parseWebPage(sdk, request, context.signal), {
     name: "web-page-parser", priority: 20,
     canHandle: (request) => Boolean(request?.url && /^https?:/i.test(request.url)),
   });

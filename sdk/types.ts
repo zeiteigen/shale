@@ -1,3 +1,5 @@
+import type { ChunkType } from "../lib/db";
+
 export interface ExtensionStateRecord {
   extension_id: string;
   state_key: string;
@@ -109,6 +111,8 @@ export interface ChunkInput {
   chunk_index?: number;
   chunk_type?: ChunkType;
   embedding: number[] | Float32Array;
+  /** Required for serialized/precomputed embeddings in a profile-tracked index. */
+  embedding_profile?: import("../lib/embedding-profile").EmbeddingProfile;
   entity_names?: string[];
 }
 
@@ -141,10 +145,7 @@ export type SearchMode = "hybrid" | "vector" | "bm25";
 export type HybridFusionStrategy = "rrf" | "linear" | "custom";
 
 export type BM25KeywordFusionStrategy =
-  | "rrf"
-  | "sum_scores"
-  | "max_score"
-  | "disjunctive";
+  "rrf" | "sum_scores" | "max_score" | "disjunctive";
 
 export interface ChunkSearchResult {
   id: number;
@@ -191,6 +192,7 @@ export interface HybridFusionOptions {
 }
 
 export interface VectorSearchOptions {
+  embeddingProfile?: import("../lib/embedding-profile").EmbeddingProfile;
   query?: string;
   vector?: number[] | Float32Array;
   chunkId?: number;
@@ -226,10 +228,18 @@ export interface HybridSearchOptions {
   fusion?: HybridFusionOptions;
   filterSourceId?: string;
   filterChunkType?: ChunkType;
-  bm25Options?: Omit<BM25SearchOptions, "query" | "limit" | "filterSourceId" | "filterChunkType">;
+  bm25Options?: Omit<
+    BM25SearchOptions,
+    "query" | "limit" | "filterSourceId" | "filterChunkType"
+  >;
   vectorOptions?: Omit<
     VectorSearchOptions,
-    "query" | "vector" | "chunkId" | "limit" | "filterSourceId" | "filterChunkType"
+    | "query"
+    | "vector"
+    | "chunkId"
+    | "limit"
+    | "filterSourceId"
+    | "filterChunkType"
   >;
 }
 
@@ -239,4 +249,3 @@ export type UnifiedSearchOptions =
   | ({ mode: "bm25" } & BM25SearchOptions);
 
 export * from "../lib/messages.types";
-

@@ -378,7 +378,7 @@ sdk.graph.ingest({
   - [`clear(): number`](file:///home/munch/Projects/shale/sdk/checkpoint.ts#L198-L206)
 
 #### 6. LLM & Embedding Clients
-- **Embeddings ([`sdk/embed.ts`](file:///home/munch/Projects/shale/sdk/embed.ts)):** [`sdk.embed(text | texts)`](file:///home/munch/Projects/shale/sdk/index.ts#L152-L162) connects to any OpenAI-compatible `/v1/embeddings` endpoint (OpenAI, Ollama, vLLM, LMStudio), automatically padding or truncating vectors to 4096 dimensions for sqlite-vec.
+- **Embeddings ([`sdk/embed.ts`](file:///home/munch/Projects/shale/sdk/embed.ts)):** [`sdk.embed(text | texts)`](file:///home/munch/Projects/shale/sdk/index.ts#L152-L162) connects to any OpenAI-compatible `/v1/embeddings` endpoint (OpenAI, Ollama, vLLM, LMStudio), padding vectors to the configured storage dimensions (default 4096) and rejecting truncation. See [model configuration and index migration](sdk/MODELS.md).
 - **Chat LLM ([`sdk/llm.ts`](file:///home/munch/Projects/shale/sdk/llm.ts)):** [`sdk.queryLLM(prompt | options)`](file:///home/munch/Projects/shale/sdk/index.ts#L167-L180) connects to `/v1/chat/completions` with support for system instructions, images (URLs or base64 data URIs), and token controls.
 
 #### 7. Multi-Modal Search (`sdk.search`)

@@ -6,9 +6,9 @@ import {
   prepareVault,
   finalizeVault,
   expandNoteWithChatModel,
-  type VaultInfo,
 } from "../extensions/obsidian/process-vaults";
-import { generateFallbackEmbeddings } from "../extensions/obsidian/ingest-file";
+import type { VaultInfo } from "../extensions/obsidian/vault-finder";
+import { testEmbeddings } from "./fixtures/embedding";
 import { run as recover } from "../extensions/obsidian/recover";
 import { createExtensionSDK } from "../sdk";
 import { isTExtensionManifest } from "../lib/extension";
@@ -78,7 +78,9 @@ Short note on qubits and superposition.`,
 
     // Verify checkpoint was saved during AI summary generation
     expect(mockSdk.hasCheckpoints()).toBe(true);
-    const checkpoints = mockSdk.getCheckpoints();
+    const checkpoints = mockSdk
+      .getCheckpoints()
+      .filter((cp) => cp.data.type === "ai_summary");
     expect(checkpoints.length).toBe(1);
     expect(checkpoints[0].data.type).toBe("ai_summary");
     expect(checkpoints[0].data.noteTitle).toBe("Quantum");
@@ -137,7 +139,7 @@ Short note on qubits and superposition.`,
     const mockSdk = createExtensionSDK(extensionId, "obsidian");
     mockSdk.queryLLM = (async () => "AI summary text") as any;
     mockSdk.embed = (async (texts: any) =>
-      generateFallbackEmbeddings(Array.isArray(texts) ? texts.length : 1, 4096)) as any;
+      testEmbeddings(Array.isArray(texts) ? texts.length : 1, 4096)) as any;
 
     // Phase 1: prepareVault creates checkpoint
     const prepared = await prepareVault(vault, mockSdk, true);
@@ -146,6 +148,40 @@ Short note on qubits and superposition.`,
     // Phase 2: finalizeVault ingests and clears checkpoint
     await finalizeVault(prepared, mockSdk);
     expect(mockSdk.hasCheckpoints()).toBe(false);
+  });
+
+  it("retains failed embeddings and their watermark, then recovers without another chat call", async () => {
+    const path = mkdtempSync(join(tmpdir(), "obsidian-embedding-retry-"));
+    writeFileSync(join(path, "Retry.md"), "# Retry\nAn atomic note.");
+    const sdk = createExtensionSDK(extensionId, "obsidian");
+    let chatCalls = 0;
+    sdk.queryLLM = (async () => {
+      chatCalls++;
+      return "Cached expansion.";
+    }) as any;
+    sdk.embed = (async () => {
+      throw new Error("Embedding endpoint offline");
+    }) as any;
+    const prepared = await prepareVault(
+      { id: "retry", name: "Retry vault", path },
+      sdk,
+      true,
+    );
+    await expect(finalizeVault(prepared, sdk)).rejects.toThrow(
+      "watermark retained",
+    );
+    expect(sdk.hasCheckpoints()).toBe(true);
+    expect(sdk.state.getWatermark(`vault:${path}:mtime`)).toBeNull();
+    await expect(recover(sdk)).rejects.toThrow("recovery failed");
+    expect(sdk.hasCheckpoints()).toBe(true);
+    sdk.embed = (async (texts: string[]) =>
+      testEmbeddings(texts.length)) as any;
+    await recover(sdk);
+    expect(chatCalls).toBe(1);
+    expect(sdk.hasCheckpoints()).toBe(false);
+    expect(
+      Number(sdk.state.getWatermark(`vault:${path}:mtime`)),
+    ).toBeGreaterThan(0);
   });
 
   it("recovers uncommitted AI summaries via recover.ts, ingests into DB, and advances watermark", async () => {
@@ -174,7 +210,7 @@ Backpropagation and transformers.`,
       return "Backpropagation; Adam optimizer; Transformer attention heads; Gradient descent.";
     }) as any;
     mockSdk.embed = (async (texts: any) =>
-      generateFallbackEmbeddings(Array.isArray(texts) ? texts.length : 1, 4096)) as any;
+      testEmbeddings(Array.isArray(texts) ? texts.length : 1, 4096)) as any;
 
     // Simulate Phase 1 running and saving checkpoint
     await prepareVault(vault, mockSdk, true);
@@ -221,9 +257,10 @@ Backpropagation and transformers.`,
     };
 
     const mockSdk = createExtensionSDK(extensionId, "obsidian");
-    mockSdk.queryLLM = (async () => "Perceptron; Activation functions; Weights.") as any;
+    mockSdk.queryLLM = (async () =>
+      "Perceptron; Activation functions; Weights.") as any;
     mockSdk.embed = (async (texts: any) =>
-      generateFallbackEmbeddings(Array.isArray(texts) ? texts.length : 1, 4096)) as any;
+      testEmbeddings(Array.isArray(texts) ? texts.length : 1, 4096)) as any;
 
     // Prepare note to create checkpoint
     await prepareVault(vault, mockSdk, true);
@@ -254,7 +291,7 @@ Backpropagation and transformers.`,
       namespace: "obsidian",
     };
 
-    await runCron(cron);
+    await runCron(cron, mockSdk);
 
     // Verify recovery ran first and cron ran right after
     const result = (globalThis as any).cronExecutionResult;

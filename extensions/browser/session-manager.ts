@@ -40,7 +40,13 @@ export function setActiveSession(
  */
 export function buildSequentialEdges(
   visits: SessionVisitRecord[],
-): Array<{ source: string; target: string; relation: string; weight: number; metadata: any }> {
+): Array<{
+  source: string;
+  target: string;
+  relation: string;
+  weight: number;
+  metadata: any;
+}> {
   const edges: Array<{
     source: string;
     target: string;
@@ -52,11 +58,20 @@ export function buildSequentialEdges(
   for (let i = 1; i < visits.length; i++) {
     const prev = visits[i - 1];
     const curr = visits[i];
-    const sameTab = prev.tabId === undefined || curr.tabId === undefined
-      ? prev.windowId === undefined || curr.windowId === undefined || prev.windowId === curr.windowId
-      : prev.tabId === curr.tabId;
-    const openedFromPrevious = curr.openerTabId !== undefined && curr.openerTabId === prev.tabId;
-    if (prev.url && curr.url && prev.url !== curr.url && (sameTab || openedFromPrevious)) {
+    const sameTab =
+      prev.tabId === undefined || curr.tabId === undefined
+        ? prev.windowId === undefined ||
+          curr.windowId === undefined ||
+          prev.windowId === curr.windowId
+        : prev.tabId === curr.tabId;
+    const openedFromPrevious =
+      curr.openerTabId !== undefined && curr.openerTabId === prev.tabId;
+    if (
+      prev.url &&
+      curr.url &&
+      prev.url !== curr.url &&
+      (sameTab || openedFromPrevious)
+    ) {
       edges.push({
         source: pageEntityName(prev.url),
         target: pageEntityName(curr.url),
@@ -131,14 +146,28 @@ export async function finalizeSession(
   prepared: PreparedSessionData,
   settings: Partial<BrowserExtensionSettings>,
 ): Promise<IngestedSessionResult> {
-  const { sessionId, startTime, endTime, visits, synthesis, checkpointId, namespace } = prepared;
+  const {
+    sessionId,
+    startTime,
+    endTime,
+    visits,
+    synthesis,
+    checkpointId,
+    namespace,
+  } = prepared;
   const sessionEntity = sessionEntityName(sessionId);
-  const actualDomains = [...new Set(visits.map((visit) => visit.domain).filter(Boolean))];
-  const actualDomainKeys = new Set(actualDomains.map((domain) => domain.toLocaleLowerCase()));
-  const dominantDomains = synthesis.dominantDomains.filter(
-    (domain) => actualDomainKeys.has(domain.toLocaleLowerCase()),
+  const actualDomains = [
+    ...new Set(visits.map((visit) => visit.domain).filter(Boolean)),
+  ];
+  const actualDomainKeys = new Set(
+    actualDomains.map((domain) => domain.toLocaleLowerCase()),
   );
-  const topics = sanitizeTopics(synthesis.topics, { title: synthesis.sessionTitle });
+  const dominantDomains = synthesis.dominantDomains.filter((domain) =>
+    actualDomainKeys.has(domain.toLocaleLowerCase()),
+  );
+  const topics = sanitizeTopics(synthesis.topics, {
+    title: synthesis.sessionTitle,
+  });
 
   sdk.logger.info(
     `[browser] [Phase 2: Embedding Model] Embedding and ingesting session "${synthesis.sessionTitle}"...`,
@@ -282,15 +311,10 @@ export async function commitSessionToGraph(
   visits: SessionVisitRecord[],
   settings: Partial<BrowserExtensionSettings>,
 ): Promise<IngestedSessionResult> {
-  const prepared = await prepareSession(
-    sdk,
-    sessionId,
-    startTime,
-    endTime,
-    visits,
-    settings,
+  return sdk.models.batch(
+    () => prepareSession(sdk, sessionId, startTime, endTime, visits, settings),
+    (prepared) => finalizeSession(sdk, prepared, settings),
   );
-  return await finalizeSession(sdk, prepared, settings);
 }
 
 /**
@@ -301,9 +325,11 @@ export async function recordSessionVisit(
   visit: SessionVisitRecord,
   explicitSessionId?: string,
   settings: Partial<BrowserExtensionSettings> = {},
+  prepareOnly = false,
 ): Promise<{
   activeSession: ActiveSessionState;
   finalizedSession?: IngestedSessionResult;
+  preparedSession?: PreparedSessionData;
   sequentialEdge?: { source: string; target: string };
 }> {
   const inactivityMinutes = settings.sessionInactivityMinutes ?? 30;
@@ -312,6 +338,7 @@ export async function recordSessionVisit(
 
   let active = getActiveSession(sdk);
   let finalizedResult: IngestedSessionResult | undefined;
+  let preparedSession: PreparedSessionData | undefined;
 
   // Check if existing session needs finalization due to idle timeout or explicit new session ID
   if (active) {
@@ -322,14 +349,25 @@ export async function recordSessionVisit(
     if (isIdle || isDifferentExplicitId) {
       if (active.visits.length > 0) {
         try {
-          finalizedResult = await commitSessionToGraph(
-            sdk,
-            active.sessionId,
-            active.startTime,
-            active.lastActivityTime,
-            active.visits,
-            settings,
-          );
+          if (prepareOnly) {
+            preparedSession = await prepareSession(
+              sdk,
+              active.sessionId,
+              active.startTime,
+              active.lastActivityTime,
+              active.visits,
+              settings,
+            );
+          } else {
+            finalizedResult = await commitSessionToGraph(
+              sdk,
+              active.sessionId,
+              active.startTime,
+              active.lastActivityTime,
+              active.visits,
+              settings,
+            );
+          }
         } catch (err: any) {
           sdk.logger.error(
             `Failed to commit session ${active.sessionId}: ${err?.message || err}`,
@@ -354,10 +392,14 @@ export async function recordSessionVisit(
   let sequentialEdge: { source: string; target: string } | undefined;
   if (active.visits.length > 0) {
     const prev = active.visits[active.visits.length - 1];
-    const sameTab = prev.tabId === undefined || visit.tabId === undefined
-      ? prev.windowId === undefined || visit.windowId === undefined || prev.windowId === visit.windowId
-      : prev.tabId === visit.tabId;
-    const openedFromPrevious = visit.openerTabId !== undefined && visit.openerTabId === prev.tabId;
+    const sameTab =
+      prev.tabId === undefined || visit.tabId === undefined
+        ? prev.windowId === undefined ||
+          visit.windowId === undefined ||
+          prev.windowId === visit.windowId
+        : prev.tabId === visit.tabId;
+    const openedFromPrevious =
+      visit.openerTabId !== undefined && visit.openerTabId === prev.tabId;
     if (prev.url !== visit.url && (sameTab || openedFromPrevious)) {
       sequentialEdge = {
         source: pageEntityName(prev.url),
@@ -379,6 +421,7 @@ export async function recordSessionVisit(
   return {
     activeSession: active,
     finalizedSession: finalizedResult,
+    preparedSession,
     sequentialEdge,
   };
 }
@@ -412,11 +455,11 @@ export async function finalizeActiveSession(
 /**
  * Ingests an explicit session snapshot payload provided directly by the Chrome extension.
  */
-export async function ingestSessionSnapshot(
+export async function prepareSessionSnapshot(
   sdk: ShaleSDK,
   payload: SessionSnapshotPayload,
   settings: Partial<BrowserExtensionSettings> = {},
-): Promise<IngestedSessionResult | null> {
+): Promise<PreparedSessionData | null> {
   if (!payload.pages || payload.pages.length === 0) {
     return null;
   }
@@ -434,16 +477,28 @@ export async function ingestSessionSnapshot(
   });
 
   const endTime =
-    payload.endTime ||
-    visits[visits.length - 1]?.visitedAt ||
-    Date.now();
+    payload.endTime || visits[visits.length - 1]?.visitedAt || Date.now();
 
-  return commitSessionToGraph(
+  return prepareSession(
     sdk,
     payload.sessionId,
     payload.startTime,
     endTime,
     visits,
     settings,
+  );
+}
+
+export function ingestSessionSnapshot(
+  sdk: ShaleSDK,
+  payload: SessionSnapshotPayload,
+  settings: Partial<BrowserExtensionSettings> = {},
+): Promise<IngestedSessionResult | null> {
+  return sdk.models.batch(
+    () => prepareSessionSnapshot(sdk, payload, settings),
+    (prepared) =>
+      prepared
+        ? finalizeSession(sdk, prepared, settings)
+        : Promise.resolve(null),
   );
 }

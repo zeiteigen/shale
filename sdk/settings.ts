@@ -9,7 +9,7 @@ import { Logger } from "./logger";
  * can update configuration options at runtime without restarting the application.
  */
 export class SettingsManager<
-  T extends Record<string, any> = Record<string, any>,
+  T extends Record<string, any> = Record<string, unknown>,
 > {
   private readonly extensionDir?: string;
   private readonly explicitPath?: string;
@@ -57,21 +57,21 @@ export class SettingsManager<
    *
    * @returns The parsed settings object, or an empty object if file is missing or invalid.
    */
-  getAll(): T {
+  getAll<R = T>(): R {
     const path = this.getSettingsPath();
     if (!path || !existsSync(path)) {
-      return {} as T;
+      return {} as R;
     }
 
     try {
       const content = readFileSync(path, "utf-8");
       if (!content.trim()) {
-        return {} as T;
+        return {} as R;
       }
-      return JSON.parse(content) as T;
+      return JSON.parse(content) as R;
     } catch (err) {
       this.logger.warn(`Failed to read settings from ${path}:`, err);
-      return {} as T;
+      return {} as R;
     }
   }
 
@@ -83,7 +83,7 @@ export class SettingsManager<
    * @param defaultValue Optional fallback value if the key is not defined in settings.json
    */
   get<K extends keyof T>(key: K, defaultValue: T[K]): T[K];
-  get<V = any>(key: string, defaultValue?: V): V;
+  get<V = unknown>(key: string, defaultValue?: V): V;
   get(key: string, defaultValue?: any): any {
     const all = this.getAll();
     if (all && Object.prototype.hasOwnProperty.call(all, key)) {

@@ -27,7 +27,6 @@
   "dynamicTokenMax": 500,
   "describeImages": true,
   "contextHydrationLimit": 3,
-  "fallbackEmbeddingDimensions": 4096,
   "namespace": "obsidian",
   "forceAll": false,
   "customVaults": []

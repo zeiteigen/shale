@@ -111,9 +111,9 @@ describe("Main Process CLI & Manual Cron Triggering", () => {
 
   describe("triggerCron", () => {
     it("successfully triggers a specific matched cron", async () => {
-      let triggered: CronExtension | null = null;
+      const triggered: CronExtension[] = [];
       const mockRunCron = async (cron: CronExtension) => {
-        triggered = cron;
+        triggered.push(cron);
       };
 
       const result = await triggerCron("db-backup-cron", {
@@ -123,7 +123,7 @@ describe("Main Process CLI & Manual Cron Triggering", () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toContain('Cron "db-backup-cron" completed successfully');
-      expect(triggered?.name).toBe("db-backup-cron");
+      expect(triggered[0]?.name).toBe("db-backup-cron");
     });
 
     it("returns error message when cron is not found", async () => {
@@ -510,8 +510,8 @@ describe("Main Process CLI & Manual Cron Triggering", () => {
       const manager = new SettingsManager(extDir);
 
       // Verify initial values
-      expect(manager.get("maxItems")).toBe(10);
-      expect(manager.get("enabled")).toBe(true);
+      expect(manager.get<number>("maxItems")).toBe(10);
+      expect(manager.get<boolean>("enabled")).toBe(true);
 
       // Execute CLI modification command
       const cliResult = await handleCliCommand("settings set sample-ext maxItems 77", {
@@ -520,12 +520,12 @@ describe("Main Process CLI & Manual Cron Triggering", () => {
       expect(cliResult.success).toBe(true);
 
       // Immediately query manager without restart or re-initialization
-      expect(manager.get("maxItems")).toBe(77);
+      expect(manager.get<number>("maxItems")).toBe(77);
       expect(manager.getAll().maxItems).toBe(77);
 
       // Modify another setting via CLI
       await handleCliCommand("settings set sample-ext enabled false", { rootDir: tempDir });
-      expect(manager.get("enabled")).toBe(false);
+      expect(manager.get<boolean>("enabled")).toBe(false);
       expect(manager.getAll().enabled).toBe(false);
     });
   });

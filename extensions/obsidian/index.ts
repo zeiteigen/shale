@@ -76,27 +76,20 @@ export async function run(
 
   sdk.logger.log(`Discovered ${vaults.length} vault(s).`);
 
-  // Phase 1: Run Chat Model across all vaults
-  sdk.logger.log(
-    `=== Phase 1: Chat Model Processing (Summaries & Image Descriptions) ===`,
+  return sdk.models.batch(
+    async () => {
+      const preparedVaults: PreparedVault[] = [];
+      for (const vault of vaults)
+        preparedVaults.push(await prepareVault(vault, sdk, isForce));
+      return preparedVaults;
+    },
+    async (preparedVaults) => {
+      const results: ProcessVaultResult[] = [];
+      for (const prepared of preparedVaults)
+        results.push(await finalizeVault(prepared, sdk));
+      return results;
+    },
   );
-  const preparedVaults: PreparedVault[] = [];
-  for (const vault of vaults) {
-    const prepared = await prepareVault(vault, sdk, isForce);
-    preparedVaults.push(prepared);
-  }
-
-  // Phase 2: Run Embedding Model across all vaults
-  sdk.logger.log(
-    `=== Phase 2: Embedding Model Processing & Database Ingestion ===`,
-  );
-  const results: ProcessVaultResult[] = [];
-  for (const prepared of preparedVaults) {
-    const result = await finalizeVault(prepared, sdk);
-    results.push(result);
-  }
-
-  return results;
 }
 
 // Standalone execution support

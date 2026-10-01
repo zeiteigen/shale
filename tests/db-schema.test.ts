@@ -187,7 +187,7 @@ describe("Database Schema & Trigger Integrity", () => {
           namespace: string;
           name: string;
           type: string;
-        }>("SELECT namespace, name, type FROM entities ORDER BY id ASC")
+        }, []>("SELECT namespace, name, type FROM entities ORDER BY id ASC")
         .all();
 
       expect(all).toEqual([
@@ -224,12 +224,12 @@ describe("Database Schema & Trigger Integrity", () => {
       const techRes = db
         .query<{
           type: string;
-        }>("SELECT type FROM entities WHERE namespace = 'tech' AND name = 'Apple'")
+        }, []>("SELECT type FROM entities WHERE namespace = 'tech' AND name = 'Apple'")
         .get();
       const cookRes = db
         .query<{
           type: string;
-        }>("SELECT type FROM entities WHERE namespace = 'cooking' AND name = 'Apple'")
+        }, []>("SELECT type FROM entities WHERE namespace = 'cooking' AND name = 'Apple'")
         .get();
 
       expect(techRes?.type).toBe("Corporation");
@@ -263,12 +263,12 @@ describe("Database Schema & Trigger Integrity", () => {
       const val1 = db
         .query<{
           value: string;
-        }>("SELECT value FROM extension_state WHERE extension_id = 'ext-1' AND state_key = 'watermark'")
+        }, []>("SELECT value FROM extension_state WHERE extension_id = 'ext-1' AND state_key = 'watermark'")
         .get();
       const val2 = db
         .query<{
           value: string;
-        }>("SELECT value FROM extension_state WHERE extension_id = 'ext-2' AND state_key = 'watermark'")
+        }, []>("SELECT value FROM extension_state WHERE extension_id = 'ext-2' AND state_key = 'watermark'")
         .get();
 
       expect(val1?.value).toBe("100");
@@ -301,7 +301,7 @@ describe("Database Schema & Trigger Integrity", () => {
         .query<{
           value: string;
           updated_at: number;
-        }>("SELECT value, updated_at FROM extension_state WHERE extension_id = 'obsidian' AND state_key = 'cursor'")
+        }, []>("SELECT value, updated_at FROM extension_state WHERE extension_id = 'obsidian' AND state_key = 'cursor'")
         .get();
 
       expect(res?.value).toBe("150");
@@ -319,7 +319,7 @@ describe("Database Schema & Trigger Integrity", () => {
 
       // 2. Insert chunk
       const chunkRes = db
-        .query<{ id: number }>(
+        .query<{ id: number }, []>(
           `
         INSERT INTO chunks (source_id, chunk_index, text_content)
         VALUES ('src-1', 0, 'Hello vector world')
@@ -337,13 +337,13 @@ describe("Database Schema & Trigger Integrity", () => {
 
       // Verify presence in chunks, fts, and vector_index
       const countChunksBefore = db
-        .query<{ c: number }>("SELECT count(*) as c FROM chunks")
+        .query<{ c: number }, []>("SELECT count(*) as c FROM chunks")
         .get()!.c;
       const countFtsBefore = db
-        .query<{ c: number }>("SELECT count(*) as c FROM chunks_fts")
+        .query<{ c: number }, []>("SELECT count(*) as c FROM chunks_fts")
         .get()!.c;
       const countVecBefore = db
-        .query<{ c: number }>("SELECT count(*) as c FROM vector_index")
+        .query<{ c: number }, []>("SELECT count(*) as c FROM vector_index")
         .get()!.c;
 
       expect(countChunksBefore).toBe(1);
@@ -354,13 +354,13 @@ describe("Database Schema & Trigger Integrity", () => {
       db.run("DELETE FROM sources WHERE id = 'src-1';");
 
       const countChunksAfter = db
-        .query<{ c: number }>("SELECT count(*) as c FROM chunks")
+        .query<{ c: number }, []>("SELECT count(*) as c FROM chunks")
         .get()!.c;
       const countFtsAfter = db
-        .query<{ c: number }>("SELECT count(*) as c FROM chunks_fts")
+        .query<{ c: number }, []>("SELECT count(*) as c FROM chunks_fts")
         .get()!.c;
       const countVecAfter = db
-        .query<{ c: number }>("SELECT count(*) as c FROM vector_index")
+        .query<{ c: number }, []>("SELECT count(*) as c FROM vector_index")
         .get()!.c;
 
       expect(countChunksAfter).toBe(0);
@@ -375,7 +375,7 @@ describe("Database Schema & Trigger Integrity", () => {
       `);
 
       const chunk = db
-        .query<{ id: number }>(
+        .query<{ id: number }, []>(
           `
         INSERT INTO chunks (source_id, chunk_index, text_content)
         VALUES ('src-2', 0, 'Direct chunk delete')
@@ -391,14 +391,14 @@ describe("Database Schema & Trigger Integrity", () => {
       ]);
 
       expect(
-        db.query<{ c: number }>("SELECT count(*) as c FROM vector_index").get()!
+        db.query<{ c: number }, []>("SELECT count(*) as c FROM vector_index").get()!
           .c,
       ).toBe(1);
 
       db.run("DELETE FROM chunks WHERE id = ?;", [chunk.id]);
 
       expect(
-        db.query<{ c: number }>("SELECT count(*) as c FROM vector_index").get()!
+        db.query<{ c: number }, []>("SELECT count(*) as c FROM vector_index").get()!
           .c,
       ).toBe(0);
     });
@@ -410,7 +410,7 @@ describe("Database Schema & Trigger Integrity", () => {
       `);
 
       const chunk = db
-        .query<{ id: number }>(
+        .query<{ id: number }, []>(
           `
         INSERT INTO chunks (source_id, chunk_index, text_content)
         VALUES ('src-3', 0, 'Original text')
@@ -448,7 +448,7 @@ describe("Database Schema & Trigger Integrity", () => {
             data: string;
             created_at: number;
             status: string;
-          }>("SELECT * FROM checkpoints WHERE id = 'cp-1'")
+          }, []>("SELECT * FROM checkpoints WHERE id = 'cp-1'")
           .get()!;
 
         expect(res).toBeDefined();
@@ -489,7 +489,7 @@ describe("Database Schema & Trigger Integrity", () => {
         `);
 
         const chunk = db
-          .query<{ chunk_type: string }>(
+          .query<{ chunk_type: string }, []>(
             "SELECT chunk_type FROM chunks WHERE source_id = 'src-chunk-type'",
           )
           .get();
@@ -507,7 +507,7 @@ describe("Database Schema & Trigger Integrity", () => {
         `);
 
         const chunks = db
-          .query<{ chunk_index: number; chunk_type: string }>(
+          .query<{ chunk_index: number; chunk_type: string }, []>(
             "SELECT chunk_index, chunk_type FROM chunks WHERE source_id = 'src-chunk-type' AND chunk_index IN (1, 2) ORDER BY chunk_index ASC",
           )
           .all();

@@ -232,7 +232,7 @@ describe("Cross-Extension Messaging System", () => {
       extB.messages.handle("file:process", async (req: ProcessFileRequest): Promise<ProcessFileResponse> => {
         return {
           success: true,
-          filePath: req.filePath,
+          filePath: req.filePath ?? "",
           fileType: req.fileType ?? "image",
           title: "diagram.png",
           uri: `file://${req.filePath}`,
@@ -359,9 +359,9 @@ describe("Cross-Extension Messaging System", () => {
       const extA = createExtensionSDK("ingestor", "ns", undefined, undefined, undefined, undefined, undefined, bus);
       const extB = createExtensionSDK("listener", "ns", undefined, undefined, undefined, undefined, undefined, bus);
 
-      let ingestedEvent: SourceIngestedEvent | null = null;
+      const ingestedEvents: SourceIngestedEvent[] = [];
       extB.messages.on("source:ingested", (evt) => {
-        ingestedEvent = evt;
+        ingestedEvents.push(evt);
       });
 
       await extA.messages.publish("source:ingested", {
@@ -374,9 +374,9 @@ describe("Cross-Extension Messaging System", () => {
         timestamp: Date.now(),
       });
 
-      expect(ingestedEvent).not.toBeNull();
-      expect(ingestedEvent?.sourceId).toBe("src-123");
-      expect(ingestedEvent?.origin).toBe("obsidian");
+      expect(ingestedEvents).toHaveLength(1);
+      expect(ingestedEvents[0]?.sourceId).toBe("src-123");
+      expect(ingestedEvents[0]?.origin).toBe("obsidian");
     });
 
     it("implements graph:link-entities request channel", async () => {

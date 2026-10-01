@@ -24,12 +24,16 @@ import {
 import {
   ingestSessionSnapshot,
   recordSessionVisit,
+  finalizeSession,
 } from "./session-manager";
 
 /**
  * Splits text into chunks of target character size on sentence or paragraph boundaries.
  */
-export function chunkText(text: string, targetChunkSize: number = 1000): string[] {
+export function chunkText(
+  text: string,
+  targetChunkSize: number = 1000,
+): string[] {
   const limit = Math.max(64, Math.floor(targetChunkSize));
   const clean = text.replace(/\r\n?/g, "\n").trim();
   if (!clean) return [""];
@@ -47,7 +51,7 @@ export function chunkText(text: string, targetChunkSize: number = 1000): string[
       currentChunk += separator + value;
       return;
     }
-    if (currentChunk) chunks.push(currentChunk), currentChunk = "";
+    if (currentChunk) (chunks.push(currentChunk), (currentChunk = ""));
     if (value.length <= limit) {
       currentChunk = value;
       return;
@@ -57,7 +61,7 @@ export function chunkText(text: string, targetChunkSize: number = 1000): string[
     // then hard-split any single token so the configured limit is guaranteed.
     for (const word of value.split(/\s+/)) {
       if (word.length > limit) {
-        if (currentChunk) chunks.push(currentChunk), currentChunk = "";
+        if (currentChunk) (chunks.push(currentChunk), (currentChunk = ""));
         for (let offset = 0; offset < word.length; offset += limit) {
           const part = word.slice(offset, offset + limit);
           if (part.length === limit) chunks.push(part);
@@ -75,7 +79,8 @@ export function chunkText(text: string, targetChunkSize: number = 1000): string[
   };
 
   for (const block of clean.split(/\n+/)) {
-    for (const sentence of block.match(/[^.!?]+(?:[.!?]+|$)/g) ?? [block]) append(sentence);
+    for (const sentence of block.match(/[^.!?]+(?:[.!?]+|$)/g) ?? [block])
+      append(sentence);
   }
   if (currentChunk) chunks.push(currentChunk);
   return chunks.length > 0 ? chunks : [clean.slice(0, limit)];
@@ -92,21 +97,23 @@ export async function preparePageVisit(
 ): Promise<PreparedPageData | null> {
   const filter = evaluateUrl(payload.url, settings);
   if (!filter.allowed) {
-    sdk.logger.debug(
-      `Excluded page "${payload.url}": ${filter.reason}`,
-    );
+    sdk.logger.debug(`Excluded page "${payload.url}": ${filter.reason}`);
     return null;
   }
 
   const title = (payload.title || filter.domain || "Untitled Page").trim();
-  sdk.logger.info(`[browser] [Phase 1: Chat Model] Preparing "${title}" (${filter.domain})`);
+  sdk.logger.info(
+    `[browser] [Phase 1: Chat Model] Preparing "${title}" (${filter.domain})`,
+  );
   let rawContent = (payload.textContent || payload.excerpt || title).trim();
   let parsedChunks: string[] | undefined;
   let contextualSummary: string | undefined;
-  let imageChunks: Array<{
-    text_content: string;
-    chunk_type: "verbatim" | "synthetic";
-  }> | undefined;
+  let imageChunks:
+    | Array<{
+        text_content: string;
+        chunk_type: "verbatim" | "synthetic";
+      }>
+    | undefined;
   // The page parser owns HTML/readability extraction, contextualization, and
   // image delegation. It is optional so browser ingestion remains usable when
   // this extension is intentionally not installed.
@@ -119,22 +126,28 @@ export async function preparePageVisit(
         text_content: string;
         chunk_type: "verbatim" | "synthetic";
       }>;
-    }>("web:parse", {
-      url: filter.cleanUrl,
-      title,
-      textContent: rawContent,
-      html: payload.html,
-      imageUrls: payload.images?.map((image) => image.url),
-      includeImages: true,
-    // Parsing may include local LLM and vision calls; allow the same cold-load
-    // window used by Shale's local-model clients instead of timing out at 1.5s.
-    }, { target: "web-page-parser", timeoutMs: 300000 });
+    }>(
+      "web:parse",
+      {
+        url: filter.cleanUrl,
+        title,
+        textContent: rawContent,
+        html: payload.html,
+        imageUrls: payload.images?.map((image) => image.url),
+        includeImages: true,
+        // Parsing may include local LLM and vision calls; allow the same cold-load
+        // window used by Shale's local-model clients instead of timing out at 1.5s.
+      },
+      { target: "web-page-parser", timeoutMs: 300000 },
+    );
     rawContent = parsed.text || rawContent;
     parsedChunks = parsed.chunks;
     contextualSummary = parsed.contextualSummary;
     imageChunks = parsed.imageChunks;
   } catch (error) {
-    sdk.logger.debug(`Web-page parser unavailable for ${filter.cleanUrl}; using browser content: ${String(error)}`);
+    sdk.logger.debug(
+      `Web-page parser unavailable for ${filter.cleanUrl}; using browser content: ${String(error)}`,
+    );
   }
   const visitedAt = payload.visitedAt || Date.now();
   const namespace = settings.namespace || sdk.namespace || "browser";
@@ -162,6 +175,26 @@ export async function preparePageVisit(
   // Phase 1 Chat Model Call: generate summary, topics, and category
   const checkpointId = `browser_page:${filter.cleanUrl}`;
   const analysis = await analyzePageWithLLM(sdk, pageData, settings);
+  const sessionUpdate =
+    pageData.recordInSession === false
+      ? null
+      : await recordSessionVisit(
+          sdk,
+          {
+            url: filter.cleanUrl,
+            title,
+            domain: filter.domain,
+            visitedAt,
+            tabId: pageData.tabId,
+            windowId: pageData.windowId,
+            openerTabId: pageData.openerTabId,
+            transitionType: pageData.transitionType,
+            pageSourceId: browserSourceId("web", filter.cleanUrl),
+          },
+          pageData.sessionId,
+          settings,
+          true,
+        );
 
   // Save checkpoint to SQLite (guarantees zero lost tokens if interrupted)
   sdk.checkpoint.save(
@@ -176,6 +209,7 @@ export async function preparePageVisit(
       parsedChunks,
       contextualSummary,
       imageChunks,
+      sessionUpdate,
     },
     { id: checkpointId, key: checkpointId },
   );
@@ -190,6 +224,7 @@ export async function preparePageVisit(
     parsedChunks,
     contextualSummary,
     imageChunks,
+    sessionUpdate,
   };
 }
 
@@ -202,7 +237,15 @@ export async function finalizePageVisit(
   prepared: PreparedPageData,
   settings: Partial<BrowserExtensionSettings>,
 ): Promise<IngestedPageResult> {
-  const { pageData, analysis, cleanUrl, domain, checkpointId, namespace } = prepared;
+  const { pageData, analysis, cleanUrl, domain, checkpointId, namespace } =
+    prepared;
+  if (prepared.sessionUpdate?.preparedSession) {
+    await finalizeSession(
+      sdk,
+      prepared.sessionUpdate.preparedSession,
+      settings,
+    );
+  }
   const title = pageData.title;
   const rawContent = pageData.textContent;
   const visitedAt = pageData.visitedAt;
@@ -214,20 +257,24 @@ export async function finalizePageVisit(
   // Phase 2 Chunking & Embeddings
   const chunkSize = settings.chunkSize ?? 1000;
   const rawChunks = chunkText(
-    prepared.parsedChunks?.length ? prepared.parsedChunks.join("\n\n") : rawContent,
+    prepared.parsedChunks?.length
+      ? prepared.parsedChunks.join("\n\n")
+      : rawContent,
     chunkSize,
   ).filter(Boolean);
-  const topics = settings.extractTopics === false
-    ? []
-    : sanitizeTopics(analysis.topics, { title, domain });
+  const topics =
+    settings.extractTopics === false
+      ? []
+      : sanitizeTopics(analysis.topics, { title, domain });
 
   const referenceLines = [
     ...(pageData.author ? [`Author: ${pageData.author}`] : []),
-    ...(pageData.links ?? []).map((link) =>
-      `Link: ${link.text?.trim() || link.url}\nURL: ${link.url}`
+    ...(pageData.links ?? []).map(
+      (link) => `Link: ${link.text?.trim() || link.url}\nURL: ${link.url}`,
     ),
-    ...(pageData.images ?? []).map((image) =>
-      `Image: ${image.alt?.trim() || "Untitled image"}\nURL: ${image.url}`
+    ...(pageData.images ?? []).map(
+      (image) =>
+        `Image: ${image.alt?.trim() || "Untitled image"}\nURL: ${image.url}`,
     ),
   ];
   const referenceChunks = referenceLines.length
@@ -239,8 +286,14 @@ export async function finalizePageVisit(
       text_content: `Page: ${title}\nURL: ${cleanUrl}\nDomain: ${domain}\nSummary: ${analysis.summary}\nContext: ${prepared.contextualSummary ?? ""}${topics.length ? `\nTopics: ${topics.join(", ")}` : ""}`,
       chunk_type: "synthetic" as const,
     },
-    ...rawChunks.map((text_content) => ({ text_content, chunk_type: "verbatim" as const })),
-    ...referenceChunks.map((text_content) => ({ text_content, chunk_type: "verbatim" as const })),
+    ...rawChunks.map((text_content) => ({
+      text_content,
+      chunk_type: "verbatim" as const,
+    })),
+    ...referenceChunks.map((text_content) => ({
+      text_content,
+      chunk_type: "verbatim" as const,
+    })),
     ...(prepared.imageChunks ?? []),
   ];
   const chunksToEmbed = chunkRecords.map((chunk) => chunk.text_content);
@@ -305,21 +358,7 @@ export async function finalizePageVisit(
   }
 
   // Session Grouping: record visit into active session
-  const visitRecord: SessionVisitRecord = {
-    url: cleanUrl,
-    title,
-    domain,
-    visitedAt,
-    tabId: pageData.tabId,
-    windowId: pageData.windowId,
-    openerTabId: pageData.openerTabId,
-    transitionType: pageData.transitionType,
-    pageSourceId: sourceRes.sourceId,
-  };
-
-  const sessionUpdate = pageData.recordInSession === false
-    ? null
-    : await recordSessionVisit(sdk, visitRecord, pageData.sessionId, settings);
+  const sessionUpdate = prepared.sessionUpdate;
 
   // If there is a sequential edge from previous page in session, link in graph
   if (sessionUpdate?.sequentialEdge) {
@@ -366,16 +405,19 @@ export async function processPageVisit(
   payload: PageVisitPayload,
   settings: Partial<BrowserExtensionSettings>,
 ): Promise<IngestedPageResult | null> {
-  const prepared = await preparePageVisit(sdk, payload, settings);
-  if (!prepared) return null;
-  return await finalizePageVisit(sdk, prepared, settings);
+  return sdk.models.batch(
+    () => preparePageVisit(sdk, payload, settings),
+    (prepared) =>
+      prepared
+        ? finalizePageVisit(sdk, prepared, settings)
+        : Promise.resolve(null),
+  );
 }
 
 /**
  * Processes a batch of open tabs strictly enforcing the two-phase pipeline:
  * Phase 1: Prepares all tabs using Chat model (zero embeddings).
  * Phase 2: Embeds and commits all tabs using Embedding model (zero chat calls).
- * Exactly 1 GPU model transition occurs across the entire batch.
  */
 export async function processTabsBatch(
   sdk: ShaleSDK,
@@ -391,37 +433,23 @@ export async function processTabsBatch(
     `[browser] [Phase 1: Chat Model] Batch preparing ${pages.length} tab(s) with Chat model...`,
   );
 
-  const preparedList: PreparedPageData[] = [];
-  let skippedCount = 0;
-
-  // Phase 1: Execute all Chat model operations across all tabs (Zero embeddings)
-  for (const pagePayload of pages) {
-    const prep = await preparePageVisit(sdk, pagePayload, settings);
-    if (prep) {
-      preparedList.push(prep);
-    } else {
-      skippedCount++;
-    }
-  }
-
-  sdk.logger.info(
-    `[browser] [Phase 1: Chat Model] Completed preparation of ${preparedList.length} tab(s). (Zero embeddings performed)`,
+  return sdk.models.batch(
+    async () => {
+      const preparedList: PreparedPageData[] = [];
+      let skippedCount = 0;
+      for (const page of pages) {
+        const prepared = await preparePageVisit(sdk, page, settings);
+        if (prepared) preparedList.push(prepared);
+        else skippedCount++;
+      }
+      return { preparedList, skippedCount };
+    },
+    async ({ preparedList, skippedCount }) => {
+      for (const prepared of preparedList)
+        await finalizePageVisit(sdk, prepared, settings);
+      return { ingestedCount: preparedList.length, skippedCount };
+    },
   );
-
-  // Phase 2: Execute all Embedding model operations across all tabs (Zero chat calls)
-  sdk.logger.info(
-    `[browser] [Phase 2: Embedding Model] Batch ingesting and embedding ${preparedList.length} tab(s)...`,
-  );
-
-  for (const prep of preparedList) {
-    await finalizePageVisit(sdk, prep, settings);
-  }
-
-  sdk.logger.info(
-    `[browser] [Phase 2: Embedding Model] Completed ingestion of ${preparedList.length} tab(s). (Zero chat calls performed)`,
-  );
-
-  return { ingestedCount: preparedList.length, skippedCount };
 }
 
 /**

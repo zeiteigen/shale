@@ -654,7 +654,7 @@ export async function runTui(rootDir = findProjectRoot(), defaultExtension?: str
         ]
           .filter(Boolean)
           .join("\n");
-        p.note(details, `${selectedExtName}.${chosenKey}`);
+        p.note(details, `${selectedExtName}.${String(chosenKey)}`);
       }
       continue;
     }
@@ -680,7 +680,7 @@ export async function runTui(rootDir = findProjectRoot(), defaultExtension?: str
       if (p.isCancel(chosenKey)) continue;
 
       const confirmReset = await p.confirm({
-        message: `Are you sure you want to reset ${chosenKey === "__all__" ? "ALL settings" : chosenKey} to default?`,
+        message: `Are you sure you want to reset ${chosenKey === "__all__" ? "ALL settings" : String(chosenKey)} to default?`,
       });
 
       if (p.isCancel(confirmReset) || !confirmReset) {
@@ -739,7 +739,7 @@ export async function runTui(rootDir = findProjectRoot(), defaultExtension?: str
         });
         if (p.isCancel(valChoice)) continue;
         setSettingValue(selectedExtName, keyName, valChoice === "true", rootDir);
-        p.log.success(`Updated ${keyName} to ${valChoice}`);
+        p.log.success(`Updated ${keyName} to ${String(valChoice)}`);
       } else {
         const inputPrompt = await p.text({
           message: `Enter new value for \x1b[36m${keyName}\x1b[0m:`,
@@ -751,7 +751,7 @@ export async function runTui(rootDir = findProjectRoot(), defaultExtension?: str
               : "",
           placeholder: helpItem?.examples ? JSON.stringify(helpItem.examples[0]) : undefined,
           validate(value) {
-            const res = parseAndValidateValue(value, helpItem);
+            const res = parseAndValidateValue(value ?? "", helpItem);
             if (!res.ok) {
               return res.error;
             }

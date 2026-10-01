@@ -1,109 +1,35 @@
 import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { createExtensionSDK, type ChunkSearchResult } from "../sdk";
+import { getGraphData as buildGraphData } from "./graph-data";
+import { sourceEntityName, graphIdentityFromSourceUri } from "../lib/source-identity";
 
 const sdk = createExtensionSDK("visualizer");
 const db = sdk.database;
 const distDir = join(import.meta.dir, "dist");
 
-function graphIdentityFromSourceUri(uri: string): string {
-  if (uri.startsWith("browser-history:")) return uri.slice("browser-history:".length);
-  if (uri.startsWith("browser-bookmark:")) {
-    const urlStart = uri.search(/:https?:\/\//);
-    if (urlStart >= 0) return uri.slice(urlStart + 1);
-  }
-  return uri;
-}
-
-export interface GraphData {
-  nodes: Array<{
-    id: number;
-    name: string;
-    type: string;
-    namespace: string;
-    degree: number;
-    sourceUri?: string;
-    sourceTitle?: string;
-    chunksCount: number;
-    chunks: Array<{ id: number; chunk_index: number; text_content: string }>;
-  }>;
-  edges: Array<{ source: number; target: number; relation: string; weight: number }>;
-  stats: { totalEntities: number; totalEdges: number; totalSources: number; totalChunks: number };
-}
-
-export function getGraphData(): GraphData {
-  const entities = db.query<{ id: number; namespace: string; name: string; type: string }, []>(
-    "SELECT id, namespace, name, type FROM entities ORDER BY id ASC",
-  ).all();
-  const edges = db.query<{
-    source_entity_id: number;
-    target_entity_id: number;
-    relation: string;
-    weight: number;
-  }, []>("SELECT source_entity_id, target_entity_id, relation, weight FROM edges").all();
-  const sources = db.query<{ id: string; uri: string; title: string }, []>(
-    "SELECT id, uri, title FROM sources",
-  ).all();
-  const sourceByTitle = new Map(sources.map((source) => [source.title.toLowerCase(), source]));
-  const sourceByUri = new Map<string, (typeof sources)[number]>();
-  for (const source of sources) {
-    const identity = graphIdentityFromSourceUri(source.uri);
-    // Rich web-page sources are queried first and remain the preferred material
-    // when history/bookmark metadata points at the same page node.
-    if (!sourceByUri.has(identity) || /^https?:\/\//.test(source.uri)) {
-      sourceByUri.set(identity, source);
-    }
-  }
-  const degree = new Map<number, number>();
-
-  for (const edge of edges) {
-    degree.set(edge.source_entity_id, (degree.get(edge.source_entity_id) || 0) + 1);
-    degree.set(edge.target_entity_id, (degree.get(edge.target_entity_id) || 0) + 1);
-  }
-
-  return {
-    nodes: entities.map((entity) => {
-      const source = sourceByUri.get(entity.name) ?? sourceByTitle.get(entity.name.toLowerCase());
-      const chunks = source ? sdk.context.getRecentChunks(source.id, 5) : [];
-      return {
-        ...entity,
-        degree: degree.get(entity.id) || 0,
-        sourceUri: source?.uri,
-        sourceTitle: source?.title,
-        chunksCount: chunks.length,
-        chunks,
-      };
-    }),
-    edges: edges.map((edge) => ({
-      source: edge.source_entity_id,
-      target: edge.target_entity_id,
-      relation: edge.relation,
-      weight: edge.weight,
-    })),
-    stats: {
-      totalEntities: entities.length,
-      totalEdges: edges.length,
-      totalSources: db.query<{ count: number }, []>("SELECT count(*) AS count FROM sources").get()?.count || 0,
-      totalChunks: db.query<{ count: number }, []>("SELECT count(*) AS count FROM chunks").get()?.count || 0,
-    },
-  };
+export { type GraphData } from "./graph-data";
+export function getGraphData(sdkOverride = sdk) {
+  return buildGraphData(sdkOverride);
 }
 
 function json(data: unknown, status = 200) {
   return Response.json(data, {
     status,
-    headers: { "Access-Control-Allow-Origin": "*" },
   });
 }
 
 function enrichResults(results: ChunkSearchResult[]) {
-  const entityBySource = db.query<{ id: number }, { $uri: string; $title: string }>(
-    "SELECT id FROM entities WHERE name = $uri OR lower(name) = lower($title) ORDER BY name = $uri DESC LIMIT 1",
+  const entityBySource = db.query<{ id: number }, { $uri: string; $title: string; $identity: string }>(
+    `SELECT id FROM entities WHERE name = $identity OR name = $uri
+      OR (lower(name) = lower($title) AND (SELECT count(*) FROM sources WHERE lower(title) = lower($title)) = 1)
+      ORDER BY name = $identity DESC, name = $uri DESC LIMIT 1`,
   );
   return results.map((result) => ({
     ...result,
     entity_id: result.source_title
       ? entityBySource.get({
+          $identity: sourceEntityName(result.source_id),
           $uri: graphIdentityFromSourceUri(result.source_uri ?? ""),
           $title: result.source_title,
         })?.id
@@ -151,10 +77,17 @@ function staticFile(pathname: string): Response {
 
 export function startVisualizerServer(port = Number(process.env.VISUALIZER_PORT) || 3333) {
   const server = Bun.serve({
+    hostname: "127.0.0.1",
     port,
     async fetch(req) {
-      const { pathname } = new URL(req.url);
-      if (req.method === "OPTIONS") return new Response(null, { headers: { "Access-Control-Allow-Origin": "*" } });
+      const url = new URL(req.url);
+      const { pathname } = url;
+      if (!["127.0.0.1", "localhost"].includes(url.hostname))
+        return json({ error: "Only local hosts are allowed." }, 403);
+      const origin = req.headers.get("Origin");
+      if (origin && origin !== new URL(req.url).origin)
+        return json({ error: "Cross-origin requests are not allowed." }, 403);
+      if (req.method === "OPTIONS") return new Response(null, { status: 204 });
       if (pathname === "/api/graph" && req.method === "GET") return json(getGraphData());
       const searchMatch = pathname.match(/^\/api\/search\/(hybrid|vector|bm25)$/);
       if (searchMatch && req.method === "POST") return search(req, searchMatch[1] as "hybrid" | "vector" | "bm25");

@@ -113,7 +113,9 @@ describe("OpenAI-Compatible Embedding Functionality", () => {
       });
 
       expect(interceptedUrl).toBe("https://mock-openai.com/v1/embeddings");
-      expect(interceptedHeaders["Authorization"]).toBe("Bearer sk-test-12345");
+      expect(new Headers(interceptedHeaders).get("Authorization")).toBe(
+        "Bearer sk-test-12345",
+      );
       expect(interceptedBody.input).toEqual(["first", "second"]);
       expect(interceptedBody.model).toBe("text-embedding-3-small");
 

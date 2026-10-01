@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { mergeOptions } from "../lib/ai/options";
 import {
   getEmbedding,
   getEmbeddings,
@@ -10,67 +11,34 @@ import {
   type OpenAIEmbeddingResponse,
 } from "../lib/ai";
 
-export class EmbedderClient {
-  private readonly defaultOptions?: EmbedderOptions;
-  private _client?: OpenAI;
+export interface EmbeddingClient {
+  embed(text: string, options?: EmbedderOptions): Promise<number[]>;
+  embedBatch(texts: string[], options?: EmbedderOptions): Promise<number[][]>;
+}
 
-  constructor(defaultOptions?: EmbedderOptions | OpenAI) {
-    if (defaultOptions instanceof OpenAI) {
-      this.defaultOptions = { client: defaultOptions };
-      this._client = defaultOptions;
-    } else {
-      this.defaultOptions = defaultOptions;
-      if (defaultOptions?.client) {
-        this._client = defaultOptions.client;
-      }
-    }
+/** Compatibility wrapper; configuration is resolved fresh for every request. */
+export class EmbedderClient implements EmbeddingClient {
+  private readonly defaultOptions: EmbedderOptions;
+
+  constructor(options?: EmbedderOptions | OpenAI) {
+    this.defaultOptions =
+      options instanceof OpenAI ? { client: options } : (options ?? {});
   }
 
-  /**
-   * Access the underlying OpenAI SDK client.
-   */
   get client(): OpenAI {
-    if (!this._client) {
-      this._client = createOpenAIClient(this.defaultOptions);
-    }
-    return this._client;
+    return createOpenAIClient(this.defaultOptions, "embedding");
   }
 
-  /**
-   * Generates an embedding vector for a single text.
-   */
-  async embed(text: string, options?: EmbedderOptions): Promise<number[]> {
-    return getEmbedding(text, this.mergeOptions(options));
+  options(overrides?: EmbedderOptions): EmbedderOptions {
+    return mergeOptions(this.defaultOptions, overrides);
   }
 
-  /**
-   * Generates embedding vectors for an array of texts.
-   */
-  async embedBatch(
-    texts: string[],
-    options?: EmbedderOptions,
-  ): Promise<number[][]> {
-    return getEmbeddings(texts, this.mergeOptions(options));
+  embed(text: string, options?: EmbedderOptions): Promise<number[]> {
+    return getEmbedding(text, this.options(options));
   }
 
-  private mergeOptions(options?: EmbedderOptions): EmbedderOptions {
-    if (!options && !this.defaultOptions) {
-      return { client: this.client };
-    }
-    const merged: EmbedderOptions = { ...this.defaultOptions, ...options };
-    if (!merged.client) {
-      const hasClientOverrides = Boolean(
-        options &&
-        (options.apiKey !== undefined ||
-          options.baseUrl !== undefined ||
-          options.endpoint !== undefined ||
-          options.fetchFn !== undefined ||
-          options.timeoutMs !== undefined ||
-          options.maxRetries !== undefined),
-      );
-      merged.client = hasClientOverrides ? undefined : this.client;
-    }
-    return merged;
+  embedBatch(texts: string[], options?: EmbedderOptions): Promise<number[][]> {
+    return getEmbeddings(texts, this.options(options));
   }
 }
 

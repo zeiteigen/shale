@@ -176,12 +176,6 @@ export interface ObsidianSettings {
   contextHydrationLimit?: number;
 
   /**
-   * Dimension size of fallback embedding vectors when embedding model is unreachable.
-   * @default 4096
-   */
-  fallbackEmbeddingDimensions?: number;
-
-  /**
    * Namespace for sources, chunks, and graph elements.
    * @default "obsidian"
    */

@@ -13,7 +13,12 @@ export interface PageVisitPayload {
   /** Sanitized by the server-side parser; capped by the browser connector. */
   html?: string;
   links?: Array<{ url: string; text?: string; rel?: string }>;
-  images?: Array<{ url: string; alt?: string; width?: number; height?: number }>;
+  images?: Array<{
+    url: string;
+    alt?: string;
+    width?: number;
+    height?: number;
+  }>;
   tabId?: number;
   windowId?: number;
   openerTabId?: number;
@@ -86,6 +91,9 @@ export type BrowserIngestPayload =
   | BrowserPingPayload;
 
 export interface PreparedPageData {
+  sessionUpdate?: Awaited<
+    ReturnType<typeof import("./session-manager").recordSessionVisit>
+  > | null;
   pageData: WebPageData;
   analysis: LLMPageAnalysis;
   cleanUrl: string;
@@ -120,7 +128,12 @@ export interface WebPageData {
   favIconUrl?: string;
   author?: string;
   links?: Array<{ url: string; text?: string; rel?: string }>;
-  images?: Array<{ url: string; alt?: string; width?: number; height?: number }>;
+  images?: Array<{
+    url: string;
+    alt?: string;
+    width?: number;
+    height?: number;
+  }>;
   visitedAt: number;
   tabId?: number;
   windowId?: number;

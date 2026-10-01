@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { mergeOptions, normalizeChatOptions } from "../lib/ai/options";
 import {
   createOpenAIClient,
   queryLLM as coreQueryLLM,
@@ -15,43 +16,24 @@ import {
   type LLMReasoningEffort,
 } from "../lib/ai";
 
+/** Compatibility wrapper; all defaults and aliases have one owner. */
 export class LLMClient {
-  private readonly defaultOptions?: LLMOptions;
-  private _client?: OpenAI;
+  private readonly defaultOptions: LLMOptions;
 
-  constructor(defaultOptions?: LLMOptions | OpenAI) {
-    if (defaultOptions instanceof OpenAI) {
-      this.defaultOptions = {
-        client: defaultOptions,
-        reasoning_effort: "low",
-        max_thinking_tokens: 512,
-      };
-      this._client = defaultOptions;
-    } else {
-      this.defaultOptions = {
-        reasoning_effort: "low",
-        max_thinking_tokens: 512,
-        ...defaultOptions,
-      };
-      if (defaultOptions?.client) {
-        this._client = defaultOptions.client;
-      }
-    }
+  constructor(options?: LLMOptions | OpenAI) {
+    this.defaultOptions = normalizeChatOptions(
+      options instanceof OpenAI ? { client: options } : options,
+    );
   }
 
-  /**
-   * Access the underlying OpenAI SDK client.
-   */
   get client(): OpenAI {
-    if (!this._client) {
-      this._client = createOpenAIClient(this.defaultOptions);
-    }
-    return this._client;
+    return createOpenAIClient(this.defaultOptions, "chat");
   }
 
-  /**
-   * Queries the LLM with text prompt and optional images.
-   */
+  options(overrides?: LLMOptions): LLMOptions {
+    return mergeOptions(this.defaultOptions, normalizeChatOptions(overrides));
+  }
+
   async query(
     input: string | LLMQueryInput,
     options: LLMOptions & { detailed: true },
@@ -62,73 +44,18 @@ export class LLMClient {
   ): Promise<string>;
   async query(
     input: string | LLMQueryInput,
-    options?: LLMOptions & { detailed?: boolean },
+    options?: LLMOptions,
   ): Promise<string | LLMResponse> {
-    const merged = this.mergeOptions(options);
-    return coreQueryLLM(input, merged as any);
+    const merged = this.options(options);
+    const response = await this.complete(input, options);
+    return merged.detailed ? response : response.content;
   }
 
-  /**
-   * Queries the LLM and returns the full structured completion response.
-   */
-  async complete(
+  complete(
     input: string | LLMQueryInput,
     options?: LLMOptions,
   ): Promise<LLMResponse> {
-    const merged = this.mergeOptions(options);
-    return fetchOpenAIChatCompletion(input, merged);
-  }
-
-  private mergeOptions(options?: LLMOptions): LLMOptions {
-    const base: LLMOptions = {
-      reasoning_effort: "low",
-      max_thinking_tokens: 512,
-      ...this.defaultOptions,
-    };
-    if (!options) {
-      if (!base.client) {
-        base.client = this.client;
-      }
-      return base;
-    }
-    const merged: LLMOptions = { ...base, ...options };
-    if (
-      options.reasoningEffort !== undefined &&
-      options.reasoning_effort === undefined
-    ) {
-      merged.reasoning_effort = options.reasoningEffort;
-    }
-    if (
-      options.maxThinkingTokens !== undefined &&
-      options.max_thinking_tokens === undefined
-    ) {
-      merged.max_thinking_tokens = options.maxThinkingTokens;
-    }
-    if (
-      options.thinkingBudget !== undefined &&
-      options.max_thinking_tokens === undefined
-    ) {
-      merged.max_thinking_tokens = options.thinkingBudget;
-    }
-    if (
-      options.thinking_budget !== undefined &&
-      options.max_thinking_tokens === undefined
-    ) {
-      merged.max_thinking_tokens = options.thinking_budget;
-    }
-    if (!merged.client) {
-      const hasClientOverrides = Boolean(
-        options &&
-        (options.apiKey !== undefined ||
-          options.baseUrl !== undefined ||
-          options.endpoint !== undefined ||
-          options.fetchFn !== undefined ||
-          options.timeoutMs !== undefined ||
-          options.maxRetries !== undefined),
-      );
-      merged.client = hasClientOverrides ? undefined : this.client;
-    }
-    return merged;
+    return fetchOpenAIChatCompletion(input, this.options(options));
   }
 }
 

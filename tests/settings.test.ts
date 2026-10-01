@@ -72,7 +72,7 @@ describe("SDK Settings Management & Hot Reloading", () => {
 
     const manager = new SettingsManager<ObsidianSettings>(emptyDir);
 
-    expect(manager.getAll()).toEqual({});
+    expect(manager.getAll<Record<string, unknown>>()).toEqual({});
     expect(manager.get("atomicNoteCharLimit", 600)).toBe(600);
     expect(manager.get("expandAtomicNotes", true)).toBe(true);
     expect(manager.has("nonExistentKey")).toBe(false);
@@ -89,7 +89,7 @@ describe("SDK Settings Management & Hot Reloading", () => {
     const manager = new SettingsManager<ObsidianSettings>(tempDir);
 
     // Should return fallback defaults instead of throwing syntax error
-    expect(manager.getAll()).toEqual({});
+    expect(manager.getAll<Record<string, unknown>>()).toEqual({});
     expect(manager.get("atomicNoteCharLimit", 600)).toBe(600);
 
     // Fix JSON on disk

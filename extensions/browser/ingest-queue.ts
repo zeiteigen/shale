@@ -42,7 +42,7 @@ export function enqueueBrowserPayload(sdk: ShaleSDK, payload: BrowserIngestPaylo
       // Keep one pending capture per canonical page. The newest DOM material
       // and timestamp replace older retries without growing extension_state.
       queue[existingIndex] = {
-        ...queue[existingIndex],
+        id: crypto.randomUUID(),
         receivedAt: Date.now(),
         payload: compacted,
       };

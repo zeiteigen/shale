@@ -1,13 +1,10 @@
-import type { ShaleSDK, Source } from "@shale/sdk";
+import type { ShaleSDK } from "@shale/sdk";
 import { findKnnCandidatePairs } from "./knn-finder";
 import { analyzeSourcePairWithLLM } from "./llm-analyzer";
-import type {
-  DiscoveredLink,
-  ProcessLinksResult,
-  RunOptions,
-} from "./types";
-
-export const WATERMARK_KEY = "last_source_update";
+import type { DiscoveredLink, ProcessLinksResult, RunOptions } from "./types";
+import { sourceEntityName } from "../../lib/source-identity";
+import { WATERMARK_KEY, BATCH_ID, readLinkBatch, completeLinkPairs, pairCheckpointId } from "./link-batch";
+export { WATERMARK_KEY } from "./link-batch";
 
 /**
  * Commits confirmed links into Shale's knowledge graph as entities and edges.
@@ -37,11 +34,14 @@ export function commitLinksToGraph(
     }
   };
   for (const link of links) {
-    addEntity(link.sourceTitleA, "Source");
-    addEntity(link.sourceTitleB, "Source");
+    addEntity(sourceEntityName(link.sourceIdA), "Source");
+    addEntity(sourceEntityName(link.sourceIdB), "Source");
     for (const resolution of link.entityResolutions ?? []) {
       addEntity(resolution.canonicalName, resolution.entityType || "Entity");
-      for (const mention of [...resolution.mentionsA, ...resolution.mentionsB]) {
+      for (const mention of [
+        ...resolution.mentionsA,
+        ...resolution.mentionsB,
+      ]) {
         if (
           mention.localeCompare(resolution.canonicalName, undefined, {
             sensitivity: "accent",
@@ -75,12 +75,16 @@ export function commitLinksToGraph(
       reason: link.reason,
       knnSimilarity: link.knnSimilarity,
       linkedAt: Date.now(),
+      sourceIdA: link.sourceIdA,
+      sourceTitleA: link.sourceTitleA,
+      sourceIdB: link.sourceIdB,
+      sourceTitleB: link.sourceTitleB,
     };
 
     // Forward edge
     addEdge({
-      source: link.sourceTitleA,
-      target: link.sourceTitleB,
+      source: sourceEntityName(link.sourceIdA),
+      target: sourceEntityName(link.sourceIdB),
       relation: link.relation,
       weight: link.weight,
       metadata,
@@ -89,8 +93,8 @@ export function commitLinksToGraph(
     // Reciprocal edge if bidirectional
     if (bidirectional) {
       addEdge({
-        source: link.sourceTitleB,
-        target: link.sourceTitleA,
+        source: sourceEntityName(link.sourceIdB),
+        target: sourceEntityName(link.sourceIdA),
         relation: link.relation,
         weight: link.weight,
         metadata,
@@ -107,7 +111,7 @@ export function commitLinksToGraph(
 
       if (resolution.mentionsA.length > 0) {
         addEdge({
-          source: link.sourceTitleA,
+          source: sourceEntityName(link.sourceIdA),
           target: resolution.canonicalName,
           relation: "MENTIONS_ENTITY",
           weight: resolution.confidence,
@@ -116,7 +120,7 @@ export function commitLinksToGraph(
       }
       if (resolution.mentionsB.length > 0) {
         addEdge({
-          source: link.sourceTitleB,
+          source: sourceEntityName(link.sourceIdB),
           target: resolution.canonicalName,
           relation: "MENTIONS_ENTITY",
           weight: resolution.confidence,
@@ -124,7 +128,10 @@ export function commitLinksToGraph(
         });
       }
 
-      for (const mention of [...resolution.mentionsA, ...resolution.mentionsB]) {
+      for (const mention of [
+        ...resolution.mentionsA,
+        ...resolution.mentionsB,
+      ]) {
         if (
           mention.localeCompare(resolution.canonicalName, undefined, {
             sensitivity: "accent",
@@ -164,10 +171,17 @@ export async function processSourceLinks(
   sdk: ShaleSDK,
   options?: RunOptions,
 ): Promise<ProcessLinksResult> {
+  return sdk.models.phase("chat", () =>
+    analyzeAndCommitSourceLinks(sdk, options),
+  );
+}
+
+async function analyzeAndCommitSourceLinks(
+  sdk: ShaleSDK,
+  options?: RunOptions,
+): Promise<ProcessLinksResult> {
   const isForce =
-    options?.forceAll ??
-    sdk.settings.get<boolean>("forceAll") ??
-    false;
+    options?.forceAll ?? sdk.settings.get<boolean>("forceAll") ?? false;
 
   const lastWatermarkStr = sdk.state.getWatermark(WATERMARK_KEY);
   const lastWatermark = isForce ? 0 : Number(lastWatermarkStr ?? "0");
@@ -176,106 +190,58 @@ export async function processSourceLinks(
     `Starting source-linker analysis (last watermark: ${lastWatermark}, forceAll: ${isForce})`,
   );
 
-  // 1. Discover updated/new sources since watermark
-  const targetSources = isForce
+  let batch = readLinkBatch(sdk);
+  const targetSources = batch ? [] : isForce
     ? sdk.context.getAllSources()
     : sdk.context.getSources({ since: lastWatermark });
-
-  if (targetSources.length === 0) {
-    sdk.logger.log("No new or updated sources since last watermark.");
+  if (!batch && targetSources.length === 0) {
     return {
-      sourcesAnalyzed: 0,
-      candidatePairsEvaluated: 0,
-      linksCreated: 0,
-      edgesCommitted: 0,
-      watermarkAdvancedTo: lastWatermark,
-      checkpointsResolved: 0,
+      sourcesAnalyzed: 0, candidatePairsEvaluated: 0, linksCreated: 0,
+      edgesCommitted: 0, watermarkAdvancedTo: lastWatermark, checkpointsResolved: 0,
     };
   }
-
-  let maxUpdatedAt = lastWatermark;
-  for (const s of targetSources) {
-    if (s.updated_at > maxUpdatedAt) {
-      maxUpdatedAt = s.updated_at;
-    }
-  }
-
-  sdk.logger.log(
-    `Found ${targetSources.length} target source(s) to analyze for links.`,
-  );
-
-  // === Phase 1: KNN Candidate Search + Chat Model Analysis ===
-  sdk.logger.log(
-    `=== Phase 1: KNN Candidate Discovery & LLM Analysis ===`,
-  );
-
-  const candidatePairs = await findKnnCandidatePairs(
-    targetSources,
-    sdk,
-    {
+  if (!batch) {
+    const pairs = await findKnnCandidatePairs(targetSources, sdk, {
       knnK: options?.knnK,
       minKnnSimilarity: options?.minKnnSimilarity,
-      maxPairsPerRun: options?.maxPairsPerRun,
-    },
-  );
-
-  sdk.logger.log(
-    `Discovered ${candidatePairs.length} candidate source pair(s) via KNN.`,
-  );
-
+      maxPairsPerRun: Number.MAX_SAFE_INTEGER,
+    });
+    batch = {
+      type: "link_batch",
+      sourcesAnalyzed: targetSources.length,
+      maxUpdatedAt: targetSources.reduce((max, source) => Math.max(max, source.updated_at), lastWatermark),
+      pairs,
+    };
+    sdk.saveCheckpoint(batch, { id: BATCH_ID, key: BATCH_ID });
+  }
+  const limit = options?.maxPairsPerRun ?? sdk.settings.get<number>("maxPairsPerRun") ?? 20;
+  if (!Number.isInteger(limit) || limit < 1)
+    throw new Error("maxPairsPerRun must be a positive integer");
+  const candidatePairs = batch.pairs.slice(0, limit);
   const discoveredLinks: DiscoveredLink[] = [];
-
   for (const pair of candidatePairs) {
     const link = await analyzeSourcePairWithLLM(pair, sdk);
-    if (link) {
-      discoveredLinks.push(link);
-    }
+    if (link) discoveredLinks.push(link);
   }
-
-  // === Phase 2: Ingestion & Knowledge Graph Commit ===
+  const namespace = sdk.settings.get<string>("namespace") ?? "source-linker";
+  const bidirectional = sdk.settings.get<boolean>("bidirectional") ?? true;
+  const completed = new Set(candidatePairs.map(pairCheckpointId));
+  const edgesCommitted = sdk.database.transaction(() => {
+    const edges = commitLinksToGraph(discoveredLinks, sdk, namespace, bidirectional);
+    for (const id of completed) sdk.deleteCheckpoint(id);
+    completeLinkPairs(sdk, completed);
+    return edges;
+  })();
   sdk.logger.log(
-    `=== Phase 2: Ingestion & Graph Edges Persistence ===`,
+    `Source linking: ${candidatePairs.length} pairs evaluated, ${edgesCommitted} edges committed; ${readLinkBatch(sdk)?.pairs.length ?? 0} pairs pending.`,
   );
-
-  const namespace =
-    sdk.settings.get<string>("namespace") ?? "source-linker";
-  const bidirectional =
-    sdk.settings.get<boolean>("bidirectional") ?? true;
-
-  const edgesCommitted = commitLinksToGraph(
-    discoveredLinks,
-    sdk,
-    namespace,
-    bidirectional,
-  );
-
-  // Resolve and clean up all link checkpoints
-  const queuedCheckpoints = sdk.checkpoint.getQueue<any>();
-  let checkpointsResolved = 0;
-  for (const cp of queuedCheckpoints) {
-    if (cp.id.startsWith("link_analysis:")) {
-      sdk.checkpoint.delete(cp.id);
-      checkpointsResolved++;
-    }
-  }
-
-  // Advance watermark
-  if (maxUpdatedAt > lastWatermark) {
-    sdk.state.setWatermark(String(maxUpdatedAt), WATERMARK_KEY);
-    sdk.logger.log(`Watermark advanced to ${maxUpdatedAt}.`);
-  }
-
-  sdk.logger.log(
-    `Source linking complete: ${targetSources.length} sources analyzed, ${candidatePairs.length} candidate pairs evaluated, ${discoveredLinks.length} links created, ${edgesCommitted} edges committed.`,
-  );
-
   return {
-    sourcesAnalyzed: targetSources.length,
+    sourcesAnalyzed: batch.sourcesAnalyzed,
     candidatePairsEvaluated: candidatePairs.length,
     linksCreated: discoveredLinks.length,
     edgesCommitted,
-    watermarkAdvancedTo: maxUpdatedAt,
-    checkpointsResolved,
+    watermarkAdvancedTo: Number(sdk.state.getWatermark(WATERMARK_KEY) ?? "0"),
+    checkpointsResolved: completed.size,
   };
 }
 

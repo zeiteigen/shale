@@ -1,12 +1,21 @@
 import { getSDK, logger, type ShaleSDK } from "@shale/sdk";
 import type { BrowserExtensionSettings } from "./settings.types";
-import { finalizeActiveSession, getActiveSession } from "./session-manager";
+import {
+  finalizeSession,
+  getActiveSession,
+  prepareSession,
+  setActiveSession,
+} from "./session-manager";
 import { run as runRecover } from "./recover";
 import {
   acknowledgeQueuedBrowserPayloads,
   getQueuedBrowserPayloads,
 } from "./ingest-queue";
-import { processBrowserPayload, processTabsBatch } from "./ingest-processor";
+import {
+  prepareBrowserPayload,
+  finalizeBrowserPayload,
+  type PreparedBrowserPayload,
+} from "./payload-pipeline";
 import type { PageVisitPayload } from "./types";
 import { normalizeUrl } from "./filter";
 
@@ -30,110 +39,112 @@ export async function run(
 
   sdk.logger.info("Running browser session aggregator cron...");
 
-  // Drain the durable subscriber inbox here, rather than doing expensive work on
-  // the HTTP ingest worker. Page visits are coalesced so all page LLM calls run
-  // before their embedding pass.
   const queued = getQueuedBrowserPayloads(sdk);
-  let processedPayloads = 0;
-  if (queued.length > 0) {
-    sdk.logger.info(
-      `Parsing ${queued.length} queued browser payload(s) as one cron batch...`,
-    );
-    const processedIds = new Set<string>();
-    const pageByUrl = new Map<string, PageVisitPayload>();
-    const pageIds = new Set<string>();
-    const others: typeof queued = [];
-    for (const item of queued) {
-      if (
-        item.payload.type === "page_visit" ||
-        item.payload.type === "active_page"
-      ) {
-        const normalized = normalizeUrl(item.payload.url);
-        const key = normalized.isValid ? normalized.cleanUrl : item.payload.url;
-        const existing = pageByUrl.get(key);
-        if (!existing || (item.payload.visitedAt ?? 0) >= (existing.visitedAt ?? 0)) {
-          pageByUrl.set(key, item.payload);
-        }
-        pageIds.add(item.id);
-      } else {
-        others.push(item);
+  return sdk.models.batch(
+    async () => {
+      const prepared: Array<{
+        ids: string[];
+        count: number;
+        payload: PreparedBrowserPayload;
+      }> = [];
+      const pageByUrl = new Map<string, PageVisitPayload>();
+      const pageIds: string[] = [];
+      const others: typeof queued = [];
+      for (const item of queued) {
+        if (
+          item.payload.type === "page_visit" ||
+          item.payload.type === "active_page"
+        ) {
+          const normalized = normalizeUrl(item.payload.url);
+          const key = normalized.isValid
+            ? normalized.cleanUrl
+            : item.payload.url;
+          const previous = pageByUrl.get(key);
+          if (
+            !previous ||
+            (item.payload.visitedAt ?? 0) >= (previous.visitedAt ?? 0)
+          )
+            pageByUrl.set(key, item.payload);
+          pageIds.push(item.id);
+        } else others.push(item);
       }
-    }
-    const pages = [...pageByUrl.values()].sort(
-      (a, b) => (a.visitedAt ?? 0) - (b.visitedAt ?? 0),
-    );
-    try {
-      if (pages.length) {
-        await processTabsBatch(sdk, { type: "tabs_batch", pages }, settings);
-        processedPayloads += pages.length;
-        for (const id of pageIds) processedIds.add(id);
-      }
-      for (const item of others) {
+      const pages = [...pageByUrl.values()].sort(
+        (a, b) => (a.visitedAt ?? 0) - (b.visitedAt ?? 0),
+      );
+      const jobs = [
+        ...(pages.length
+          ? [
+              {
+                ids: pageIds,
+                count: pages.length,
+                payload: { type: "tabs_batch" as const, pages },
+              },
+            ]
+          : []),
+        ...others.map((item) => ({
+          ids: [item.id],
+          count: 1,
+          payload: item.payload,
+        })),
+      ];
+      for (const job of jobs) {
         try {
-          await processBrowserPayload(sdk, item.payload, settings);
-          processedPayloads++;
-          processedIds.add(item.id);
+          prepared.push({
+            ...job,
+            payload: await prepareBrowserPayload(sdk, job.payload, settings),
+          });
         } catch (error) {
           sdk.logger.error(
-            `Keeping queued browser payload ${item.id} for retry:`,
+            "Browser preparation failed; retaining inbox items:",
             error,
           );
         }
       }
-    } catch (error) {
-      // A failed page batch has not been acknowledged; retain every page for retry.
-      sdk.logger.error("Browser page batch failed; retaining it for retry:", error);
-    }
-    acknowledgeQueuedBrowserPayloads(sdk, processedIds);
-  }
-
-  const active = getActiveSession(sdk);
-  if (!active || active.visits.length === 0) {
-    sdk.logger.info("No active browsing session pending aggregation.");
-    return {
-      finalizedSessionTitle: null,
-      pageCount: 0,
-      processedPayloads,
-      queuedPayloads: queued.length,
-    };
-  }
-
-  const inactivityMs = (settings.sessionInactivityMinutes ?? 30) * 60 * 1000;
-  const idleTimeMs = Date.now() - active.lastActivityTime;
-
-  if (idleTimeMs > inactivityMs) {
-    sdk.logger.info(
-      `Active session ${active.sessionId} has been idle for ${Math.round(
-        idleTimeMs / 60000,
-      )} minutes (threshold: ${settings.sessionInactivityMinutes}m). Finalizing session...`,
-    );
-
-    const result = await finalizeActiveSession(sdk, settings);
-    if (result) {
-      sdk.logger.info(
-        `Successfully synthesized session "${result.title}" (${result.pageCount} pages, ${result.edgesCount} edges).`,
-      );
+      const active = getActiveSession(sdk);
+      const inactivityMs = (settings.sessionInactivityMinutes ?? 30) * 60_000;
+      const session =
+        active?.visits.length &&
+        Date.now() - active.lastActivityTime > inactivityMs
+          ? await prepareSession(
+              sdk,
+              active.sessionId,
+              active.startTime,
+              active.lastActivityTime,
+              active.visits,
+              settings,
+            )
+          : null;
+      return { prepared, session };
+    },
+    async ({ prepared, session }) => {
+      let processedPayloads = 0;
+      const acknowledged = new Set<string>();
+      for (const job of prepared) {
+        try {
+          await finalizeBrowserPayload(sdk, job.payload, settings);
+          processedPayloads += job.count;
+          for (const id of job.ids) acknowledged.add(id);
+        } catch (error) {
+          sdk.logger.error(
+            "Browser embedding/commit failed; retaining inbox items:",
+            error,
+          );
+        }
+      }
+      acknowledgeQueuedBrowserPayloads(sdk, acknowledged);
+      const result = session
+        ? await finalizeSession(sdk, session, settings)
+        : null;
+      if (result && getActiveSession(sdk)?.sessionId === session?.sessionId)
+        setActiveSession(sdk, null);
       return {
-        finalizedSessionTitle: result.title,
-        pageCount: result.pageCount,
+        finalizedSessionTitle: result?.title ?? null,
+        pageCount: result?.pageCount ?? 0,
         processedPayloads,
         queuedPayloads: queued.length,
       };
-    }
-  } else {
-    sdk.logger.info(
-      `Active session ${active.sessionId} is still active (${active.visits.length} pages, idle for ${Math.round(
-        idleTimeMs / 60000,
-      )}m).`,
-    );
-  }
-
-  return {
-    finalizedSessionTitle: null,
-    pageCount: active.visits.length,
-    processedPayloads,
-    queuedPayloads: queued.length,
-  };
+    },
+  );
 }
 
 // Standalone execution support

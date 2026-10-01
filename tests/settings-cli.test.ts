@@ -270,16 +270,16 @@ describe("Settings CLI & Management Utilities", () => {
       );
 
       // Initial read through SDK
-      expect(sdk.settings.get("maxItems")).toBe(50);
-      expect(sdk.settings.get("theme")).toBe("dark");
+      expect(sdk.settings.get<number>("maxItems")).toBe(50);
+      expect(sdk.settings.get<string>("theme")).toBe("dark");
 
       // Update via CLI set function
       setSettingValue("test-plugin", "maxItems", "180", rootDir);
       setSettingValue("test-plugin", "theme", "light", rootDir);
 
       // Immediate subsequent read through SDK without recreating or restarting SDK
-      expect(sdk.settings.get("maxItems")).toBe(180);
-      expect(sdk.settings.get("theme")).toBe("light");
+      expect(sdk.settings.get<number>("maxItems")).toBe(180);
+      expect(sdk.settings.get<string>("theme")).toBe("light");
       expect(sdk.settings.getAll().maxItems).toBe(180);
     });
   });

@@ -1,14 +1,15 @@
 import { dirname, join } from "node:path";
 import ingestQueue from "./ingest-queue";
 import "./ingest-router";
-import { isIngestMaterial } from "../lib/ingest.types";
+import { handleIngestRequest } from "./ingest-http";
 import {
   crons,
   checkpointRecoverScripts,
   extensionNamespaces,
+  subscribe_ingest,
   getCheckpointRecoverScript,
 } from "./load-extensions";
-import { createExtensionSDK, sdkStorage, findNearestManifest } from "../sdk";
+import { createExtensionSDK, sdkStorage, findNearestManifest, type ShaleSDK } from "../sdk";
 import { hasQueuedCheckpoints } from "../lib/db";
 import type { CronExtension } from "../lib/extension";
 import { startCli } from "./cli";
@@ -35,54 +36,52 @@ export async function runCheckpointRecover(
   extensionId: string,
   scriptPath: string,
   namespace?: string,
+  sdkOverride?: ShaleSDK,
 ): Promise<void> {
   const ns = namespace ?? extensionNamespaces.get(extensionId) ?? extensionId;
-  const sdk = createExtensionSDK(extensionId, ns);
+  const sdk = sdkOverride ?? createExtensionSDK(extensionId, {
+    namespace: ns,
+    extensionDir: dirname(scriptPath),
+  });
   const context = sdk.getCheckpointContext();
   if (context.count === 0) {
     return;
   }
 
-  await sdkStorage.run(sdk, async () => {
-    let mod: any;
-    try {
-      mod = await import(scriptPath);
-    } catch {
-      // Fall back to transpilation/AsyncFunction if dynamic import fails
-    }
-
-    if (mod) {
-      if (typeof mod.run === "function") {
-        await mod.run(sdk, context);
-        for (const cp of context.checkpoints) {
-          sdk.deleteCheckpoint(cp.id);
-        }
-        return;
+  await sdk.models.phase("embedding", () =>
+    sdkStorage.run(sdk, async () => {
+      let mod: any;
+      try {
+        mod = await import(scriptPath);
+      } catch {
+        // Fall back to transpilation/AsyncFunction if dynamic import fails
       }
-      if (typeof mod.default === "function") {
-        await mod.default(sdk, context);
-        for (const cp of context.checkpoints) {
-          sdk.deleteCheckpoint(cp.id);
+
+      if (mod) {
+        if (typeof mod.run === "function") {
+          await mod.run(sdk, context);
+          return;
         }
-        return;
+        if (typeof mod.default === "function") {
+          await mod.default(sdk, context);
+          return;
+        }
       }
-    }
 
-    const code = await Bun.file(scriptPath).text();
-    const transpiler = new Bun.Transpiler({ loader: "ts" });
-    const jsCode = transpiler.transformSync(code);
-    const runFn = new AsyncFunction("shared", jsCode);
+      const code = await Bun.file(scriptPath).text();
+      const transpiler = new Bun.Transpiler({ loader: "ts" });
+      const jsCode = transpiler.transformSync(code);
+      const runFn = new AsyncFunction("shared", jsCode);
 
-    await runFn({ sdk, context });
-    for (const cp of context.checkpoints) {
-      sdk.deleteCheckpoint(cp.id);
-    }
-  });
+      await runFn({ sdk, context });
+    }),
+  );
 }
 
 export async function wait_for_checkpoint_script(
   extensionId: string,
   cron?: CronExtension,
+  sdkOverride?: ShaleSDK,
 ): Promise<void> {
   if (inFlightRecoveries.has(extensionId)) {
     await inFlightRecoveries.get(extensionId);
@@ -94,7 +93,10 @@ export async function wait_for_checkpoint_script(
     try {
       const discovered = findNearestManifest(dirname(cron.script));
       if (discovered?.manifest?.checkpoint_recover) {
-        scriptPath = join(discovered.dir, discovered.manifest.checkpoint_recover);
+        scriptPath = join(
+          discovered.dir,
+          discovered.manifest.checkpoint_recover,
+        );
       }
     } catch {}
   }
@@ -103,18 +105,19 @@ export async function wait_for_checkpoint_script(
     return;
   }
 
-  if (!hasQueuedCheckpoints(extensionId)) {
+  if (!(sdkOverride ? sdkOverride.hasCheckpoints() : hasQueuedCheckpoints(extensionId))) {
     return;
   }
 
   const recoveryPromise = (async () => {
     try {
-      await runCheckpointRecover(extensionId, scriptPath, cron?.namespace);
+      await runCheckpointRecover(extensionId, scriptPath, cron?.namespace, sdkOverride);
     } catch (err: any) {
       console.error(
         `Error in checkpoint recovery for extension ${extensionId}:`,
         err?.message || err,
       );
+      throw err;
     } finally {
       inFlightRecoveries.delete(extensionId);
     }
@@ -124,98 +127,95 @@ export async function wait_for_checkpoint_script(
   await recoveryPromise;
 }
 
-export async function runCron(cron: CronExtension) {
-  try {
-    const extensionId = cron.extensionId || "default";
-    await wait_for_checkpoint_script(extensionId, cron);
+export async function runCron(cron: CronExtension, sdkOverride?: ShaleSDK) {
+  const extensionId = cron.extensionId || "default";
+  await wait_for_checkpoint_script(extensionId, cron, sdkOverride);
 
-    const sdk = createExtensionSDK(
-      cron.extensionId || "default",
-      cron.namespace,
-    );
+  const sdk = sdkOverride ?? createExtensionSDK(cron.extensionId || "default", {
+    namespace: cron.namespace,
+    extensionDir: dirname(cron.script),
+  });
 
-    // Run within AsyncLocalStorage scope so any imported extension files/functions share the scope
-    await sdkStorage.run(sdk, async () => {
-      let mod: any;
-      try {
-        mod = await import(cron.script);
-      } catch {
-        // Fall back to transpilation/AsyncFunction if dynamic import fails
+  // Run within AsyncLocalStorage scope so any imported extension files/functions share the scope
+  await sdkStorage.run(sdk, async () => {
+    let mod: any;
+    try {
+      mod = await import(cron.script);
+    } catch {
+      // Fall back to transpilation/AsyncFunction if dynamic import fails
+    }
+
+    if (mod) {
+      if (typeof mod.run === "function") {
+        await mod.run(sdk);
+        return;
       }
-
-      if (mod) {
-        if (typeof mod.run === "function") {
-          await mod.run(sdk);
-          return;
-        }
-        if (typeof mod.default === "function") {
-          await mod.default(sdk);
-          return;
-        }
+      if (typeof mod.default === "function") {
+        await mod.default(sdk);
+        return;
       }
+    }
 
-      const code = await Bun.file(cron.script).text();
+    const code = await Bun.file(cron.script).text();
 
-      // Transpile TypeScript/JSX to raw JavaScript in-memory
-      const transpiler = new Bun.Transpiler({ loader: "ts" });
-      const jsCode = transpiler.transformSync(code);
+    // Transpile TypeScript/JSX to raw JavaScript in-memory
+    const transpiler = new Bun.Transpiler({ loader: "ts" });
+    const jsCode = transpiler.transformSync(code);
 
-      // Wrap in a function that receives your shared state/imports as arguments
-      const runFn = new AsyncFunction("shared", jsCode);
+    // Wrap in a function that receives your shared state/imports as arguments
+    const runFn = new AsyncFunction("shared", jsCode);
 
-      await runFn({ sdk });
-    });
-  } catch (err: any) {
-    console.log("Err in cron:", err?.message || err);
-  }
+    await runFn({ sdk });
+  });
 }
 
 /** Run only crons explicitly marked for the host startup phase. */
 export async function runStartupCrons() {
   for (const cron of crons) {
     if (cron.run_on_startup) {
-      await runCron(cron);
+      try {
+        await runCron(cron);
+      } catch (error) {
+        console.error(`[cron] Startup job ${cron.name || cron.extensionId} failed:`, error);
+      }
     }
   }
 }
 
 export async function runAllCrons() {
+  const failures: unknown[] = [];
   for (const cron of crons) {
-    await runCron(cron);
+    try {
+      await runCron(cron);
+    } catch (error) {
+      failures.push(error);
+    }
   }
+  if (failures.length) throw new AggregateError(failures, `${failures.length} cron job(s) failed`);
 }
 
 for (const cron of crons) {
   Bun.cron(cron.schedule, async () => {
-    await runCron(cron);
+    try {
+      await runCron(cron);
+    } catch (err) {
+      console.error(`[cron] ${cron.name || cron.extensionId} failed:`, err);
+    }
   });
 }
 
 if (import.meta.main) {
   try {
     Bun.serve({
+      hostname: "127.0.0.1",
       port: Number(process.env.PORT) || 7425,
       routes: {
         "/health": () => Response.json({ status: "ok", service: "shale" }),
-        "/ingest": async (req) => {
-          try {
-            const body = await req.json();
-
-            if (!isIngestMaterial(body)) {
-              return new Response("ERR");
-            }
-
-            const ns = extensionNamespaces.get(body.type);
-            if (!ns) {
-              return new Response("ERR");
-            }
-
-            ingestQueue.push(body);
-            return new Response("OK");
-          } catch {
-            return new Response("ERR");
-          }
-        },
+        "/ingest": (req) => handleIngestRequest(
+          req,
+          subscribe_ingest.map((hook) => hook.reciever_name),
+          (item) => ingestQueue.push(item),
+        ),
       },
     });
   } catch (err: any) {
