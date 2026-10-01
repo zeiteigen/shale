@@ -1,5 +1,6 @@
 import type { ShaleSDK } from "../sdk";
 import { sourceIdFromEntity, graphIdentityFromSourceUri } from "../lib/source-identity";
+import type { ClaimFilter, ClaimStatus } from "../sdk/graph/types";
 
 export interface GraphData {
   nodes: Array<{
@@ -7,27 +8,27 @@ export interface GraphData {
     name: string;
     type: string;
     namespace: string;
+    stableId: string;
+    canonicalId: number | null;
     degree: number;
     sourceUri?: string;
     sourceTitle?: string;
     chunksCount: number;
     chunks: Array<{ id: number; chunk_index: number; text_content: string }>;
   }>;
-  edges: Array<{ source: number; target: number; relation: string; weight: number }>;
-  stats: { totalEntities: number; totalEdges: number; totalSources: number; totalChunks: number };
+  edges: Array<{ id: string; source: number; target: number; relation: string; weight: number; status: ClaimStatus; context?: string }>;
+  truncated: boolean;
+  stats: { totalEntities: number; totalEdges: number; totalSources: number; totalChunks: number; totalClaims: number };
 }
 
-export function getGraphData(sdk: ShaleSDK): GraphData {
+export function getGraphData(sdk: ShaleSDK, filter: ClaimFilter = {}): GraphData {
   const db = sdk.database;
-  const entities = db.query<{ id: number; namespace: string; name: string; type: string }, []>(
-    "SELECT id, namespace, name, type FROM entities ORDER BY id ASC",
+  const entities = db.query<{ id: number; namespace: string; name: string; type: string; stableId:string;canonicalId:number|null }, []>(
+    "SELECT id,namespace,coalesce(display_name,name) AS name,type,stable_id AS stableId,canonical_id AS canonicalId FROM entities ORDER BY id ASC",
   ).all();
-  const edges = db.query<{
-    source_entity_id: number;
-    target_entity_id: number;
-    relation: string;
-    weight: number;
-  }, []>("SELECT source_entity_id, target_entity_id, relation, weight FROM edges").all();
+  const claims=sdk.graph.claims.list({...filter,statuses:filter.statuses ?? ['accepted','proposed','disputed'],polarity:1,limit:1000});
+  const edges=claims.filter(c=>c.object!==undefined).map(c=>({id:c.id,source_entity_id:c.subject,
+    target_entity_id:c.object!,relation:c.predicate,weight:c.strength ?? 1,status:c.status,context:c.context}));
   const sources = db.query<{ id: string; uri: string; title: string }, []>(
     "SELECT id, uri, title FROM sources",
   ).all();
@@ -73,17 +74,19 @@ export function getGraphData(sdk: ShaleSDK): GraphData {
       };
     }),
     edges: edges.map((edge) => ({
+      id:edge.id,status:edge.status,context:edge.context,
       source: edge.source_entity_id,
       target: edge.target_entity_id,
       relation: edge.relation,
       weight: edge.weight,
     })),
     stats: {
+      totalClaims:db.query<{count:number}, []>('SELECT count(*) AS count FROM graph_claims').get()?.count || 0,
       totalEntities: entities.length,
       totalEdges: edges.length,
       totalSources: db.query<{ count: number }, []>("SELECT count(*) AS count FROM sources").get()?.count || 0,
       totalChunks: db.query<{ count: number }, []>("SELECT count(*) AS count FROM chunks").get()?.count || 0,
     },
+    truncated:claims.length===1000,
   };
 }
-

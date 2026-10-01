@@ -1,7 +1,11 @@
-import type { ShaleSDK } from "@shale/sdk";
+import type { ShaleSDK, EvidenceInput } from "@shale/sdk";
 import type { DiscoveredLink, LLMLinkAnalysis } from "./types";
 
 export interface LinkCheckpoint {
+  evidenceA?: EvidenceInput[];
+  evidenceB?: EvidenceInput[];
+  extractionRun?: string;
+  model?: string;
   sourceA: { id: string; title: string };
   sourceB: { id: string; title: string };
   analysis: LLMLinkAnalysis;
@@ -26,5 +30,6 @@ export function acceptedLink(data: LinkCheckpoint, sdk: ShaleSDK): DiscoveredLin
     weight: data.analysis.weight,
     knnSimilarity: data.knnSimilarity,
     entityResolutions: data.analysis.entityResolutions ?? [],
+    evidenceA:data.evidenceA,evidenceB:data.evidenceB,extractionRun:data.extractionRun,model:data.model,
   };
 }

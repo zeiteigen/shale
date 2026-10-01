@@ -1,4 +1,7 @@
-import type { ShaleSDK } from "@shale/sdk";
+import { commitResolutions } from "./resolution-graph";
+import type { ShaleSDK, IngestEdgeInput, EvidenceInput } from "@shale/sdk";
+import { bindConnectorSources } from './source-bindings';
+import { createHash } from "node:crypto";
 import { findKnnCandidatePairs } from "./knn-finder";
 import { analyzeSourcePairWithLLM } from "./llm-analyzer";
 import type { DiscoveredLink, ProcessLinksResult, RunOptions } from "./types";
@@ -25,6 +28,7 @@ export function commitLinksToGraph(
     return 0;
   }
 
+  return sdk.database.transaction(() => {
   // Deduplicate entities
   const entityMap = new Map<string, { name: string; type: string }>();
   const addEntity = (name: string, type: string) => {
@@ -36,31 +40,10 @@ export function commitLinksToGraph(
   for (const link of links) {
     addEntity(sourceEntityName(link.sourceIdA), "Source");
     addEntity(sourceEntityName(link.sourceIdB), "Source");
-    for (const resolution of link.entityResolutions ?? []) {
-      addEntity(resolution.canonicalName, resolution.entityType || "Entity");
-      for (const mention of [
-        ...resolution.mentionsA,
-        ...resolution.mentionsB,
-      ]) {
-        if (
-          mention.localeCompare(resolution.canonicalName, undefined, {
-            sensitivity: "accent",
-          }) !== 0
-        ) {
-          addEntity(mention, "EntityAlias");
-        }
-      }
-    }
   }
 
   const entities = Array.from(entityMap.values());
-  const edges: Array<{
-    source: string;
-    target: string;
-    relation: string;
-    weight: number;
-    metadata?: Record<string, any>;
-  }> = [];
+  const edges: IngestEdgeInput[] = [];
   const edgeKeys = new Set<string>();
   const addEdge = (edge: (typeof edges)[number]) => {
     const key = `${edge.source}\u0000${edge.target}\u0000${edge.relation}`;
@@ -71,6 +54,12 @@ export function commitLinksToGraph(
   };
 
   for (const link of links) {
+    const evidence: EvidenceInput[] = [...(link.evidenceA ?? []),...(link.evidenceB ?? [])];
+    const assertion = (source:string,target:string,relation:string) => ({
+      id:`link:${createHash('sha256').update(JSON.stringify([namespace,source,target,relation,link.extractionRun,evidence])).digest('hex')}`,
+      method:'llm',model:link.model,extractionRun:link.extractionRun,confidence:link.weight,
+      status:'proposed' as const,evidence,
+    });
     const metadata = {
       reason: link.reason,
       knnSimilarity: link.knnSimilarity,
@@ -88,66 +77,22 @@ export function commitLinksToGraph(
       relation: link.relation,
       weight: link.weight,
       metadata,
+      claim:assertion(sourceEntityName(link.sourceIdA),sourceEntityName(link.sourceIdB),link.relation),
     });
 
     // Reciprocal edge if bidirectional
-    if (bidirectional) {
+    const reciprocal = sdk.graph.relations.reciprocal(link.relation);
+    if (bidirectional && reciprocal) {
       addEdge({
         source: sourceEntityName(link.sourceIdB),
         target: sourceEntityName(link.sourceIdA),
-        relation: link.relation,
+        relation: reciprocal,
         weight: link.weight,
         metadata,
+        claim:assertion(sourceEntityName(link.sourceIdB),sourceEntityName(link.sourceIdA),reciprocal),
       });
     }
 
-    for (const resolution of link.entityResolutions ?? []) {
-      const resolutionMetadata = {
-        reason: resolution.reason,
-        confidence: resolution.confidence,
-        canonicalName: resolution.canonicalName,
-        linkedAt: metadata.linkedAt,
-      };
-
-      if (resolution.mentionsA.length > 0) {
-        addEdge({
-          source: sourceEntityName(link.sourceIdA),
-          target: resolution.canonicalName,
-          relation: "MENTIONS_ENTITY",
-          weight: resolution.confidence,
-          metadata: { ...resolutionMetadata, mentions: resolution.mentionsA },
-        });
-      }
-      if (resolution.mentionsB.length > 0) {
-        addEdge({
-          source: sourceEntityName(link.sourceIdB),
-          target: resolution.canonicalName,
-          relation: "MENTIONS_ENTITY",
-          weight: resolution.confidence,
-          metadata: { ...resolutionMetadata, mentions: resolution.mentionsB },
-        });
-      }
-
-      for (const mention of [
-        ...resolution.mentionsA,
-        ...resolution.mentionsB,
-      ]) {
-        if (
-          mention.localeCompare(resolution.canonicalName, undefined, {
-            sensitivity: "accent",
-          }) === 0
-        ) {
-          continue;
-        }
-        addEdge({
-          source: mention,
-          target: resolution.canonicalName,
-          relation: "COREFERS_TO",
-          weight: resolution.confidence,
-          metadata: resolutionMetadata,
-        });
-      }
-    }
   }
 
   const result = sdk.graph.ingest({
@@ -156,7 +101,13 @@ export function commitLinksToGraph(
     edges,
   });
 
-  return result.edgesInserted;
+  bindConnectorSources(sdk,namespace,new Map(links.flatMap(link => [
+    [link.sourceIdA,result.entityMap[sourceEntityName(link.sourceIdA)]],
+    [link.sourceIdB,result.entityMap[sourceEntityName(link.sourceIdB)]],
+  ] as Array<[string,number]>)));
+
+  return result.edgesInserted + links.reduce((count,link)=>count+commitResolutions(sdk,link,result.entityMap,namespace),0);
+  })();
 }
 
 /**

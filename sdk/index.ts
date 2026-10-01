@@ -3,6 +3,10 @@ export { StateManager } from "./state";
 export { ContextHydrator } from "./context";
 export { CheckpointManager } from "./checkpoint";
 export { GraphIngestor } from "./graph";
+export { SourceGraph, graphIdentity } from "./graph/source";
+export { commitPreparedClaims, type PreparedSourceClaim } from './graph/prepared';
+export type * from "./graph/types";
+export type { GraphSearchOptions, GraphSearchResult } from "./graph/retrieval";
 export { UnifiedIngestor } from "./ingest";
 export { ExtensionMessages } from "./messages";
 export {

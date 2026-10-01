@@ -57,6 +57,7 @@ export async function run(
           domain: pageData.domain || "",
           checkpointId: item.id,
           namespace,
+          parser: data.parser,
           parsedChunks: data.parsedChunks,
           contextualSummary: data.contextualSummary,
           imageChunks: data.imageChunks,

@@ -151,8 +151,10 @@ export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
   const { source, chunks } = options;
 
   const insertSource = db.query(`
-    INSERT OR REPLACE INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
+    INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
     VALUES ($id, $type, $uri, $origin, $created_at, $title, $updated_at, $hash)
+    ON CONFLICT(id) DO UPDATE SET type=excluded.type,uri=excluded.uri,origin=excluded.origin,
+      title=excluded.title,updated_at=excluded.updated_at,hash=excluded.hash
   `);
 
   const insertChunk = db.query<
@@ -170,6 +172,7 @@ export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
   `);
 
   const txn = db.transaction(() => {
+    db.query("DELETE FROM chunks WHERE source_id=?").run(source.id);
     insertSource.run({
       $id: source.id,
       $type: source.type,

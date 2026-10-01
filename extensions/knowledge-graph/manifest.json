@@ -1,0 +1,7 @@
+{
+  "name": "knowledge-graph",
+  "version": "1.0.0",
+  "description": "Typed graph storage, retrieval, evidence inspection, and correction message handlers.",
+  "namespace": "knowledge",
+  "subscribe_messages": "index.ts"
+}

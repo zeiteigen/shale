@@ -1,0 +1,8 @@
+{
+  "name":"knowledge-extractor",
+  "version":"1.0.0",
+  "description":"Extracts grounded entity claims and multi-participant events from ingested source revisions.",
+  "namespace":"knowledge",
+  "checkpoint_recover":"recover.ts",
+  "crons":[{"name":"knowledge-extractor-cron","schedule":"0 */4 * * *","script":"index.ts"}]
+}

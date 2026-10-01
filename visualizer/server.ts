@@ -3,14 +3,16 @@ import { join, normalize } from "node:path";
 import { createExtensionSDK, type ChunkSearchResult } from "../sdk";
 import { getGraphData as buildGraphData } from "./graph-data";
 import { sourceEntityName, graphIdentityFromSourceUri } from "../lib/source-identity";
+import { knowledgeApi } from "./knowledge-api";
+import type { ClaimFilter } from "../sdk/graph/types";
 
 const sdk = createExtensionSDK("visualizer");
 const db = sdk.database;
 const distDir = join(import.meta.dir, "dist");
 
 export { type GraphData } from "./graph-data";
-export function getGraphData(sdkOverride = sdk) {
-  return buildGraphData(sdkOverride);
+export function getGraphData(sdkOverride = sdk, filter?: ClaimFilter) {
+  return buildGraphData(sdkOverride,filter);
 }
 
 function json(data: unknown, status = 200) {
@@ -75,7 +77,7 @@ function staticFile(pathname: string): Response {
   return new Response(Bun.file(filePath));
 }
 
-export function startVisualizerServer(port = Number(process.env.VISUALIZER_PORT) || 3333) {
+export function startVisualizerServer(port = Number(process.env.VISUALIZER_PORT) || 3333, sdkOverride = sdk) {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port,
@@ -88,7 +90,17 @@ export function startVisualizerServer(port = Number(process.env.VISUALIZER_PORT)
       if (origin && origin !== new URL(req.url).origin)
         return json({ error: "Cross-origin requests are not allowed." }, 403);
       if (req.method === "OPTIONS") return new Response(null, { status: 204 });
-      if (pathname === "/api/graph" && req.method === "GET") return json(getGraphData());
+      if (pathname === "/api/graph" && req.method === "GET") {
+        const at=url.searchParams.has('at') ? Number(url.searchParams.get('at')) : undefined;
+        if (at!==undefined && !Number.isSafeInteger(at)) return json({error:'Invalid graph date'},400);
+        return json(getGraphData(sdkOverride,{at,context:url.searchParams.get('context') ?? undefined}));
+      }
+      const knowledgeResponse = await knowledgeApi(req,url,sdkOverride);
+      if (knowledgeResponse) return knowledgeResponse;
+      if (pathname === '/api/search/graph' && req.method === 'POST') {
+        try {return json(await sdkOverride.search.graph(await req.json()));}
+        catch (error) {return json({error:error instanceof Error ? error.message : 'Search failed'},400);}
+      }
       const searchMatch = pathname.match(/^\/api\/search\/(hybrid|vector|bm25)$/);
       if (searchMatch && req.method === "POST") return search(req, searchMatch[1] as "hybrid" | "vector" | "bm25");
       if (pathname === "/api/health") return json({ ok: true });

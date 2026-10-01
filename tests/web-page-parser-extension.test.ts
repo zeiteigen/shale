@@ -50,6 +50,7 @@ describe("Web page parser extension", () => {
       "https://example.com/static-image.png",
     ]);
     expect(requests).toEqual(result.imageUrls);
-    expect(result.imageChunks.every((chunk) => chunk.chunk_type === "verbatim")).toBe(true);
+    expect(result.imageKnowledge?.every(image => image.claims.every(claim => claim.status === "proposed"))).toBe(true);
+    expect(result.imageChunks.every((chunk) => chunk.chunk_type === "synthetic")).toBe(true);
   });
 });

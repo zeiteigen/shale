@@ -437,7 +437,7 @@ describe("Source Linker Extension", () => {
 
       expect(edgesCommitted).toBe(4);
       const graphEdges = db.query<{ source: string; target: string; relation: string; metadata: string }, []>(`
-        SELECT s.name AS source, t.name AS target, e.relation, e.metadata
+        SELECT coalesce(s.display_name,s.name) AS source, coalesce(t.display_name,t.name) AS target, e.relation, e.metadata
         FROM edges e
         JOIN entities s ON s.id = e.source_entity_id
         JOIN entities t ON t.id = e.target_entity_id

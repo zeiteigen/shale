@@ -88,7 +88,7 @@ export async function processImageFilesBatch(
 
   const settings = sdk.settings.getAll<ProcessImageSettings>();
   const entityType = settings?.defaultEntityType ?? "Image";
-  const relation = settings?.defaultRelation ?? "IN_SAME_VAULT";
+  const relation = settings?.defaultRelation ?? "CONTAINED_IN";
 
   const prepare = async () => {
     // Phase 1: Chat Model Only across all images (Zero embeddings)
@@ -107,6 +107,7 @@ export async function processImageFilesBatch(
         const entities: ProcessedEntity[] = [
           {
             name: parsed.imageTitle,
+            identityKey: parsed.imageUri,
             type: entityType,
             namespace: item.options?.namespace,
           },
@@ -126,7 +127,7 @@ export async function processImageFilesBatch(
           chunk_index: c.chunk_index,
           chunk_type: c.chunk_type,
           text_content: c.text_content,
-          entity_names: [parsed.imageTitle],
+          metadata: c.metadata,
           embedding:
             c.chunk_index === 0 && item.options?.precomputedEmbedding
               ? item.options.precomputedEmbedding
@@ -140,11 +141,17 @@ export async function processImageFilesBatch(
           title: parsed.imageTitle,
           uri: parsed.imageUri,
           description: parsed.description,
+          knowledge: parsed.contextualChunks.map(chunk => ({
+            predicate: String(chunk.metadata?.predicate ?? "VISUAL_DESCRIPTION"),
+            value: chunk.text_content, chunkIndex: chunk.chunk_index,
+            status: "proposed", method: String(chunk.metadata?.origin ?? "vision"), model: chunk.metadata?.model as string | undefined,
+          })),
           chunks,
           entities,
           edges,
           metadata: {
             updatedAt: parsed.updatedAt,
+            assetHash: parsed.assetHash,
           },
         });
       } catch (err: any) {

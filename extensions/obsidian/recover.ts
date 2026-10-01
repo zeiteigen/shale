@@ -4,7 +4,8 @@ import {
   type ShaleSDK,
   type CheckpointContext,
 } from "@shale/sdk";
-import { embedContextualChunks, commitVaultGraph } from "./process-vaults";
+import { commitNote, commitImage } from "./commit";
+import { embedContextualChunks } from "./process-vaults";
 
 export interface RecoverResult {
   recoveredNotes: number;
@@ -57,12 +58,7 @@ export async function run(
       continue;
     }
 
-    const {
-      vault,
-      parsedFile,
-      entities = [],
-      edges = [],
-    } = data;
+    const {vault,parsedFile} = data;
 
     try {
       const parsed = parsedFile ?? data.parsedImage;
@@ -77,37 +73,10 @@ export async function run(
         parsed.noteTitle ?? parsed.imageTitle,
       );
 
-      // Commit note source and chunks to SQLite
-      sdk.ingest.sourceAndChunks({
-        source: {
-          type: parsedFile ? "markdown_note" : "image",
-          uri: parsed.noteUri ?? parsed.imageUri,
-          origin: "obsidian",
-          title: parsed.noteTitle ?? parsed.imageTitle,
-          updated_at: parsed.updatedAt,
-        },
-        chunks: parsed.contextualChunks.map((chunk: any, idx: number) => ({
-          chunk_index: chunk.chunk_index,
-          chunk_type:
-            chunk.chunk_type ??
-            (chunk.heading?.includes("(Expanded Context)")
-              ? "synthetic"
-              : "verbatim"),
-          text_content: chunk.text_content,
-          embedding: embeddings[idx],
-        })),
-        namespace: "obsidian",
-      });
-
-      // Commit graph elements
-      const vaultEntityName = vault?.name ? `Vault: ${vault.name}` : undefined;
-      const allEntities = [
-        ...(vaultEntityName ? [{ name: vaultEntityName, type: "Vault" }] : []),
-        ...entities,
-      ];
-      if (allEntities.length > 0 && edges.length > 0) {
-        commitVaultGraph(sdk, allEntities, edges);
-      }
+      const vaultContext = vault ?? {name:"Vault",path:parsed.filePath.substring(0,parsed.filePath.lastIndexOf("/"))};
+      const namespace = data.namespace ?? sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian";
+      if (parsedFile) commitNote(sdk,parsedFile,embeddings,vaultContext,namespace,cp.id);
+      else commitImage(sdk,data.parsedImage,embeddings,vaultContext,namespace,cp.id);
 
       // Track watermark advancement for this vault
 

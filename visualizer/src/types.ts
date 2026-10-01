@@ -5,6 +5,8 @@ export interface GraphNode {
   name: string;
   type: string;
   namespace: string;
+  stableId: string;
+  canonicalId: number | null;
   degree: number;
   sourceUri?: string;
   sourceTitle?: string;
@@ -13,6 +15,9 @@ export interface GraphNode {
 }
 
 export interface GraphEdge {
+  id: string;
+  status: string;
+  context?: string;
   source: number;
   target: number;
   relation: string;
@@ -20,6 +25,7 @@ export interface GraphEdge {
 }
 
 export interface GraphData {
+  truncated: boolean;
   nodes: GraphNode[];
   edges: GraphEdge[];
   stats: {
@@ -27,6 +33,7 @@ export interface GraphData {
     totalEdges: number;
     totalSources: number;
     totalChunks: number;
+    totalClaims: number;
   };
 }
 

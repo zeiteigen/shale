@@ -3,6 +3,7 @@ export interface ParsedNote {
   body: string;
   rawContent: string;
   wikilinks: string[];
+  references?: Array<{target:string;raw:string;alias?:string;heading?:string;position:number}>;
   images: string[];
   tags: string[];
   frontmatter: Record<string, unknown>;
@@ -90,40 +91,18 @@ export function parseNoteContent(
     const yamlText = frontmatterMatch[1];
     body = rawContent.slice(frontmatterMatch[0].length);
 
-    // Line-based YAML parsing for tags, category, and properties
-    let currentKey: string | null = null;
-    for (const line of yamlText.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      if (trimmed.startsWith("- ")) {
-        const item = trimmed.slice(2).trim();
-        tags.push(item);
-        if (currentKey) {
-          if (!Array.isArray(frontmatter[currentKey])) {
-            frontmatter[currentKey] = [];
-          }
-          (frontmatter[currentKey] as string[]).push(item);
-        }
-      } else if (trimmed.includes(":")) {
-        const [k, ...v] = trimmed.split(":");
-        const key = k.trim();
-        const val = v.join(":").trim();
-        if (val) {
-          frontmatter[key] = val;
-          currentKey = null;
-          if (
-            key.toLowerCase() === "tags" ||
-            key.toLowerCase() === "tag" ||
-            key.toLowerCase() === "category"
-          ) {
-            tags.push(val);
-          }
-        } else {
-          frontmatter[key] = [];
-          currentKey = key;
+    try {
+      const properties = Bun.YAML.parse(yamlText);
+      if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+        Object.assign(frontmatter, JSON.parse(JSON.stringify(properties)));
+        for (const key of ["tags", "tag", "category"]) {
+          const value = frontmatter[key];
+          if (Array.isArray(value)) tags.push(...value.filter((item): item is string => typeof item === "string"));
+          else if (typeof value === "string") tags.push(...value.split(/[,\s]+/).filter(Boolean));
         }
       }
+    } catch {
+      // Invalid YAML remains in rawContent; do not invent parsed properties.
     }
   }
 
@@ -158,11 +137,15 @@ export function parseNoteContent(
     .replace(/!\[.*?\]\(.*?\)/g, "");
 
   const wikilinks = new Set<string>();
+  const references: NonNullable<ParsedNote['references']> = [];
   const linkRegex = /\[\[(.*?)\]\]/g;
   while ((match = linkRegex.exec(textWithoutEmbeds)) !== null) {
     const target = normalizeWikilink(match[1]);
     if (target && target !== defaultTitle) {
       wikilinks.add(target);
+      const [destination,alias] = match[1].split('|');
+      references.push({target,raw:match[0],alias,heading:destination.split('#').slice(1).join('#') || undefined,
+        position:references.length});
     }
   }
 
@@ -181,6 +164,7 @@ export function parseNoteContent(
     body: body.trim(),
     rawContent,
     wikilinks: Array.from(wikilinks),
+    references,
     images: Array.from(images),
     tags: Array.from(new Set(tags)),
     frontmatter,

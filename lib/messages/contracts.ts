@@ -1,3 +1,8 @@
+import type { GraphChannelDefinitions } from './graph-contracts';
+import type { WebChannelDefinitions } from './web-contracts';
+export type { WebPageParseRequest, WebPageParseResponse } from './web-contracts';
+import type { PreparedSourceClaim } from '../../sdk/graph/prepared';
+
 // ---------------------------------------------------------------------------
 // Built-in Channel Schemas
 // ---------------------------------------------------------------------------
@@ -64,6 +69,7 @@ export interface ProcessedEntity {
   name: string;
   type: string;
   namespace?: string;
+  identityKey?: string;
 }
 
 export interface ProcessedEdge {
@@ -81,6 +87,7 @@ export interface ProcessFileResponse {
   title: string;
   uri: string;
   description?: string;
+  knowledge?: PreparedSourceClaim[];
   chunks: ProcessedChunk[];
   entities: ProcessedEntity[];
   edges: ProcessedEdge[];
@@ -251,7 +258,7 @@ export interface SearchQueryResponse {
 // Type-Safe Channel Map
 // ---------------------------------------------------------------------------
 
-export interface BuiltinChannelDefinitions {
+export interface BuiltinChannelDefinitions extends GraphChannelDefinitions, WebChannelDefinitions {
   "file:process": {
     type: "request";
     request: ProcessFileRequest;

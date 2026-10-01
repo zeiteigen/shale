@@ -29,7 +29,7 @@
     "fallbackDescriptionTemplate": {
       "type": "string",
       "description": "Fallback text when LLM is unavailable or disabled, supporting {{imageName}} placeholder.",
-      "default": "Detailed visual diagram and conceptual representation for {{imageName}}. Covers physical layout, components, and underlying subject explanation."
+      "default": "Image {{imageName}}. Visual analysis unavailable."
     },
     "supportedExtensions": {
       "type": "string[]",
@@ -48,7 +48,7 @@
     "defaultRelation": {
       "type": "string",
       "description": "Default graph edge relation from image to its container entity.",
-      "default": "IN_SAME_VAULT"
+      "default": "CONTAINED_IN"
     },
     "defaultEntityType": {
       "type": "string",

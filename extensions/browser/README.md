@@ -7,12 +7,16 @@ The **Shale Browser Ingestion Extension** ingests, embeds, enriches, and indexes
 ## Features
 
 - **Active Web Page Ingestion**: Ingests visited pages with title, clean body text, metadata, and full-text/vector index.
+  - Stores observed DOM author, links, image dimensions, and reference qualifiers as evidence-backed claims.
+  - Stores LLM summaries, categories, topics, contextualization, and image interpretations as proposals with their extraction method and model.
 - **Canonical Graph Identity**: Uses normalized URLs for `WebPage` nodes and session URIs for `WebSession` nodes, so duplicate titles never merge unrelated records.
 - **Privacy & Collision Avoidance Filters**:
   - Excludes social media platforms (`x.com`, `reddit.com`, `instagram.com`, `facebook.com`, `tiktok.com`, `linkedin.com`, `youtube.com`) to leave room for specialized social media ingestion extensions.
   - Excludes sensitive URLs (`*mail.google.com*`, `*accounts.google.com*`, `*bank*`, `*login*`).
   - Automatically strips URL tracking parameters (`utm_*`, `fbclid`, `gclid`).
 - **Explicit Web Session Grouping**:
+  - Records sessions as events with ordered participants and each visit as a distinct occurrence, including repeated visits to the same URL.
+  - Keeps the observed visit log verbatim alongside the synthetic narrative, including timestamps, tab/window IDs, and transition types.
   - Clusters true navigation events within a single browsing session; snapshots and manual captures stay page-local.
   - Creates `WebSession` knowledge graph entities.
   - Links sequential navigation transitions (`Page A -> NAVIGATED_TO -> Page B`).
@@ -21,16 +25,20 @@ The **Shale Browser Ingestion Extension** ingests, embeds, enriches, and indexes
   - Summarizes web pages and extracts 3-5 core conceptual topic nodes.
   - Synthesizes entire browsing sessions into descriptive narrative summaries with dominant topics.
 - **Bookmarks & History**:
+  - Keeps individual bookmark records, folder ancestry, creation events, visit counts, typed counts, and last-visit observations. Aggregate counts do not fabricate individual visits.
   - Ingests bookmark trees with folder hierarchies (`WebPage -> BOOKMARKED_IN -> BookmarkFolder`).
   - Ingests browser history batches with domain relationships.
   - Keeps bookmark/history sources separate from rich page captures while connecting them to the same canonical page node.
 - **Crash Recovery**:
+  - Commits each page/session source, graph assertions, and checkpoint completion atomically; replay preserves reviewed statuses and does not duplicate assertions.
   - Uses the two-phase local GPU optimization pattern with checkpoints to guarantee zero lost LLM tokens during unexpected exits.
   - The host runs the browser cron once during startup, recovering checkpoints first and then draining every durable ingest item already queued.
 
 ---
 
 ## Configuration & Settings
+
+These graph records are emitted on ingestion. Existing history/bookmarks can be refreshed through browser sync, and pages through capture. Prior URL-based page/session entity IDs are retained; other entities with equal labels keep separate identities. Page preparation/commit, catalog ingestion, session ingestion, and graph writers live in separate modules.
 
 Settings can be managed via the Shale Settings CLI:
 

@@ -21,7 +21,7 @@
     },
     "bidirectional": {
       "type": "boolean",
-      "description": "Whether to create bidirectional edges in the knowledge graph between linked sources.",
+      "description": "Create reciprocal edges using declared inverse or symmetric relations. Unknown directional relations remain one-way.",
       "default": true,
       "possibleValues": [true, false]
     },

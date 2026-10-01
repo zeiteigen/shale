@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { randomUUIDv7 } from "bun";
 import defaultDb from "../lib/db-init";
+import { ensureGraphSchema } from "../lib/graph/schema";
 import { getIndexDimension, vectorBuffer } from "../lib/embedding-index";
 import {
   assertEmbeddingProfile,
@@ -19,6 +20,7 @@ export class UnifiedIngestor {
   constructor(defaultNamespace: string = "default", database?: Database) {
     this.defaultNamespace = defaultNamespace;
     this.db = database ?? defaultDb;
+    ensureGraphSchema(this.db);
   }
 
   /**
@@ -53,8 +55,10 @@ export class UnifiedIngestor {
     }
 
     const insertSourceStmt = this.db.query(`
-      INSERT OR REPLACE INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
+      INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
       VALUES ($id, $type, $uri, $origin, $created_at, $title, $updated_at, $hash)
+      ON CONFLICT(id) DO UPDATE SET type=excluded.type,uri=excluded.uri,origin=excluded.origin,
+        title=excluded.title,updated_at=excluded.updated_at,hash=excluded.hash
     `);
 
     const insertChunkStmt = this.db.query<
@@ -117,10 +121,9 @@ export class UnifiedIngestor {
         .get({ $uri: source.uri });
       if (existing) {
         if (!source.id) sourceId = existing.id;
-        this.db
-          .query("DELETE FROM sources WHERE id = $id")
-          .run({ $id: existing.id });
+        if (sourceId !== existing.id) this.db.query("DELETE FROM sources WHERE id = ?").run(existing.id);
       }
+      this.db.query("DELETE FROM chunks WHERE source_id = ?").run(sourceId);
 
       // 1. Insert or replace the source
       insertSourceStmt.run({

@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { getGraph, search } from "./api";
 import type { GraphData, GraphNode, SearchMode, SearchResult } from "./types";
+import { ClaimPanel } from './ClaimPanel';
+import { IdentityPanel } from './IdentityPanel';
 
 const TYPE_COLORS: Record<string, string> = {
   Note: "#8f4d35",
@@ -164,7 +166,10 @@ function GraphMap({
           const to = layout.get(edge.target);
           if (!from || !to) return null;
           const highlighted = selected && (selected.id === edge.source || selected.id === edge.target);
-          return <line key={`${edge.source}-${edge.target}-${edge.relation}-${index}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} className={highlighted ? "map-edge active" : "map-edge"} />;
+          return <line key={`${edge.source}-${edge.target}-${edge.relation}-${index}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+            strokeDasharray={edge.status==='accepted' ? undefined : '4 3'} className={highlighted ? "map-edge active" : "map-edge"}>
+            <title>{edge.relation} · {edge.status}{edge.context ? ` · ${edge.context}` : ''}</title>
+          </line>;
         })}
         {visibleNodes.map((node) => {
           const point = layout.get(node.id)!;
@@ -195,15 +200,27 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [focusSelection, setFocusSelection] = useState(false);
   const [connectionDepth, setConnectionDepth] = useState(1);
+  const [graphContext,setGraphContext]=useState('');
+  const [graphDate,setGraphDate]=useState('');
+  const at=graphDate ? new Date(`${graphDate}T00:00:00Z`).getTime() : undefined;
+
+  function refreshGraph() {
+    getGraph({context:graphContext || undefined,at}).then(graph=> {
+      setData(graph);setSelected(current=>current ? graph.nodes.find(n=>n.id===current.id) ?? null : null);
+    }).catch(reason=>setError(reason.message));
+  }
 
   useEffect(() => {
-    getGraph()
+    let cancelled=false;
+    getGraph({context:graphContext || undefined,at})
       .then((graph) => {
+        if (cancelled) return;
         setData(graph);
         setVisibleTypes(new Set(graph.nodes.map((node) => node.type)));
       })
-      .catch((reason) => setError(reason.message));
-  }, []);
+      .catch((reason) => {if (!cancelled) setError(reason.message);});
+    return ()=>{cancelled=true;};
+  }, [graphContext,graphDate]);
 
   useEffect(() => {
     if (!selected) setFocusSelection(false);
@@ -277,6 +294,11 @@ function App() {
           </div>}
 
           <div className="filter-section">
+            <div className="knowledge-panel">
+              <label>Context<input value={graphContext} onChange={e=>setGraphContext(e.target.value)} placeholder="All contexts" /></label>
+              <label>Valid on<input type="date" value={graphDate} onChange={e=>setGraphDate(e.target.value)} /></label>
+              {data?.truncated && <p className="quiet">Showing the first 1,000 claims. Filter the context to narrow the map.</p>}
+            </div>
             <p className="section-label">Show entries</p>
             <div className="filter-options">
               {types.map((type) => <label key={type} className="type-toggle"><input type="checkbox" checked={visibleTypes.has(type)} onChange={() => toggleType(type)} /><i style={{ backgroundColor: colorFor(type) }} /><span>{type}</span><small>{data?.nodes.filter((node) => node.type === type).length}</small></label>)}
@@ -296,7 +318,7 @@ function App() {
         <section className="map-pane">
           <div className="map-heading"><div><p className="eyebrow"><Network size={14} /> relationships</p><h1>Map of the collection</h1></div><span className="entry-count">{focusSelection && selected ? `${connectionDepth}-hop focus` : `${data?.nodes.filter((node) => visibleTypes.has(node.type)).length} visible`}</span></div>
           {error ? <div className="error-note">{error}</div> : data && <GraphMap data={data} selected={selected} visibleTypes={visibleTypes} focusSelection={focusSelection} connectionDepth={connectionDepth} onSelect={setSelected} />}
-          <p className="map-caption">Each dot is an entry. Lines record a stated connection. Select an entry to read its material.</p>
+          <p className="map-caption">Each dot is an entry. Dashed connections await review or are disputed. Select an entry to inspect its claims and evidence.</p>
         </section>
 
         <aside className="reading-pane">
@@ -306,6 +328,8 @@ function App() {
             <h2>{selected.name}</h2>
             <p className="source-line">{selected.namespace} · {selected.degree} recorded links</p>
             {selected.sourceUri && <a className="source-link" href={selected.sourceUri} target="_blank" rel="noreferrer">Open source <ChevronRight size={14} /></a>}
+            <IdentityPanel node={selected} nodes={data?.nodes ?? []} onChanged={refreshGraph} />
+            <ClaimPanel node={selected} nodes={data?.nodes ?? []} onChanged={refreshGraph} context={graphContext || undefined} at={at} />
             <section className="reading-section"><p className="section-label">Connections</p>{connections.length ? connections.slice(0, 12).map(({ edge, node }) => <button key={`${edge.relation}-${node.id}`} className="connection" onClick={() => setSelected(node)}><span>{edge.relation.replaceAll("_", " ")}</span><strong>{node.name}</strong></button>) : <p className="quiet">No graph links recorded for this entry.</p>}</section>
             <section className="reading-section"><p className="section-label">Passages</p>{selected.chunks.length ? selected.chunks.map((chunk) => <article className="excerpt" key={chunk.id}><span>§ {chunk.chunk_index + 1}</span><p>{shortText(chunk.text_content, 700)}</p></article>) : <p className="quiet">No stored passage is attached to this entry.</p>}</section>
           </> : <div className="empty-reading"><Layers3 size={28} /><h2>Reading desk</h2><p>Select a dot, a connection, or a search result to open the underlying material here.</p></div>}

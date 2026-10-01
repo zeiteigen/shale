@@ -1,4 +1,4 @@
-import type { Source } from "@shale/sdk";
+import type { Source, EvidenceInput } from "@shale/sdk";
 
 export interface SourceCandidatePair {
   sourceA: Source;
@@ -25,6 +25,10 @@ export interface EntityResolution {
 }
 
 export interface DiscoveredLink {
+  evidenceA?: EvidenceInput[];
+  evidenceB?: EvidenceInput[];
+  extractionRun?: string;
+  model?: string;
   sourceIdA: string;
   sourceTitleA: string;
   sourceIdB: string;

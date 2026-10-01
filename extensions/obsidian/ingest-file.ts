@@ -1,3 +1,6 @@
+import { dirname } from "node:path";
+import { commitNote, commitImage } from "./commit";
+import { createNoteIndex, indexVault, resolveNoteLinks } from './link-targets';
 import { getSDK, logger, getSetting, type ShaleSDK } from "@shale/sdk";
 import { parseFile, type ParsedFile, type ContextualChunk } from "./parse-file";
 import { parseImageFile, type ParsedImage } from "./parse-image";
@@ -32,6 +35,8 @@ export interface IngestFileOptions {
   parsedFile?: ParsedFile;
   contextHydrationLimit?: number;
   namespace?: string;
+  vaultPath?: string;
+  noteIndex?: ReturnType<typeof createNoteIndex>;
 }
 
 export interface IngestImageOptions {
@@ -40,6 +45,7 @@ export interface IngestImageOptions {
   deferEmbedding?: boolean;
   parsedImage?: ParsedImage;
   namespace?: string;
+  vaultPath?: string;
 }
 
 /** Failed embeddings stay pending; fabricated vectors never enter the index. */
@@ -109,11 +115,17 @@ export async function ingestFile(
 ): Promise<IngestFileResult> {
   const sdk = sdkOverride ?? getSDK();
 
-  const prepare = async () =>
-    options?.parsedFile ??
-    parseFile(filePath, sdk, {
+  const prepare = async () => {
+    const file = options?.parsedFile ?? await parseFile(filePath, sdk, {
       expandAtomicNotes: options?.expandAtomicNotes,
     });
+    if (!file.linkTargets) {
+      const vaultPath = options?.vaultPath ?? dirname(filePath);
+      const index = options?.noteIndex ?? indexVault(vaultPath,sdk.settings.get<string[]>('ignoredDirectories'));
+      resolveNoteLinks(file,vaultPath,index);
+    }
+    return file;
+  };
   const finalize = async (
     parsedFile: ParsedFile,
   ): Promise<IngestFileResult> => {
@@ -168,22 +180,8 @@ export async function ingestFile(
       getSetting<string>("namespace", "obsidian");
 
     // 3. Ingest note source and chunks atomically
-    const ingestResult = sdk.ingest.sourceAndChunks({
-      source: {
-        type: "markdown_note",
-        uri: parsedFile.noteUri,
-        origin: "obsidian",
-        title: parsedFile.noteTitle,
-        updated_at: parsedFile.updatedAt,
-      },
-      chunks: parsedFile.contextualChunks.map((chunk, idx) => ({
-        chunk_index: chunk.chunk_index,
-        chunk_type: chunk.chunk_type ?? "verbatim",
-        text_content: chunk.text_content,
-        embedding: embeddings[idx],
-      })),
-      namespace: ns,
-    });
+    const ingestResult = commitNote(sdk,parsedFile,embeddings,
+      {name:vaultEntityName.replace(/^Vault: /,""),path:options?.vaultPath ?? dirname(filePath)},ns);
 
     return {
       filePath,
@@ -203,8 +201,8 @@ export async function ingestFile(
  * Ingests an individual image file using the Shale SDK:
  * 1. Calls parseImageFile to generate multimodal description using Chat model
  * 2. Embeds the description chunks outside of parsing (or uses precomputed embeddings)
- * 3. Atomically ingests source and chunks with chunk_type (verbatim for layout, synthetic for meaning)
- * 4. Constructs Image graph entity and IN_SAME_VAULT edge
+ * 3. Atomically ingests source, synthetic vision chunks, and evidence-backed graph claims
+ * 4. Commits the Image identity and directed vault membership
  */
 export async function ingestImageFile(
   filePath: string,
@@ -284,24 +282,8 @@ export async function ingestImageFile(
       getSetting<string>("namespace", "obsidian");
 
     // 3. Atomically ingest image source and chunks
-    const ingestResult = sdk.ingest.sourceAndChunks({
-      source: {
-        type: "image",
-        uri: parsedImage.imageUri,
-        origin: "obsidian",
-        title: parsedImage.imageTitle,
-        updated_at: parsedImage.updatedAt,
-      },
-      chunks: targetChunks.map((chunk, idx) => ({
-        chunk_index: chunk.chunk_index,
-        chunk_type:
-          chunk.chunk_type ??
-          (chunk.chunk_index === 0 ? "verbatim" : "synthetic"),
-        text_content: chunk.text_content,
-        embedding: embeddings[idx],
-      })),
-      namespace: imageNs,
-    });
+    const ingestResult = commitImage(sdk,parsedImage,embeddings,
+      {name:vaultEntityName.replace(/^Vault: /,""),path:options.vaultPath ?? dirname(filePath)},imageNs);
 
     return {
       filePath,

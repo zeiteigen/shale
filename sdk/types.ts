@@ -63,6 +63,9 @@ export interface IngestEntityInput {
   type: string;
   id?: number;
   namespace?: string;
+  /** Durable identity; distinct entities may share a display name. */
+  stableId?: string;
+  aliases?: string[];
 }
 
 export interface IngestEdgeInput {
@@ -71,6 +74,8 @@ export interface IngestEdgeInput {
   relation: string;
   weight?: number;
   metadata?: string | Record<string, any>;
+  /** First-class assertion fields. Legacy metadata is retained as qualifiers. */
+  claim?: Omit<import('./graph/types').ClaimInput, 'subject' | 'predicate' | 'object'>;
 }
 
 export type { Source, ChunkType } from "../lib/db";

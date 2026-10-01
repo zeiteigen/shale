@@ -1,6 +1,7 @@
 import type { ShaleSDK } from "@shale/sdk";
 import { acceptedLink } from "./link-decision";
 import { pairCheckpointId } from "./link-batch";
+import { linkEvidence } from "./link-evidence";
 import type {
   SourceCandidatePair,
   LLMLinkAnalysis,
@@ -245,6 +246,8 @@ export async function analyzeSourcePairWithLLM(
 
   const excerptA = contextA.combinedText.slice(0, maxChars);
   const excerptB = contextB.combinedText.slice(0, maxChars);
+  const evidenceA = linkEvidence(sdk,pair.sourceA.id,pair.sourceA.hash,contextA.chunks,maxChars);
+  const evidenceB = linkEvidence(sdk,pair.sourceB.id,pair.sourceB.hash,contextB.chunks,maxChars);
 
   const prompt = buildAnalysisPrompt(
     pair,
@@ -289,6 +292,7 @@ export async function analyzeSourcePairWithLLM(
       accepted: analysis.shouldLink && analysis.weight >= minConfidence,
       knnSimilarity: pair.knnSimilarity,
       updatedAt: Math.max(pair.sourceA.updated_at, pair.sourceB.updated_at),
+      evidenceA,evidenceB,extractionRun:checkpointId,model:modelOverride || sdk.llm.options?.().model,
     },
     {
       id: checkpointId,
@@ -317,6 +321,7 @@ export async function analyzeSourcePairWithLLM(
     weight: analysis.weight,
     knnSimilarity: pair.knnSimilarity,
     entityResolutions: analysis.entityResolutions,
+    evidenceA,evidenceB,extractionRun:checkpointId,model:modelOverride || sdk.llm.options?.().model,
   };
 }
 

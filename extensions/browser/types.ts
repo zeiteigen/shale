@@ -1,3 +1,4 @@
+import type { WebPageParseResponse } from "../../lib/messages/web-contracts";
 /**
  * Type definitions for the Shale Browser Ingestion Extension.
  */
@@ -100,6 +101,7 @@ export interface PreparedPageData {
   domain: string;
   checkpointId: string;
   namespace: string;
+  parser?: WebPageParseResponse;
   parsedChunks?: string[];
   contextualSummary?: string;
   imageChunks?: Array<{
@@ -144,12 +146,16 @@ export interface WebPageData {
 }
 
 export interface LLMPageAnalysis {
+  method?: string;
+  model?: string;
   summary: string;
   topics: string[];
   category: string;
 }
 
 export interface LLMSessionAnalysis {
+  method?: string;
+  model?: string;
   sessionTitle: string;
   summary: string;
   topics: string[];

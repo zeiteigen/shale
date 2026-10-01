@@ -1,0 +1,10 @@
+{
+  "extension":"knowledge-extractor",
+  "settings":{
+    "enabled":{"type":"boolean","description":"Extract grounded claims and events from source revisions.","default":true,"possibleValues":[true,false]},
+    "maxSourcesPerRun":{"type":"number","description":"Maximum source revisions analyzed per run.","default":5,"range":{"min":1,"max":50}},
+    "maxContentChars":{"type":"number","description":"Maximum verbatim characters supplied per source revision.","default":12000,"range":{"min":100,"max":50000}},
+    "namespace":{"type":"string","description":"Namespace for extracted knowledge.","default":"knowledge"},
+    "llmModel":{"type":"string","description":"Optional chat model override.","default":null}
+  }
+}

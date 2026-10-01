@@ -1,0 +1,41 @@
+import type { Database } from "bun:sqlite";
+import { sourceEntityName } from "../../lib/source-identity";
+import type { ChunkSearchResult, HybridSearchOptions } from "../types";
+import type { GraphIngestor } from "../graph";
+import type { Evidence, GraphTraversal, TraversalOptions } from "./types";
+
+export interface GraphSearchOptions extends HybridSearchOptions {
+  mode?: 'hybrid'|'bm25'|'vector'; maxSeeds?: number;
+  graph?: Omit<TraversalOptions,'start'>;
+}
+export interface GraphSearchResult {
+  results: ChunkSearchResult[]; neighborhoods: GraphTraversal[]; evidence: Evidence[];
+  relatedPassages: Array<{claimId:string;revisionId:number;chunkIndex:number;text:string}>; truncated: boolean;
+}
+
+/** Expand retrieved passages into bounded, explainable graph neighborhoods. */
+export function expandGraphResults(db: Database, graph: GraphIngestor, results: ChunkSearchResult[], options: GraphSearchOptions): GraphSearchResult {
+  const maxSeeds = options.maxSeeds ?? 5;
+  if (!Number.isInteger(maxSeeds) || maxSeeds < 1 || maxSeeds > 20) throw new Error('maxSeeds must be between 1 and 20');
+  const seeds = new Set<number>();
+  for (const result of results) {
+    const matches = db.query<{id:number}, [number,string]>(`SELECT e.id FROM entities e
+      WHERE e.id IN (SELECT entity_id FROM chunk_entities WHERE chunk_id=?) OR e.name=? LIMIT 21`).all(result.id,sourceEntityName(result.source_id));
+    for (const row of matches) seeds.add(graph.entities.canonical(row.id).id);
+  }
+  const selected = [...seeds].slice(0,maxSeeds);
+  const neighborhoods = selected.map(start=>graph.query.traverse({...options.graph,start,
+    maxNodes:options.graph?.maxNodes ?? 50,maxClaims:options.graph?.maxClaims ?? 100,direction:options.graph?.direction ?? 'both'}));
+  const claimIds = new Set(neighborhoods.flatMap(n=>n.claims.map(c=>c.id)));
+  const evidence = [...claimIds].flatMap(id=>graph.evidence.list(id));
+  const passages = new Map<string,GraphSearchResult['relatedPassages'][number]>();
+  for (const item of evidence) {
+    if (item.chunkIndex === undefined) continue;
+    const row = db.query<{text_content:string}, [number,number]>(
+      'SELECT text_content FROM graph_revision_chunks WHERE revision_id=? AND chunk_index=?').get(item.revisionId,item.chunkIndex);
+    if (row) passages.set(`${item.claimId}:${item.revisionId}:${item.chunkIndex}`,
+      {claimId:item.claimId,revisionId:item.revisionId,chunkIndex:item.chunkIndex,text:row.text_content});
+  }
+  return {results,neighborhoods,evidence,relatedPassages:[...passages.values()],
+    truncated:seeds.size>maxSeeds || neighborhoods.some(n=>n.truncated)};
+}

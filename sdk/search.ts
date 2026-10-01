@@ -1,6 +1,8 @@
 import { Database } from "bun:sqlite";
 import { eng, removeStopwords } from "stopword";
 import defaultDb from "../lib/db-init";
+import { GraphIngestor } from "./graph";
+import { expandGraphResults, type GraphSearchOptions } from "./graph/retrieval";
 import { ensureCosineIndex } from "../lib/cosine-index";
 import { getIndexDimension, vectorBuffer } from "../lib/embedding-index";
 import {
@@ -133,6 +135,12 @@ export class ChunkSearcher {
   constructor(database?: Database, embedder?: EmbeddingClient) {
     this.db = database ?? defaultDb;
     this.embedder = embedder ?? new EmbedderClient();
+  }
+
+  async graph(options: GraphSearchOptions) {
+    const results = options.mode === 'bm25' ? await this.bm25(options)
+      : options.mode === 'vector' ? await this.vector(options) : await this.hybrid(options);
+    return expandGraphResults(this.db,new GraphIngestor('default',this.db),results,options);
   }
 
   /**

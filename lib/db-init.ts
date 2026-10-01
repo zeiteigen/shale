@@ -3,6 +3,7 @@ import * as sqliteVec from "sqlite-vec";
 
 import { join } from "node:path";
 import { ensureCosineIndex } from "./cosine-index";
+import { ensureGraphSchema } from "./graph/schema";
 
 const db = new Database(process.env.SHALE_DB_PATH || join(import.meta.dir, "../production.db"));
 
@@ -172,5 +173,7 @@ db.run(`
     FOREIGN KEY(entity_id) REFERENCES entities(id) ON DELETE CASCADE
   ) STRICT;
 `);
+
+ensureGraphSchema(db);
 
 export default db;

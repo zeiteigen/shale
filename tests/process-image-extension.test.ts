@@ -297,7 +297,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       expect(response.title).toBe("data_pipeline.png");
       expect(response.description).toContain("MapReduce execution graph");
       expect(response.chunks.length).toBe(2);
-      expect(response.chunks[0].chunk_type).toBe("verbatim");
+      expect(response.chunks[0].chunk_type).toBe("synthetic");
       expect(response.chunks[0].text_content).toContain(
         "Directed acyclic graph with three tiers",
       );
@@ -322,7 +322,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
           (e) =>
             e.source === "data_pipeline.png" &&
             e.target === "Vault: Analytics" &&
-            e.relation === "IN_SAME_VAULT",
+            e.relation === "CONTAINED_IN",
         ),
       ).toBe(true);
     });
@@ -429,7 +429,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         )
         .all();
       expect(chunks.length).toBe(2);
-      expect(chunks[0].chunk_type).toBe("verbatim");
+      expect(chunks[0].chunk_type).toBe("synthetic");
       expect(chunks[0].text_content).toContain("Microservice boxes");
       expect(chunks[1].chunk_type).toBe("synthetic");
       expect(chunks[1].text_content).toContain("Event-driven architecture");
@@ -588,7 +588,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         const item = response.results[i];
         expect(item.success).toBe(true);
         expect(item.chunks.length).toBe(2);
-        expect(item.chunks[0].chunk_type).toBe("verbatim");
+        expect(item.chunks[0].chunk_type).toBe("synthetic");
         expect(item.chunks[1].chunk_type).toBe("synthetic");
         // Embeddings must be deferred
         expect(item.chunks[0].embedding).toBeUndefined();
@@ -691,7 +691,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         expect(res.chunks.length).toBe(2);
         expect(res.chunks[0].embedding).toBeDefined();
         expect(res.chunks[1].embedding).toBeDefined();
-        expect(res.chunks[0].chunk_type).toBe("verbatim");
+        expect(res.chunks[0].chunk_type).toBe("synthetic");
         expect(res.chunks[1].chunk_type).toBe("synthetic");
       }
 
@@ -774,7 +774,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       expect(parsedBatch[0].imageTitle).toBe("revenue_q1.png");
       expect(parsedBatch[1].imageTitle).toBe("revenue_q2.png");
       expect(parsedBatch[0].contextualChunks.length).toBe(2);
-      expect(parsedBatch[0].contextualChunks[0].chunk_type).toBe("verbatim");
+      expect(parsedBatch[0].contextualChunks[0].chunk_type).toBe("synthetic");
       expect(parsedBatch[0].contextualChunks[1].chunk_type).toBe("synthetic");
     });
   });

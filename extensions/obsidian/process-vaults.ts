@@ -1,3 +1,5 @@
+import { commitNote, commitImage } from "./commit";
+import { createNoteIndex } from "./link-targets";
 import { join } from "node:path";
 import { readdirSync, statSync } from "node:fs";
 import { getSDK, logger, getSetting, type ShaleSDK } from "@shale/sdk";
@@ -194,6 +196,7 @@ export function filterModifiedFiles(
  * 1. Discovers and filters modified markdown notes and images.
  */
 export interface PreparedVault {
+  namespace?: string;
   checkpointId?: string;
   vault: VaultInfo;
   maxMtime: number;
@@ -268,6 +271,7 @@ export async function prepareVault(
 
   const prepared: PreparedVault = {
     vault,
+    namespace:sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian",
     maxMtime,
     vaultEntityName,
     entities: [{ name: vaultEntityName, type: "Vault" }],
@@ -285,11 +289,15 @@ export async function prepareVault(
     `[Phase 1: Chat Model] Processing ${modifiedNotes.length} updated note(s) and ${modifiedImages.length} updated image(s) with Chat model in "${vault.name}"...`,
   );
 
+  const noteIndex = createNoteIndex([...allMdFiles,...allImageFiles]);
+
   // 1. Process modified notes via ingestFile with deferEmbedding: true (calls parseFile & Chat model expansion)
   for (const filePath of modifiedNotes) {
     try {
       const fileResult = await ingestFile(filePath, vaultEntityName, sdk, {
         deferEmbedding: true,
+        vaultPath: vault.path,
+        noteIndex,
       });
       if (fileResult.parsedFile) {
         prepared.parsedNotes.push({
@@ -302,6 +310,7 @@ export async function prepareVault(
         sdk.saveCheckpoint(
           {
             type: "ai_summary",
+            namespace:prepared.namespace,
             vault: { name: vault.name, path: vault.path },
             filePath,
             noteTitle: fileResult.parsedFile.noteTitle,
@@ -375,6 +384,7 @@ export async function prepareVault(
     sdk.saveCheckpoint(
       {
         type: "image_analysis",
+        namespace:prepared.namespace,
         vault: { name: vault.name, path: vault.path },
         filePath: image.filePath,
         parsedImage: image.parsedImage,
@@ -439,14 +449,8 @@ export async function finalizeVault(
   let notesProcessed = 0;
   let imagesProcessed = 0;
   let failures = prepared.preparationFailed ? 1 : 0;
-  const resolvedCheckpoints: string[] = [];
-
-  const entities: Array<{ name: string; type: string }> = [
-    ...prepared.entities,
-  ];
-  const edges: Array<{ source: string; target: string; relation: string }> = [
-    ...prepared.edges,
-  ];
+  let edgesCreated = 0;
+  const namespace = prepared.namespace ?? sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian";
 
   // 1. Embed and ingest all parsed notes
   for (const note of prepared.parsedNotes) {
@@ -457,29 +461,10 @@ export async function finalizeVault(
         note.parsedFile.noteTitle,
       );
 
-      const ingestResult = sdk.ingest.sourceAndChunks({
-        source: {
-          type: "markdown_note",
-          uri: note.parsedFile.noteUri,
-          origin: "obsidian",
-          title: note.parsedFile.noteTitle,
-          updated_at: note.parsedFile.updatedAt,
-        },
-        chunks: note.parsedFile.contextualChunks.map((chunk, idx) => ({
-          chunk_index: chunk.chunk_index,
-          chunk_type: chunk.chunk_type ?? "verbatim",
-          text_content: chunk.text_content,
-          embedding: embeddings[idx],
-        })),
-        namespace: "obsidian",
-      });
-
+      const ingestResult = commitNote(sdk,note.parsedFile,embeddings,prepared.vault,namespace,`ai_summary:${note.filePath}`);
       totalChunksCreated += ingestResult.chunksCount;
-      entities.push(...note.entities);
-      edges.push(...note.edges);
+      edgesCreated += ingestResult.edgesCreated;
       notesProcessed++;
-
-      resolvedCheckpoints.push(`ai_summary:${note.filePath}`);
     } catch (err) {
       failures++;
       sdk.logger.error(
@@ -504,30 +489,10 @@ export async function finalizeVault(
         img.parsedImage.imageTitle,
       );
 
-      const ingestResult = sdk.ingest.sourceAndChunks({
-        source: {
-          type: "image",
-          uri: img.parsedImage.imageUri,
-          origin: "obsidian",
-          title: img.parsedImage.imageTitle,
-          updated_at: img.parsedImage.updatedAt,
-        },
-        chunks: targetChunks.map((chunk, idx) => ({
-          chunk_index: chunk.chunk_index,
-          chunk_type:
-            chunk.chunk_type ??
-            (chunk.chunk_index === 0 ? "verbatim" : "synthetic"),
-          text_content: chunk.text_content,
-          embedding: embeddings[idx],
-        })),
-        namespace: "obsidian",
-      });
-
+      const ingestResult = commitImage(sdk,img.parsedImage,embeddings,prepared.vault,namespace,`image_analysis:${img.filePath}`);
       totalChunksCreated += ingestResult.chunksCount;
-      entities.push(...img.entities);
-      edges.push(...img.edges);
+      edgesCreated += ingestResult.edgesCreated;
       imagesProcessed++;
-      resolvedCheckpoints.push(`image_analysis:${img.filePath}`);
     } catch (err) {
       failures++;
       sdk.logger.error(
@@ -538,8 +503,6 @@ export async function finalizeVault(
   }
 
   // 3. Commit Graph entities & edges
-  const edgesCreated = commitVaultGraph(sdk, entities, edges);
-  for (const id of resolvedCheckpoints) sdk.deleteCheckpoint(id);
   if (failures)
     throw new Error(
       `Vault finalization has ${failures} failure(s); watermark retained for retry`,

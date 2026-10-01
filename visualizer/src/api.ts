@@ -1,6 +1,6 @@
 import type { GraphData, SearchMode, SearchResult } from "./types";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -9,8 +9,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function getGraph() {
-  return request<GraphData>("/api/graph");
+export function getGraph(filter: {context?:string;at?:number} = {}) {
+  const query=new URLSearchParams();
+  if (filter.context !== undefined) query.set('context',filter.context);
+  if (filter.at !== undefined) query.set('at',String(filter.at));
+  return request<GraphData>(`/api/graph?${query}`);
+}
+
+export function updateKnowledge<T>(action: string, body: unknown) {
+  return request<T>(`/api/knowledge/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
 
 export function search(query: string, mode: SearchMode, limit = 12) {

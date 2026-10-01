@@ -82,3 +82,14 @@ button { cursor: pointer; }
 .empty-reading p { font-size: 12px; line-height: 1.55; }
 @media (max-width: 1050px) { .reading-pane { display: none; } }
 @media (max-width: 700px) { .masthead { height: 60px; padding: 0 16px; } .document-title, .ledger { display: none; } .workspace { height: calc(100vh - 60px); } .index-pane { top: 12px; bottom: auto; left: 12px; width: calc(100% - 24px); max-height: 290px; } .map-heading { top: 318px; left: 12px; } .map-controls { bottom: 18px; left: 12px; } .map-caption { display: none; } .filter-section { display: none; } }
+/* Evidence and identity inspection controls. */
+.knowledge-panel label { display: grid; gap: .35rem; margin: .8rem 0; font-size: .8rem; }
+.knowledge-panel input, .knowledge-panel select, .knowledge-panel textarea { width: 100%; padding: .5rem; background: #faf7f0; border: 1px solid #d8d1c3; color: inherit; }
+.knowledge-panel button { padding: .5rem .7rem; border: 1px solid #d8d1c3; background: #faf7f0; color: inherit; cursor: pointer; }
+.knowledge-panel button:disabled { opacity: .5; cursor: default; }
+.claim-card { display: grid; gap: .4rem; width: 100%; margin: .5rem 0; text-align: left; }
+.claim-card span, .claim-card small { font-size: .75rem; color: #68717a; }
+.claim-detail { font-size: .8rem; overflow-wrap: anywhere; }
+.claim-detail pre { white-space: pre-wrap; max-height: 15rem; overflow: auto; }
+.claim-detail blockquote { margin: .8rem 0; border-left: 2px solid #8f4d35; padding: 0 .7rem; }
+.claim-detail cite, .claim-detail a { display: block; margin-top: .4rem; }

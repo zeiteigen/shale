@@ -35,6 +35,7 @@ export function buildFallbackPageAnalysis(
   const topics = sanitizeTopics(titleTopic ? [titleTopic] : [], { domain });
 
   return {
+    method: "heuristic",
     summary:
       excerpt.slice(0, 200).trim() ||
       `Web page from ${domain} titled "${title}".`,
@@ -114,7 +115,7 @@ Return ONLY valid JSON matching this schema:
         ? parsed.category.trim()
         : "WebPage";
 
-    return { summary, topics, category };
+    return { summary, topics, category, method:"llm",model:settings.llmModel ?? sdk.llm.options?.().model };
   } catch (err: any) {
     sdk.logger.warn(
       `LLM page analysis failed for "${page.title}": ${err?.message || err}. Using fallback.`,
@@ -137,6 +138,7 @@ export function buildFallbackSessionAnalysis(
       : `Browsing Session (${domains.join(", ")})`;
 
   return {
+    method: "heuristic",
     sessionTitle,
     summary: `Web browsing session spanning ${visits.length} page visits across ${domains.join(", ")}.`,
     topics: domains.slice(0, 5),
@@ -229,6 +231,7 @@ Return ONLY valid JSON matching this schema:
       : domains;
 
     return {
+      method:"llm",model:settings.llmModel ?? sdk.llm.options?.().model,
       sessionTitle,
       summary,
       topics,

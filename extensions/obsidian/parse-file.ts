@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { statSync, readFileSync } from "node:fs";
 import { sdkStorage, logger, getSetting, type ShaleSDK } from "@shale/sdk";
 import type { ChunkType } from "../../lib/db";
@@ -6,6 +6,7 @@ import { parseNoteContent, type ParsedNote } from "./parser";
 import { dynamicChunkNote, type MarkdownChunk } from "./chunker";
 
 export interface ContextualChunk {
+  metadata?: Record<string, unknown>;
   chunk_index: number;
   chunk_type?: ChunkType;
   text_content: string;
@@ -17,6 +18,8 @@ export interface ParsedFile {
   noteUri: string;
   updatedAt: number;
   parsed: ParsedNote;
+  linkTargets?: Record<string,string>;
+  assetTargets?: Record<string,string>;
   chunks: MarkdownChunk[];
   contextualChunks: ContextualChunk[];
 }
@@ -241,7 +244,7 @@ export async function parseFile(
   const rawContent = readFileSync(filePath, "utf-8");
   const filename = basename(filePath);
   const noteTitle = filename.replace(/\.md$/i, "");
-  const noteUri = `file://${filePath}`;
+  const noteUri = `file://${resolve(filePath)}`;
   const updatedAt = Math.floor(statSync(filePath).mtimeMs);
 
   const parsed = parseNoteContent(rawContent, noteTitle);
@@ -300,6 +303,11 @@ export async function parseFile(
   }
 
   const contextualChunks = buildContextualChunks(chunks, noteTitle, parsed);
+  for (const chunk of contextualChunks) if (chunk.chunk_type === "synthetic")
+    chunk.metadata = {origin:"llm",model:sdk?.llm.options?.().model};
+  const frontmatter = /^---\r?\n[\s\S]*?\r?\n---/.exec(rawContent)?.[0];
+  if (frontmatter) contextualChunks.push({chunk_index:contextualChunks.length,
+    chunk_type:"verbatim",text_content:frontmatter,metadata:{origin:"frontmatter"}});
 
   return {
     filePath,

@@ -237,3 +237,8 @@ export async function run() {
 - Vector indexes use cosine distance. Older Euclidean indexes migrate transactionally on startup/search, preserving vector bytes, chunk IDs, and embedding provenance; no model inference is needed. Filtered searches calculate distances within the matching source/type set before limiting results.
 - HTTP ingest and visualizer servers bind to `127.0.0.1`. The visualizer rejects external origins and hostnames. Invalid ingest requests return non-success HTTP statuses; accepted requests return 202.
 - `bun test` uses a temporary database via its preload. `SHALE_DB_PATH` overrides the database path for isolated tools/hosts. `bun run typecheck` checks host, tests, message contracts, and UI separately.
+# Rich knowledge graph
+
+The graph SDK supports entities with durable identity, scoped claims, source evidence,
+events, review history, conflict discovery, bounded traversal, and graph-aware search.
+See the [graph reference](graph/README.md) for examples and migration semantics.

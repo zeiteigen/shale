@@ -63,22 +63,31 @@ export async function parseWebPage(sdk: ShaleSDK, request: WebPageParseRequest, 
   ])].slice(0, maxImages);
   const chunks = chunkWebText(text, request.chunkSize ?? settings.chunkSize ?? 1000);
   let contextualSummary = `Web page “${title}” from ${new URL(request.url).hostname}. ${text.slice(0, 500)}`;
+  let contextMethod = "excerpt";
   if (settings.enableLlmContext !== false && text.length) {
     try {
       contextualSummary = (await sdk.queryLLM(`Write a concise retrieval context for this web page. State its subject, intended audience, and the relation between its main sections. Do not invent facts.\n\nTitle: ${title}\nURL: ${request.url}\n\nContent:\n${text.slice(0, 6000)}`, { model: settings.llmModel ?? undefined, maxTokens: 300, signal })).trim() || contextualSummary;
+      contextMethod = "llm";
     } catch (error) { signal?.throwIfAborted(); sdk.logger.warn(`Web-page contextualization failed for ${request.url}:`, error); }
   }
   const imageChunks: WebPageParseResponse["imageChunks"] = [];
+  const imageKnowledge: NonNullable<WebPageParseResponse["imageKnowledge"]> = [];
   if (request.includeImages !== false && imageUrls.length) {
     for (const imageUrl of imageUrls) {
       try {
         const image = await sdk.messages.request<ProcessFileResponse>("file:process", { filePath: imageUrl, fileType: "image", contextEntity: title, options: { deferEmbedding: true } }, { target: "process-image", timeoutMs: 300000, signal });
-        if (image.success) imageChunks.push(...image.chunks.map((chunk) => ({
-          text_content: chunk.text_content,
-          chunk_type: chunk.chunk_type ?? "verbatim",
-        })));
+        if (image.success) {
+          const offset = imageChunks.length;
+          imageKnowledge.push({uri:image.uri || imageUrl,title:image.title || imageUrl,
+            claims:(image.knowledge ?? image.chunks.map(chunk => ({
+              predicate:"VISUAL_DESCRIPTION",value:chunk.text_content,chunkIndex:chunk.chunk_index,
+              status:"proposed" as const,method:"vision",
+            }))).map(claim => ({...claim,chunkIndex:claim.chunkIndex+offset}))});
+          imageChunks.push(...image.chunks.map(chunk => ({text_content:chunk.text_content,
+            chunk_type:"synthetic" as const,metadata:{...chunk.metadata,assetUri:image.uri || imageUrl,origin:"vision"}})));
+        }
       } catch (error) { signal?.throwIfAborted(); sdk.logger.debug(`Image parser unavailable or failed for ${imageUrl}: ${String(error)}`); }
     }
   }
-  return { title, text, chunks, contextualSummary, imageUrls, imageChunks };
+  return { title, text, chunks, contextualSummary, contextMethod, contextModel: contextMethod === "llm" ? settings.llmModel ?? sdk.llm.options?.().model : undefined, imageUrls, imageChunks, imageKnowledge };
 }

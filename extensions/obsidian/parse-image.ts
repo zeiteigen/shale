@@ -1,11 +1,12 @@
 import { basename } from "node:path";
 import { statSync, existsSync } from "node:fs";
 import { getSDK, logger, type ShaleSDK } from "@shale/sdk";
+import type { PreparedSourceClaim } from "../../sdk/graph/prepared";
 import type { ContextualChunk } from "./parse-file";
 import {
   describeImageWithChatModel as sharedDescribeImage,
   parseImageFile as sharedParseImageFile,
-} from "../process-image/process-image";
+} from "../../sdk/media/image";
 
 export interface ParsedImage {
   filePath: string;
@@ -13,6 +14,8 @@ export interface ParsedImage {
   imageUri: string;
   updatedAt: number;
   description: string;
+  knowledge?: PreparedSourceClaim[];
+  assetHash?: string;
   contextualChunk: ContextualChunk;
   contextualChunks: ContextualChunk[];
 }
@@ -23,7 +26,7 @@ export interface ParseImageOptions {
 
 /**
  * Prompts the SDK Chat model to generate a comprehensive multimodal description.
- * Re-exported from the dedicated process-image extension.
+ * Shared with the image service through the standalone SDK implementation.
  */
 export async function describeImageWithChatModel(
   sdk: ShaleSDK,
@@ -75,13 +78,14 @@ export async function parseImageFile(
                 chunk_index: c.chunk_index,
                 chunk_type:
                   c.chunk_type ??
-                  (c.chunk_index === 0 ? "verbatim" : "synthetic"),
+                  "synthetic",
                 text_content: c.text_content,
+                metadata: c.metadata,
               }))
             : [
                 {
                   chunk_index: 0,
-                  chunk_type: "verbatim",
+                  chunk_type: "synthetic",
                   text_content: `# Image: ${resp.title}\n${resp.description ?? ""}`,
                 },
               ];
@@ -92,6 +96,8 @@ export async function parseImageFile(
           imageUri: resp.uri || imageUri,
           updatedAt: resp.metadata?.updatedAt ?? updatedAt,
           description: resp.description ?? "",
+          knowledge: resp.knowledge,
+          assetHash: resp.metadata?.assetHash,
           contextualChunk: contextualChunks[0],
           contextualChunks,
         };
@@ -103,7 +109,7 @@ export async function parseImageFile(
     }
   }
 
-  // 2. Local fallback using process-image logic
+  // 2. Standalone fallback using the SDK implementation
   const localResult = await sharedParseImageFile(rawPath, sdk, options);
   const contextualChunks: ContextualChunk[] = localResult.contextualChunks.map(
     (c) => ({
@@ -119,6 +125,8 @@ export async function parseImageFile(
     imageUri: localResult.imageUri,
     updatedAt: localResult.updatedAt,
     description: localResult.description,
+    assetHash: localResult.assetHash,
+    knowledge: localResult.contextualChunks.map(c => ({ predicate: String(c.metadata?.predicate ?? "VISUAL_DESCRIPTION"), value: c.text_content, chunkIndex: c.chunk_index, status: "proposed", method: String(c.metadata?.origin ?? "vision"), model: c.metadata?.model as string | undefined })),
     contextualChunk: contextualChunks[0],
     contextualChunks,
   };
@@ -161,6 +169,7 @@ export async function parseImageFilesBatch(
 
       const batchResults = resp?.results || (resp?.success ? [resp] : []);
       if (Array.isArray(batchResults) && batchResults.length > 0) {
+        if (batchResults.some((item: any) => !item.success)) throw new Error("Image batch contains failed items");
         return batchResults.map((item: any, idx: number) => {
           const rawPath = rawPaths[idx] || item.filePath;
           const imageTitle = item.title || basename(rawPath);
@@ -178,13 +187,14 @@ export async function parseImageFilesBatch(
                   chunk_index: c.chunk_index,
                   chunk_type:
                     c.chunk_type ??
-                    (c.chunk_index === 0 ? "verbatim" : "synthetic"),
+                    "synthetic",
                   text_content: c.text_content,
+                metadata: c.metadata,
                 }))
               : [
                   {
                     chunk_index: 0,
-                    chunk_type: "verbatim",
+                    chunk_type: "synthetic",
                     text_content: `# Image: ${imageTitle}\n${item.description ?? ""}`,
                   },
                 ];
@@ -195,6 +205,8 @@ export async function parseImageFilesBatch(
             imageUri,
             updatedAt: item.metadata?.updatedAt ?? updatedAt,
             description: item.description ?? "",
+            knowledge: item.knowledge,
+            assetHash: item.metadata?.assetHash,
             contextualChunk: contextualChunks[0],
             contextualChunks,
           };

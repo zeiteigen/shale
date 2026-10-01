@@ -351,7 +351,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       const edges = db
         .query<{ source: string; target: string; relation: string }, []>(
           `
-          SELECT s.name AS source, t.name AS target, e.relation
+          SELECT coalesce(s.display_name,s.name) AS source, coalesce(t.display_name,t.name) AS target, e.relation
           FROM edges e
           JOIN entities s ON e.source_entity_id = s.id
           JOIN entities t ON e.target_entity_id = t.id
@@ -360,8 +360,8 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
         )
         .all();
 
-      // 1. IN_SAME_VAULT edges (connecting notes to "Vault: test-vault")
-      const vaultEdges = edges.filter((e) => e.relation === "IN_SAME_VAULT");
+      // 1. Directed IN_VAULT edges (connecting notes to "Vault: test-vault")
+      const vaultEdges = edges.filter((e) => e.relation === "IN_VAULT");
       expect(
         vaultEdges.some(
           (e) => e.source === "Alpha" && e.target === "Vault: test-vault",
@@ -475,7 +475,8 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       expect(parsed.updatedAt).toBeGreaterThan(0);
       expect(parsed.parsed.wikilinks).toContain("Qubits");
       expect(parsed.chunks.length).toBeGreaterThan(0);
-      expect(parsed.contextualChunks.length).toBe(parsed.chunks.length);
+      expect(parsed.contextualChunks.length).toBe(parsed.chunks.length + 1);
+      expect(parsed.contextualChunks.at(-1)?.text_content).toContain("tags:");
       expect(parsed.contextualChunks[0].text_content).toContain(
         "Category: Physics",
       );
@@ -620,7 +621,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       writeFileSync(stubNotePath, `---\ncategory:\n- Chemistry\n---\n`);
 
       const parsed = await parseFile(stubNotePath);
-      expect(parsed.contextualChunks.length).toBe(1);
+      expect(parsed.contextualChunks.length).toBe(2);
       expect(parsed.contextualChunks[0].text_content).toContain(
         "# Note: alkyne",
       );
@@ -634,7 +635,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
         "Vault: ChemistryVault",
         sdk,
       );
-      expect(result.chunksCreated).toBe(1);
+      expect(result.chunksCreated).toBe(2);
       expect(result.noteTitle).toBe("alkyne");
 
       // Also verify completely blank note
@@ -820,7 +821,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
         )
         .all();
       expect(chunks.length).toBe(2);
-      expect(chunks[0].chunk_type).toBe("verbatim");
+      expect(chunks[0].chunk_type).toBe("synthetic");
       expect(chunks[0].text_content).toContain("Central node A");
       expect(chunks[1].chunk_type).toBe("synthetic");
       expect(chunks[1].text_content).toContain("Byzantine fault tolerance");
