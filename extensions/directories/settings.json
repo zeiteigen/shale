@@ -1,0 +1,12 @@
+{
+  "directories": [],
+  "recursive": true,
+  "ignoreHidden": true,
+  "ignoredDirectories": ["node_modules", "vendor", "dist", "build"],
+  "fileExtensions": ["pdf", "docx", "pptx", "xlsx", "odt", "odp", "ods", "rtf", "txt", "csv", "md", "html", "epub", "png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "tiff"],
+  "maxFileSizeMB": 50,
+  "processingTimeoutMs": 120000,
+  "embeddingBatchSize": 64,
+  "forceAll": false,
+  "namespace": "directories"
+}

@@ -1,3 +1,6 @@
+import { preparePublicCapture } from "./public-capture";
+import { finalizeActivity } from "./activity-graph";
+import { applyCatalogDeletion } from "./catalog-lifecycle";
 import type { ShaleSDK } from "@shale/sdk";
 import type { BrowserExtensionSettings } from "./settings.types";
 import type {
@@ -20,26 +23,39 @@ export type PreparedBrowserPayload =
   | { type: "session"; session: PreparedSessionData | null }
   | { type: "history"; payload: HistoryBatchPayload }
   | { type: "bookmarks"; payload: BookmarksBatchPayload }
-  | { type: "ping" };
+  | { type: "ping" }
+  | {
+      type: "activity";
+      payload: import("../../lib/browser-contract").ActivityEventPayload;
+    }
+  | {
+      type: "delete";
+      payload: import("../../lib/browser-contract").CatalogDeletePayload;
+    };
 
 export async function prepareBrowserPayload(
   sdk: ShaleSDK,
   payload: BrowserIngestPayload,
   settings: Partial<BrowserExtensionSettings>,
+  options: { jobId?: string; managed?: boolean } = {},
 ): Promise<PreparedBrowserPayload> {
   switch (payload.type) {
+    case "public_page_capture": {
+      const page = await preparePublicCapture(sdk, payload, settings, options);
+      return { type: "pages", pages: page ? [page] : [] };
+    }
     case "page_visit":
     case "active_page": {
-      const page = await preparePageVisit(sdk, payload, settings);
+      const page = await preparePageVisit(sdk, payload, settings, options);
       return { type: "pages", pages: page ? [page] : [] };
     }
     case "tabs_batch":
     case "pages_batch": {
-      const pages: PreparedPageData[] = [];
-      for (const page of payload.pages ?? []) {
-        const prepared = await preparePageVisit(sdk, page, settings);
-        if (prepared) pages.push(prepared);
-      }
+      const pages = (await sdk.models.mapChat(payload.pages ?? [], (page, index) =>
+        preparePageVisit(sdk, page, settings, {
+          ...options,
+          jobId: options.jobId ? `${options.jobId}:${index}` : undefined,
+        }))).filter((page): page is PreparedPageData => !!page);
       return { type: "pages", pages };
     }
     case "session_snapshot":
@@ -52,8 +68,14 @@ export async function prepareBrowserPayload(
       return { type: "history", payload };
     case "bookmarks_batch":
       return { type: "bookmarks", payload };
+    case "activity_event":
+      return { type: "activity", payload };
     case "ping":
       return { type: "ping" };
+    case "catalog_delete":
+      return { type: "delete", payload };
+    case "browser_batch":
+      throw new Error("Versioned batches must be split at admission");
   }
 }
 
@@ -61,21 +83,45 @@ export async function finalizeBrowserPayload(
   sdk: ShaleSDK,
   prepared: PreparedBrowserPayload,
   settings: Partial<BrowserExtensionSettings>,
+  assertOwned: () => void = () => {},
+  afterCommit: () => void = () => {},
 ): Promise<void> {
   switch (prepared.type) {
     case "pages":
       for (const page of prepared.pages)
-        await finalizePageVisit(sdk, page, settings);
+        await finalizePageVisit(sdk, page, settings, assertOwned);
       break;
     case "session":
       if (prepared.session)
-        await finalizeSession(sdk, prepared.session, settings);
+        await finalizeSession(sdk, prepared.session, settings, assertOwned);
+      break;
+    case "activity":
+      await finalizeActivity(
+        sdk,
+        prepared.payload,
+        settings,
+        assertOwned,
+        afterCommit,
+      );
       break;
     case "history":
-      await processHistoryBatch(sdk, prepared.payload, settings);
+      await processHistoryBatch(sdk, prepared.payload, settings, () => {
+        assertOwned();
+        afterCommit();
+      });
+      break;
+    case "delete":
+      sdk.database.transaction(() => {
+        assertOwned();
+        applyCatalogDeletion(sdk, prepared.payload);
+        afterCommit();
+      })();
       break;
     case "bookmarks":
-      await processBookmarksBatch(sdk, prepared.payload, settings);
+      await processBookmarksBatch(sdk, prepared.payload, settings, () => {
+        assertOwned();
+        afterCommit();
+      });
       break;
   }
 }

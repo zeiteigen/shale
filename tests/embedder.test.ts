@@ -47,8 +47,8 @@ describe("OpenAI-Compatible Embedding Functionality", () => {
       );
     });
 
-    it("respects explicit OPENAI_ENDPOINT override", () => {
-      process.env.OPENAI_ENDPOINT =
+    it("respects explicit EMBEDDING_ENDPOINT override", () => {
+      process.env.EMBEDDING_ENDPOINT =
         "https://azure-openai.resource/deployments/embed/embeddings?api-version=2024-02";
       expect(resolveEmbeddingEndpoint()).toBe(
         "https://azure-openai.resource/deployments/embed/embeddings?api-version=2024-02",

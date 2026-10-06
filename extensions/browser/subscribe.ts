@@ -1,57 +1,132 @@
 import { getSDK, type ShaleSDK } from "@shale/sdk";
 import type { IngestMaterial } from "../../lib/ingest.types";
-import type { BrowserIngestPayload } from "./types";
-import { enqueueBrowserPayload } from "./ingest-queue";
-
+import {
+  BROWSER_PROTOCOL_VERSION,
+  MAX_BROWSER_BYTES,
+  MAX_BROWSER_RECORDS,
+} from "../../lib/browser-contract";
+import { BrowserProtocolError } from "../../lib/browser-validation";
+import { admitBrowserPayload } from "./admission";
+import { migrateLegacyInbox } from "./inbox-store";
+import { wakeBrowserWorker } from "./worker-scheduler";
+import { browserStatus, retryBrowserJobs } from "./status";
+import { queryBrowser, correctContext } from "./retrieval";
+import type { BrowserExtensionSettings } from "./settings.types";
 let cachedSdk: ShaleSDK | null = null;
-
-function resolveSDK(): ShaleSDK {
-  if (!cachedSdk) {
-    cachedSdk = getSDK(import.meta.dir);
-  }
-  return cachedSdk;
+const resolveSDK = () => (cachedSdk ??= getSDK(import.meta.dir));
+export function capturePolicy(sdk: ShaleSDK) {
+  const settings = sdk.settings.getAll<BrowserExtensionSettings>();
+  return {
+    protocolVersion: 1 as const,
+    excludeDomains: settings.excludeDomains ?? [],
+    excludePatterns: settings.excludePatterns ?? [],
+    excludePrivateBrowsing: settings.excludePrivateBrowsing !== false,
+    sessionInactivityMinutes: settings.sessionInactivityMinutes ?? 30,
+  };
 }
-
-/**
- * Optional initialization hook called when the extension is registered.
- */
 export async function init(): Promise<void> {
   const sdk = resolveSDK();
-  sdk.logger.info("Browser ingestion subscription hook initialized.");
+  migrateLegacyInbox(sdk);
+  sdk.messages.handle("browser:query", (filter) => queryBrowser(sdk, filter), {
+    name: "browser",
+  });
+  sdk.messages.handle("browser:policy", () => capturePolicy(sdk), {
+    name: "browser",
+  });
+  wakeBrowserWorker(sdk);
 }
-
-/**
- * Push ingestion entrypoint invoked by the Shale ingest router.
- *
- * @param item Inbound HTTP payload matching IngestMaterial
- * @param sdkOverride Optional scoped SDK instance
- */
+export async function accept(item: IngestMaterial, sdkOverride?: ShaleSDK) {
+  const sdk = sdkOverride ?? resolveSDK();
+  let payload: unknown;
+  try {
+    payload = JSON.parse(item.content);
+  } catch {
+    throw new BrowserProtocolError("Invalid browser JSON");
+  }
+  const receipt = admitBrowserPayload(sdk, payload);
+  if (!sdkOverride) wakeBrowserWorker(sdk);
+  return receipt;
+}
 export async function subscribe(
   item: IngestMaterial,
   sdkOverride?: ShaleSDK,
 ): Promise<void> {
+  await accept(item, sdkOverride);
+}
+export function capabilities() {
+  return {
+    protocolVersions: [BROWSER_PROTOCOL_VERSION],
+    maxBytes: MAX_BROWSER_BYTES,
+    maxRecords: MAX_BROWSER_RECORDS,
+  };
+}
+export async function inspect(
+  req: Request,
+  sdkOverride?: ShaleSDK,
+): Promise<Response> {
   const sdk = sdkOverride ?? resolveSDK();
-
+  const url = new URL(req.url),
+    endpoint = url.pathname.split("/").at(-1);
   try {
-    let payload: BrowserIngestPayload;
-    if (typeof item.content === "string") {
-      payload = JSON.parse(item.content);
-    } else if (typeof item.content === "object" && item.content !== null) {
-      payload = item.content as any;
-    } else {
-      sdk.logger.warn("Received empty or malformed browser ingest payload.");
-      return;
+    if (req.method === "GET") {
+      if (endpoint === "policy") return Response.json(capturePolicy(sdk));
+      if (endpoint === "status") {
+        const ids = url.searchParams.get("ids")?.split(",").filter(Boolean);
+        if (ids && (ids.length > 100 || ids.some((id) => id.length > 200)))
+          throw new Error("Invalid receipt IDs");
+        return Response.json(browserStatus(sdk, ids));
+      }
+      if (endpoint === "library")
+        return Response.json(
+          queryBrowser(sdk, {
+            query: url.searchParams.get("query") ?? undefined,
+            collectorId: url.searchParams.get("collectorId") ?? undefined,
+            sessionId: url.searchParams.get("sessionId") ?? undefined,
+            threadId: url.searchParams.get("threadId") ?? undefined,
+            goal: url.searchParams.get("goal") ?? undefined,
+            topic: url.searchParams.get("topic") ?? undefined,
+            domain: url.searchParams.get("domain") ?? undefined,
+            quality: (url.searchParams.get("quality") ?? undefined) as any,
+            from: url.searchParams.has("from")
+              ? Number(url.searchParams.get("from"))
+              : undefined,
+            to: url.searchParams.has("to")
+              ? Number(url.searchParams.get("to"))
+              : undefined,
+            limit: url.searchParams.has("limit")
+              ? Number(url.searchParams.get("limit"))
+              : undefined,
+          }),
+        );
     }
-
-    const queueLength = enqueueBrowserPayload(sdk, payload);
-    sdk.logger.info(
-      `Queued browser payload: type="${payload.type}" (origin: ${item.metadata.data_origin}, pending: ${queueLength}).`,
+    if (req.method === "POST" && ["retry", "context"].includes(endpoint!)) {
+      const body = await req.text();
+      if (new TextEncoder().encode(body).length > 32000)
+        throw new Error("Command too large");
+      const input = JSON.parse(body);
+      if (endpoint === "retry") {
+        if (
+          !Array.isArray(input.ids) ||
+          input.ids.length > 100 ||
+          input.ids.some(
+            (id: unknown) => typeof id !== "string" || id.length > 200,
+          )
+        )
+          throw new Error("Invalid retry IDs");
+        retryBrowserJobs(sdk, input.ids);
+        if (!sdkOverride) wakeBrowserWorker(sdk);
+        return Response.json({ success: true });
+      }
+      const result = correctContext(sdk, input);
+      if (!sdkOverride) wakeBrowserWorker(sdk);
+      return Response.json(result);
+    }
+    return Response.json(
+      { error: "Unknown browser endpoint or method" },
+      { status: 404 },
     );
-  } catch (err: any) {
-    sdk.logger.error(
-      `Error processing browser ingestion payload: ${err?.message || err}`,
-    );
+  } catch (error: any) {
+    return Response.json({ error: error.message }, { status: 400 });
   }
 }
-
 export default subscribe;

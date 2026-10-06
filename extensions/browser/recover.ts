@@ -1,3 +1,7 @@
+import { failSession } from "./session-failure";
+import { acquireTaskLease } from "../../lib/task-lease";
+import { finalizeBrowserPayload } from "./payload-pipeline";
+import { finishJob, failJob, pendingJobs } from "./inbox-store";
 import type { CheckpointContext, ShaleSDK } from "@shale/sdk";
 import { finalizePageVisit } from "./ingest-processor";
 import { finalizeSession } from "./session-manager";
@@ -13,9 +17,10 @@ export interface RecoverResult {
  * Crash recovery runner invoked when queued checkpoints exist.
  * Embeds uncommitted summaries and commits sources, chunks, and graph edges without re-querying LLM.
  */
-export async function run(
+async function recoverOwned(
   sdk: ShaleSDK,
-  context?: CheckpointContext,
+  context: CheckpointContext | undefined,
+  assertOwned: () => void,
 ): Promise<RecoverResult> {
   const ctx = context ?? sdk.getCheckpointContext();
   if (ctx.count === 0) {
@@ -31,6 +36,7 @@ export async function run(
   let failed = 0;
 
   for (const item of ctx.checkpoints) {
+    if (!sdk.checkpoint.get(item.id)) continue;
     const data = item.data as any;
     if (!data || typeof data !== "object") {
       ctx.resolve(item.id);
@@ -38,7 +44,18 @@ export async function run(
     }
 
     try {
-      if (data.type === "browser_page_analysis") {
+      assertOwned();
+      if (data.type === "browser_job") {
+        await finalizeBrowserPayload(
+          sdk,
+          data.prepared,
+          data.settings ?? sdk.settings.getAll<BrowserExtensionSettings>(),
+          assertOwned,
+          () => finishJob(sdk, data.jobId),
+        );
+        sdk.database.transaction(() => finishJob(sdk, data.jobId))();
+        recoveredPages++;
+      } else if (data.type === "browser_page_analysis") {
         const {
           pageData,
           analysis,
@@ -51,6 +68,9 @@ export async function run(
         // Finalization is deliberately LLM-free. Reusing the normal Phase 2
         // path preserves HTML-derived chunks, links, images, and session edges.
         const prepared: PreparedPageData = {
+          jobId: data.jobId,
+          contentKey: data.contentKey,
+          settings: data.settings,
           pageData,
           analysis,
           cleanUrl: pageData.cleanUrl || pageData.url,
@@ -66,7 +86,8 @@ export async function run(
         await finalizePageVisit(
           sdk,
           prepared,
-          sdk.settings.getAll<BrowserExtensionSettings>(),
+          data.settings ?? sdk.settings.getAll<BrowserExtensionSettings>(),
+          assertOwned,
         );
         recoveredPages++;
       } else if (data.type === "browser_session_analysis") {
@@ -82,6 +103,7 @@ export async function run(
         await finalizeSession(
           sdk,
           {
+            ...data,
             sessionId,
             startTime,
             endTime,
@@ -90,7 +112,8 @@ export async function run(
             checkpointId: item.id,
             namespace,
           },
-          sdk.settings.getAll<BrowserExtensionSettings>(),
+          data.settings ?? sdk.settings.getAll<BrowserExtensionSettings>(),
+          assertOwned,
         );
 
         recoveredSessions++;
@@ -98,7 +121,27 @@ export async function run(
 
       ctx.resolve(item.id);
     } catch (err: any) {
+      if (!sdk.checkpoint.get(item.id)) continue;
       failed++;
+      if (
+        (data.type === "browser_job" ||
+          data.type === "browser_page_analysis") &&
+        data.jobId
+      ) {
+        const job = sdk.database
+          .query<{ id: string; attempts: number }, [string, string]>(
+            "SELECT id,attempts FROM browser_jobs WHERE extension_id=? AND id=? AND state IN ('received','prepared')",
+          )
+          .get(sdk.extensionId, data.jobId);
+        if (job) failJob(sdk, job, err, data.settings?.maxJobAttempts ?? 5);
+      }
+      if (data.type === "browser_session_analysis" && data.collectorId)
+        failSession(
+          sdk,
+          { ...data, checkpointId: item.id },
+          err,
+          data.settings?.maxJobAttempts ?? 5,
+        );
       sdk.logger.error(
         `[Recovery] Failed recovering checkpoint ${item.id}: ${err?.message || err}`,
       );
@@ -119,4 +162,34 @@ export async function run(
   return { recoveredPages, recoveredSessions };
 }
 
+export async function run(
+  sdk: ShaleSDK,
+  context?: CheckpointContext,
+): Promise<RecoverResult> {
+  const lease = acquireTaskLease(
+    sdk.database,
+    sdk.extensionId,
+    "browser-worker-lease",
+    120000,
+  );
+  if (!lease) throw new Error("Browser worker already owns recovery");
+  let lost: unknown;
+  const renewal = setInterval(() => {
+    try {
+      lease.renew();
+    } catch (error) {
+      lost = error;
+    }
+  }, 30000);
+  const assertOwned = () => {
+    if (lost) throw lost;
+    lease.renew();
+  };
+  try {
+    return await recoverOwned(sdk, context, assertOwned);
+  } finally {
+    clearInterval(renewal);
+    lease.release();
+  }
+}
 export default run;

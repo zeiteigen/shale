@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k \"bun --watch server.ts\" \"vite\"",
-    "server": "bun server.ts",
+    "dev": "concurrently -k \"bun ../main/index.ts\" \"vite --host 127.0.0.1\"",
+    "server": "bun ../main/index.ts",
     "build": "vite build",
     "preview": "vite preview"
   },

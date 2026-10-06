@@ -14,7 +14,7 @@ export interface ObsidianSettings {
   customVaults?: Array<{ name?: string; path: string } | string>;
 
   /**
-   * Additional folder names to ignore during note/image scanning (e.g. ["templates", "archive"]).
+   * Additional folder names to ignore during note/image/document scanning (e.g. ["templates", "archive"]).
    * Hidden folders starting with "." (.obsidian, .git, .trash) are always ignored by default.
    */
   ignoredDirectories?: string[];
@@ -30,6 +30,15 @@ export interface ObsidianSettings {
    * @default true
    */
   includeImages?: boolean;
+
+  /** Discover supported document attachments in every vault. @default true */
+  includeDocuments?: boolean;
+
+  /** Document formats delegated to process-document; Markdown uses the note pipeline. */
+  documentExtensions?: string[];
+
+  /** Whole per-document message deadline, including parsing and optional summaries. @default 180000 */
+  documentRequestTimeoutMs?: number;
 
   /**
    * Recognized image file extensions.

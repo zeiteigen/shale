@@ -5,9 +5,17 @@ export function validateVector(
   dimension?: number,
 ): void {
   if (
+    (Array.isArray(vector) || vector instanceof Float32Array) &&
+    dimension !== undefined && vector.length !== dimension
+  ) {
+    throw new Error(
+      `Invalid embedding vector: expected ${dimension} finite dimensions, received ${vector.length}. ` +
+      "Stop ingestion and run bun run scripts/reindex-embeddings.ts <database-path> to migrate the index to the configured embedding model and dimensions.",
+    );
+  }
+  if (
     !(Array.isArray(vector) || vector instanceof Float32Array) ||
     !vector.length ||
-    (dimension !== undefined && vector.length !== dimension) ||
     !vector.every(
       (value) =>
         typeof value === "number" &&

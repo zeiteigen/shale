@@ -1,7 +1,11 @@
-import type { GraphChannelDefinitions } from './graph-contracts';
-import type { WebChannelDefinitions } from './web-contracts';
-export type { WebPageParseRequest, WebPageParseResponse } from './web-contracts';
-import type { PreparedSourceClaim } from '../../sdk/graph/prepared';
+import type { GraphChannelDefinitions } from "./graph-contracts";
+import type { BrowserChannelDefinitions } from "./browser-contracts";
+import type { WebChannelDefinitions } from "./web-contracts";
+export type {
+  WebPageParseRequest,
+  WebPageParseResponse,
+} from "./web-contracts";
+import type { PreparedSourceClaim } from "../../sdk/graph/prepared";
 
 // ---------------------------------------------------------------------------
 // Built-in Channel Schemas
@@ -258,7 +262,11 @@ export interface SearchQueryResponse {
 // Type-Safe Channel Map
 // ---------------------------------------------------------------------------
 
-export interface BuiltinChannelDefinitions extends GraphChannelDefinitions, WebChannelDefinitions {
+export interface BuiltinChannelDefinitions
+  extends
+    GraphChannelDefinitions,
+    WebChannelDefinitions,
+    BrowserChannelDefinitions {
   "file:process": {
     type: "request";
     request: ProcessFileRequest;

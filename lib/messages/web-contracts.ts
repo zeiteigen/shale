@@ -1,5 +1,5 @@
-import type { ProcessedChunk } from './contracts';
-import type { PreparedSourceClaim } from '../../sdk/graph/prepared';
+import type { ProcessedChunk } from "./contracts";
+import type { PreparedSourceClaim } from "../../sdk/graph/prepared";
 
 export interface WebPageParseRequest {
   url: string;
@@ -9,19 +9,36 @@ export interface WebPageParseRequest {
   imageUrls?: string[];
   chunkSize?: number;
   includeImages?: boolean;
+  enableLlmContext?: boolean;
+  allowFetch?: boolean;
+  blocks?: import("../browser-contract").PageBlock[];
+  extraction?: import("../browser-contract").ExtractionInfo;
 }
 export interface WebPageParseResponse {
   title: string;
   text: string;
   chunks: string[];
+  blocks?: import("../browser-contract").PageBlock[];
+  extraction?: import("../browser-contract").ExtractionInfo;
+  chunkLocators?: Array<{ locator: string; headingPath: string[] }>;
   contextualSummary: string;
   contextMethod?: string;
   contextModel?: string;
   imageUrls: string[];
-  imageChunks: Array<Pick<ProcessedChunk,'text_content'|'chunk_type'|'metadata'>>;
+  imageChunks: Array<
+    Pick<ProcessedChunk, "text_content" | "chunk_type" | "metadata">
+  >;
   /** Interpretation evidence indexes refer to imageChunks, not page text chunks. */
-  imageKnowledge?: Array<{uri:string;title:string;claims:PreparedSourceClaim[]}>;
+  imageKnowledge?: Array<{
+    uri: string;
+    title: string;
+    claims: PreparedSourceClaim[];
+  }>;
 }
 export interface WebChannelDefinitions {
-  'web:parse': { type:'request';request:WebPageParseRequest;response:WebPageParseResponse };
+  "web:parse": {
+    type: "request";
+    request: WebPageParseRequest;
+    response: WebPageParseResponse;
+  };
 }

@@ -8,7 +8,7 @@ import {
 import { IngestMaterial } from "../lib/ingest.types";
 import { createExtensionSDK, sdkStorage } from "../sdk";
 
-export type IngestHook = {
+export type IngestHook = import("./ingest-admission").IngestSubscriber & {
   func: (item: IngestMaterial) => Promise<void>;
   reciever_name: string;
 };
@@ -119,6 +119,9 @@ for await (const file of glob.scan(extensionsDir)) {
           subscribe_ingest.push({
             func: entryModule.subscribe,
             reciever_name: manifest.name,
+            accept: typeof entryModule.accept === "function" ? entryModule.accept : undefined,
+            inspect: typeof entryModule.inspect === "function" ? entryModule.inspect : undefined,
+            capabilities: typeof entryModule.capabilities === "function" ? entryModule.capabilities : undefined,
           });
         }
       }

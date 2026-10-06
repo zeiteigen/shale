@@ -169,11 +169,8 @@ async function analyzeAndCommitSourceLinks(
   if (!Number.isInteger(limit) || limit < 1)
     throw new Error("maxPairsPerRun must be a positive integer");
   const candidatePairs = batch.pairs.slice(0, limit);
-  const discoveredLinks: DiscoveredLink[] = [];
-  for (const pair of candidatePairs) {
-    const link = await analyzeSourcePairWithLLM(pair, sdk);
-    if (link) discoveredLinks.push(link);
-  }
+  const discoveredLinks = (await sdk.models.mapChat(candidatePairs,
+    pair => analyzeSourcePairWithLLM(pair, sdk))).filter((link): link is DiscoveredLink => !!link);
   const namespace = sdk.settings.get<string>("namespace") ?? "source-linker";
   const bidirectional = sdk.settings.get<boolean>("bidirectional") ?? true;
   const completed = new Set(candidatePairs.map(pairCheckpointId));

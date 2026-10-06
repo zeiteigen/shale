@@ -386,12 +386,12 @@ describe("Main Process CLI & Manual Cron Triggering", () => {
 
     it("shows settings help when typing 'settings' or 'settings help'", async () => {
       const r1 = await handleCliCommand("settings");
-      expect(r1.output).toContain("Extension Settings Commands:");
+      expect(r1.output).toContain("Settings Commands (use root for project settings.json):");
       expect(r1.output).toContain("settings list-extensions");
       expect(r1.output).toContain("settings set <extension> <key> <val>");
 
       const r2 = await handleCliCommand("settings help");
-      expect(r2.output).toContain("Extension Settings Commands:");
+      expect(r2.output).toContain("Settings Commands (use root for project settings.json):");
     });
 
     it("lists discovered extensions via 'settings list-extensions' and 'settings extensions'", async () => {

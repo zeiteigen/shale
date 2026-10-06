@@ -69,7 +69,7 @@ export function normalizeUrl(rawUrl: string): {
     }
 
     // Strip hash fragment
-    parsed.hash = "";
+    if (!/^#(?:!\/|\/)/.test(parsed.hash)) parsed.hash = "";
 
     return {
       cleanUrl: parsed.toString(),

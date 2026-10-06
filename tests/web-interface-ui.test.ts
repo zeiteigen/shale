@@ -1,0 +1,61 @@
+import { expect, it } from "bun:test";
+import { chromium } from "playwright-core";
+import { createWebHost } from "./fixtures/web-host";
+
+// Run after web:build; use an installed Chromium rather than downloading a browser.
+it.skipIf(process.env.SHALE_WEB_E2E !== "1")("operates settings, jobs, console and graph from the unified browser UI", async () => {
+  const host = createWebHost();
+  const browser = await chromium.launch({ executablePath: process.env.SHALE_CHROMIUM_PATH ?? "/usr/bin/chromium", headless: true, args: ["--no-sandbox"] });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  page.setDefaultTimeout(5000);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    await page.goto(host.base);
+    await page.getByRole("heading", { name: "Shale at a glance" }).waitFor();
+    await page.getByRole("button", { name: "Run demo-job", exact: true }).click();
+    await page.locator(".task-history .run-status.succeeded").first().waitFor();
+    await page.getByLabel("Shale command").fill("help");
+    await page.locator(".command-form").getByRole("button", { name: "Run", exact: true }).click();
+    await page.getByText("Available CLI Commands:", { exact: false }).waitFor();
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "demo Settings", exact: true }).click();
+    await page.getByLabel("enabled", { exact: true }).selectOption("false");
+    await page.locator(".setting-field").filter({ has: page.getByLabel("enabled", { exact: true }) }).getByRole("button", { name: "Save", exact: true }).click();
+    await page.locator(".setting-field").filter({ has: page.getByLabel("enabled", { exact: true }) }).getByText("Saved.", { exact: true }).waitFor();
+    const folders = page.locator(".setting-field").filter({ has: page.getByLabel("directories", { exact: true }) });
+    await page.getByLabel("directories", { exact: true }).fill('["/tmp/web-notes"]');
+    await folders.getByRole("button", { name: "Save", exact: true }).click();
+    await folders.getByText("Saved.", { exact: true }).waitFor();
+    const object = page.locator(".setting-field").filter({ has: page.getByLabel("rules", { exact: true }) });
+    await page.getByLabel("rules", { exact: true }).fill("[]");
+    await object.getByRole("button", { name: "Save", exact: true }).click();
+    await object.getByRole("alert").waitFor();
+    expect(await object.getByRole("alert").innerText()).toContain("Expected JSON object");
+    await page.reload();
+    await page.getByRole("button", { name: "demo Settings", exact: true }).click();
+    expect(await page.getByLabel("enabled", { exact: true }).inputValue()).toBe("false");
+    expect(await page.getByLabel("directories", { exact: true }).inputValue()).toContain("/tmp/web-notes");
+    const enabled = page.locator(".setting-field").filter({ has: page.getByLabel("enabled", { exact: true }) });
+    await enabled.getByRole("button", { name: "Reset", exact: true }).click();
+    await enabled.getByText("Reset to default.", { exact: true }).waitFor();
+    expect(await page.getByLabel("enabled", { exact: true }).inputValue()).toBe("true");
+    await page.getByRole("link", { name: "Knowledge", exact: true }).click();
+    await page.getByRole("heading", { name: "Map of the collection" }).waitFor();
+    await page.getByRole("link", { name: "Overview", exact: true }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("heading", { name: "Shale at a glance" }).waitFor();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "demo Settings", exact: true }).click();
+    await page.getByLabel("enabled", { exact: true }).waitFor();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole("link", { name: "Overview", exact: true }).click();
+    if (process.env.SHALE_WEB_SCREENSHOT) await page.screenshot({ path: process.env.SHALE_WEB_SCREENSHOT, fullPage: true });
+    expect(errors).toEqual([]);
+    page.once("dialog", dialog => dialog.accept());
+    await page.getByRole("button", { name: "Stop host", exact: true }).click();
+    await page.getByRole("heading", { name: "Shale has stopped." }).waitFor();
+  } finally { await browser.close(); host.close(); }
+}, 30_000);

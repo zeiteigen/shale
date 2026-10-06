@@ -6,20 +6,22 @@ import {
 } from "@shale/sdk";
 import { commitNote, commitImage } from "./commit";
 import { embedContextualChunks } from "./process-vaults";
+import { documentWatermarkKey, finalizeDocument } from "./document-vault";
 
 export interface RecoverResult {
   recoveredNotes: number;
+  recoveredDocuments: number;
 }
 
 /**
  * Checkpoint recovery script for the Obsidian extension.
  * Invoked automatically by Shale when queued checkpoints are detected.
  *
- * Finalizes notes that had their AI summaries/expansions generated before a crash:
+ * Finalizes cached note, image, and document preparation from before a crash:
  * 1. Retrieves queued checkpoints via SDK context.
  * 2. Embeds contextual chunks (including the AI summary).
- * 3. Commits markdown_note sources, chunks, and graph edges to SQLite.
- * 4. Advances the vault watermark so subsequent cron runs skip recovered files.
+ * 3. Commits sources, chunks, and graph evidence to SQLite.
+ * 4. Advances each vault's cursors only when its discovery batch completed.
  * 5. Resolves each processed checkpoint.
  */
 export async function run(
@@ -31,29 +33,30 @@ export async function run(
 
   if (!context || context.count === 0) {
     sdk.logger.log("[Recovery] No queued checkpoints to recover.");
-    return { recoveredNotes: 0 };
+    return { recoveredNotes: 0, recoveredDocuments: 0 };
   }
 
   sdk.logger.log(
-    `[Recovery] Found ${context.count} queued checkpoint(s). Beginning AI summary recovery...`,
+    `[Recovery] Found ${context.count} queued checkpoint(s). Beginning vault recovery...`,
   );
 
   let recoveredNotes = 0;
+  let recoveredDocuments = 0;
   let failures = 0;
   const batches = context.checkpoints.filter(
     (cp) => cp.data?.type === "vault_batch",
   );
-  const vaultMaxMtime = new Map<string, { path: string; maxMtime: number }>();
+  const vaultMaxMtime = new Map<string, { path: string; maxMtime: number; maxDocumentMtime?: number }>();
 
   for (const cp of context.checkpoints) {
     const data = cp.data;
     if (data?.type === "vault_batch") continue;
     if (
       !data ||
-      !["ai_summary", "image_analysis"].includes(data.type) ||
-      !(data.parsedFile || data.parsedImage)
+      !["ai_summary", "image_analysis", "document_analysis"].includes(data.type) ||
+      !(data.parsedFile || data.parsedImage || data.parsedDocument)
     ) {
-      // Not a full note AI summary checkpoint, resolve and continue
+      // Not a complete file preparation checkpoint, resolve and continue.
       context.resolve(cp.id);
       continue;
     }
@@ -61,6 +64,14 @@ export async function run(
     const {vault,parsedFile} = data;
 
     try {
+      if (data.type === "document_analysis") {
+        const namespace = data.namespace ?? sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian";
+        await finalizeDocument(data.parsedDocument, vault, sdk, namespace, cp.id);
+        recoveredDocuments++;
+        context.resolve(cp.id);
+        sdk.logger.log(`[Recovery] Recovered document "${data.parsedDocument.documentTitle}".`);
+        continue;
+      }
       const parsed = parsedFile ?? data.parsedImage;
       sdk.logger.log(
         `[Recovery] Finalizing note "${parsed.noteTitle ?? parsed.imageTitle}" with cached AI summary...`,
@@ -91,7 +102,7 @@ export async function run(
     } catch (err) {
       failures++;
       sdk.logger.error(
-        `[Recovery] Failed to recover checkpoint for note "${data.noteTitle}":`,
+        `[Recovery] Failed to recover checkpoint for "${data.noteTitle ?? data.parsedDocument?.documentTitle ?? data.filePath}":`,
         err,
       );
     }
@@ -105,12 +116,13 @@ export async function run(
       vaultMaxMtime.set(batch.data.vault.path, {
         path: batch.data.vault.path,
         maxMtime: batch.data.maxMtime,
+        maxDocumentMtime: batch.data.maxDocumentMtime,
       });
     }
   }
 
   // Advance watermarks for all recovered vaults
-  for (const [vaultPath, { maxMtime }] of vaultMaxMtime.entries()) {
+  for (const [vaultPath, { maxMtime, maxDocumentMtime }] of vaultMaxMtime.entries()) {
     const watermarkKey = `vault:${vaultPath}:mtime`;
     const lastWatermark = Number(sdk.state.getWatermark(watermarkKey) ?? "0");
     if (maxMtime > lastWatermark) {
@@ -119,15 +131,20 @@ export async function run(
         `[Recovery] Advanced watermark for vault at "${vaultPath}" to ${maxMtime}.`,
       );
     }
+    if (maxDocumentMtime !== undefined) {
+      const documentKey = documentWatermarkKey(vaultPath);
+      const lastDocumentMtime = Number(sdk.state.getWatermark(documentKey) ?? "0");
+      if (maxDocumentMtime > lastDocumentMtime) sdk.state.setWatermark(String(maxDocumentMtime), documentKey);
+    }
   }
 
   for (const batch of batches) context.resolve(batch.id);
 
   sdk.logger.log(
-    `[Recovery] Checkpoint recovery finished. Recovered ${recoveredNotes} note(s).`,
+    `[Recovery] Checkpoint recovery finished. Recovered ${recoveredNotes} note(s) and ${recoveredDocuments} document(s).`,
   );
 
-  return { recoveredNotes };
+  return { recoveredNotes, recoveredDocuments };
 }
 
 if (import.meta.main) {

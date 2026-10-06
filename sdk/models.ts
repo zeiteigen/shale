@@ -7,6 +7,9 @@ import {
 } from "../lib/ai/config";
 import type { LLMClient } from "./llm";
 import type { EmbedderClient } from "./embed";
+import { boundedMap } from "../lib/ai/bounded-map";
+import { resolveChatBatchWidth, resolveBatchMode, resolveBatchEndpoint } from "../lib/ai/batch-config";
+import { collectBatchRequests } from "../lib/ai/batch-dispatch";
 
 /** Batch scheduling is shared across all SDK instances, including message handlers. */
 export class ModelBatches {
@@ -19,11 +22,13 @@ export class ModelBatches {
     const profiles = [
       {
         options: this.chat.options(),
-        endpoint: resolveChatEndpoint(this.chat.options()),
+        endpoint: resolveBatchMode("chat", this.chat.options()) === "api"
+          ? resolveBatchEndpoint("chat", this.chat.options()) : resolveChatEndpoint(this.chat.options()),
       },
       {
         options: this.embedding.options(),
-        endpoint: resolveEmbeddingEndpoint(this.embedding.options()),
+        endpoint: resolveBatchMode("embedding", this.embedding.options()) === "api"
+          ? resolveBatchEndpoint("embedding", this.embedding.options()) : resolveEmbeddingEndpoint(this.embedding.options()),
       },
     ];
     const resources = new Set(
@@ -49,5 +54,12 @@ export class ModelBatches {
     return modelCoordinator.exclusive(this.resource(), () =>
       modelCoordinator.phase(role, work),
     );
+  }
+
+  /** Batch independent preparation tasks, including delegated processors and checkpoints. */
+  mapChat<T, R>(items: readonly T[], work: (item: T, index: number) => Promise<R>): Promise<R[]> {
+    if (!items.length) return Promise.resolve([]);
+    return this.phase("chat", () => collectBatchRequests(() => boundedMap(items,
+      resolveChatBatchWidth(this.chat.options()), work)));
   }
 }

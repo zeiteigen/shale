@@ -1,47 +1,31 @@
 import type { AIClientOptions } from "./types";
+import { getRootSetting } from "../settings";
+import { modelEndpointUrl } from "./endpoint-url";
 
 export type ModelRole = "chat" | "embedding";
 
 function endpointFor(role: ModelRole, options?: AIClientOptions): string {
-  const suffix = role === "chat" ? "/chat/completions" : "/embeddings";
   const specificEndpoint =
     role === "chat"
-      ? process.env.OPENAI_CHAT_ENDPOINT
-      : process.env.EMBEDDING_ENDPOINT;
+      ? getRootSetting("OPENAI_CHAT_ENDPOINT")
+      : getRootSetting("EMBEDDING_ENDPOINT");
   const specificBase =
     role === "chat"
-      ? process.env.OPENAI_CHAT_BASE_URL
-      : process.env.EMBEDDING_BASE_URL;
+      ? getRootSetting("OPENAI_CHAT_BASE_URL")
+      : getRootSetting("EMBEDDING_BASE_URL");
   const explicit = options?.endpoint;
   const configuredBase = options?.baseUrl ?? options?.client?.baseURL;
   const base =
     configuredBase ??
     specificBase ??
-    process.env.OPENAI_BASE_URL ??
+    getRootSetting("OPENAI_BASE_URL") ??
     "https://api.openai.com/v1";
   const endpoint =
     explicit ??
     (configuredBase === undefined
-      ? (specificEndpoint ?? process.env.OPENAI_ENDPOINT)
+      ? specificEndpoint
       : undefined);
-  const result =
-    endpoint ??
-    (base.replace(/\/+$/, "").endsWith(suffix)
-      ? base.replace(/\/+$/, "")
-      : `${base.replace(/\/+$/, "")}${suffix}`);
-  const url = new URL(result);
-  if (!["http:", "https:"].includes(url.protocol)) {
-    throw new Error("Model endpoints must use HTTP or HTTPS");
-  }
-  if (
-    (role === "chat" && url.pathname.endsWith("/embeddings")) ||
-    (role === "embedding" && url.pathname.endsWith("/chat/completions"))
-  ) {
-    throw new Error(
-      `The ${role} profile points to an endpoint for the other model role`,
-    );
-  }
-  return result;
+  return modelEndpointUrl(role, base, endpoint);
 }
 
 export const resolveChatEndpoint = (options?: AIClientOptions): string =>
@@ -92,16 +76,14 @@ export function resolveTimeout(
 ): number {
   const specific =
     role === "chat"
-      ? (process.env.CHAT_TIMEOUT_MS ?? process.env.OPENAI_CHAT_TIMEOUT_MS)
-      : (process.env.EMBEDDING_TIMEOUT_MS ??
-        process.env.OPENAI_EMBEDDING_TIMEOUT_MS);
+      ? getRootSetting("CHAT_TIMEOUT_MS")
+      : getRootSetting("EMBEDDING_TIMEOUT_MS");
   return (
     numericSetting(
       options?.timeoutMs ??
         options?.client?.timeout ??
         specific ??
-        process.env.MODEL_TIMEOUT_MS ??
-        process.env.OPENAI_TIMEOUT_MS,
+        getRootSetting("MODEL_TIMEOUT_MS"),
       "Model timeout",
       1,
     ) ?? (isLocalEndpoint(endpointFor(role, options)) ? 300_000 : 60_000)
@@ -116,7 +98,7 @@ export function resolveModelResource(
     resource !== undefined
       ? resource
       : isLocalEndpoint(endpoint)
-        ? (process.env.MODEL_GPU_RESOURCE ?? "local-gpu")
+        ? (getRootSetting("MODEL_GPU_RESOURCE") ?? "local-gpu")
         : null;
   if (resolved !== null && !resolved.trim())
     throw new Error("Model GPU resource must be a nonempty name or null");
@@ -131,7 +113,7 @@ export function resolveRetries(
     numericSetting(
       options?.maxRetries ??
         options?.client?.maxRetries ??
-        process.env.OPENAI_MAX_RETRIES,
+        getRootSetting("OPENAI_MAX_RETRIES"),
       "Model retries",
       0,
     ) ?? (isLocalEndpoint(endpointFor(role, options)) ? 2 : 0)

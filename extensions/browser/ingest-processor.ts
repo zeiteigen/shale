@@ -1,5 +1,12 @@
+import { preparePublicCapture } from "./public-capture";
 import type { ShaleSDK } from "@shale/sdk";
-import type { BrowserIngestPayload, PageVisitPayload, PreparedPageData, TabsBatchPayload, IngestedPageResult } from "./types";
+import type {
+  BrowserIngestPayload,
+  PageVisitPayload,
+  PreparedPageData,
+  TabsBatchPayload,
+  IngestedPageResult,
+} from "./types";
 import type { BrowserExtensionSettings } from "./settings.types";
 import { preparePageVisit, finalizePageVisit } from "./page-ingest";
 import { processHistoryBatch, processBookmarksBatch } from "./catalog-ingest";
@@ -93,6 +100,15 @@ export async function processBrowserPayload(
     case "session_end":
       return ingestSessionSnapshot(sdk, payload, settings);
 
+    case "public_page_capture":
+      return sdk.models.batch(
+        () => preparePublicCapture(sdk, payload, settings),
+        async (prepared) =>
+          prepared ? finalizePageVisit(sdk, prepared, settings) : null,
+      );
+    case "activity_event":
+    case "catalog_delete":
+    case "browser_batch":
     case "ping":
       return { pong: true };
 

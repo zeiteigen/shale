@@ -1,8 +1,16 @@
+import { embedBounded } from "./embed-bounded";
+import { ensureBrowserSchema } from "./storage-schema";
+import { recordCatalog, isCatalogStale } from "./catalog-lifecycle";
 import type { ShaleSDK } from "@shale/sdk";
 import type { HistoryBatchPayload, BookmarksBatchPayload } from "./types";
 import type { BrowserExtensionSettings } from "./settings.types";
 import { evaluateUrl } from "./filter";
-import { bookmarkSourceUri, browserSourceId, historySourceUri, pageEntityName } from "./identity";
+import {
+  bookmarkSourceUri,
+  browserSourceId,
+  historySourceUri,
+  pageEntityName,
+} from "./identity";
 import { commitCatalogGraph } from "./catalog-graph";
 
 /**
@@ -12,7 +20,9 @@ export async function processHistoryBatch(
   sdk: ShaleSDK,
   payload: HistoryBatchPayload,
   settings: Partial<BrowserExtensionSettings>,
+  afterCommit: () => void = () => {},
 ): Promise<{ ingestedCount: number; skippedCount: number }> {
+  ensureBrowserSchema(sdk.database);
   const namespace = settings.namespace || sdk.namespace || "browser";
   let skippedCount = 0;
 
@@ -26,9 +36,14 @@ export async function processHistoryBatch(
     sourceId: string;
     sourceUri: string;
     pageEntity: string;
+    original?: (typeof payload.items)[number];
   }> = [];
 
   for (const item of payload.items) {
+    if (isCatalogStale(sdk, "history", item)) {
+      skippedCount++;
+      continue;
+    }
     const filter = evaluateUrl(item.url, settings);
     if (!filter.allowed) {
       skippedCount++;
@@ -40,7 +55,10 @@ export async function processHistoryBatch(
     const textContent = `Page: ${title}\nDomain: ${filter.domain}\nURL: ${filter.cleanUrl}\nVisited: ${new Date(
       visitTime,
     ).toISOString()}${item.visitCount !== undefined ? `\nVisit Count: ${item.visitCount}` : ""}${item.typedCount !== undefined ? `\nTyped Count: ${item.typedCount}` : ""}`;
-    const sourceId = browserSourceId("history", filter.cleanUrl);
+    const sourceUri = item.collectorId
+      ? `browser-history://${encodeURIComponent(item.collectorId)}/${encodeURIComponent(item.id || filter.cleanUrl)}`
+      : historySourceUri(filter.cleanUrl);
+    const sourceId = browserSourceId("history", sourceUri);
 
     validItems.push({
       title,
@@ -50,8 +68,9 @@ export async function processHistoryBatch(
       typedCount: item.typedCount,
       textContent,
       sourceId,
-      sourceUri: historySourceUri(filter.cleanUrl),
+      sourceUri,
       pageEntity: pageEntityName(filter.cleanUrl),
+      original: item,
     });
   }
 
@@ -59,6 +78,7 @@ export async function processHistoryBatch(
     sdk.logger.info(
       `[History] 0 valid items in batch (${skippedCount} excluded/skipped).`,
     );
+    sdk.database.transaction(afterCommit)();
     return { ingestedCount: 0, skippedCount };
   }
 
@@ -68,7 +88,7 @@ export async function processHistoryBatch(
 
   // Batch embed all items simultaneously
   const texts = validItems.map((v) => v.textContent);
-  const embeddings = await sdk.embed(texts);
+  const embeddings = await embedBounded(sdk, texts, settings);
 
   sdk.database.transaction(() => {
     for (let i = 0; i < validItems.length; i++) {
@@ -93,9 +113,11 @@ export async function processHistoryBatch(
         ],
         namespace,
       });
-  
-      commitCatalogGraph(sdk,v,namespace);
+
+      commitCatalogGraph(sdk, v, namespace);
+      recordCatalog(sdk, "history", v.original, v.sourceId);
     }
+    afterCommit();
   })();
 
   return { ingestedCount: validItems.length, skippedCount };
@@ -108,7 +130,9 @@ export async function processBookmarksBatch(
   sdk: ShaleSDK,
   payload: BookmarksBatchPayload,
   settings: Partial<BrowserExtensionSettings>,
+  afterCommit: () => void = () => {},
 ): Promise<{ ingestedCount: number; skippedCount: number }> {
+  ensureBrowserSchema(sdk.database);
   const namespace = settings.namespace || sdk.namespace || "browser";
   let skippedCount = 0;
 
@@ -121,9 +145,14 @@ export async function processBookmarksBatch(
     sourceId: string;
     sourceUri: string;
     pageEntity: string;
+    original?: (typeof payload.items)[number];
   }> = [];
 
   for (const item of payload.items) {
+    if (isCatalogStale(sdk, "bookmark", item)) {
+      skippedCount++;
+      continue;
+    }
     if (!item.url) {
       skippedCount++;
       continue;
@@ -138,8 +167,10 @@ export async function processBookmarksBatch(
     const title = (item.title || filter.domain || "Bookmark").trim();
     const folder = (item.folderPath || "Bookmarks Bar").trim();
     const dateAdded = item.dateAdded || Date.now();
-    const textContent = `Bookmark: ${title}\nFolder: ${folder}\nDomain: ${filter.domain}\nURL: ${filter.cleanUrl}\nAdded At: ${dateAdded}`;
-    const sourceUri = bookmarkSourceUri(item.id, filter.cleanUrl);
+    const textContent = `Bookmark: ${title}${item.sequence !== undefined ? `\nObservation sequence: ${item.sequence}` : ""}\nFolder: ${folder}\nDomain: ${filter.domain}\nURL: ${filter.cleanUrl}\nAdded At: ${dateAdded}`;
+    const sourceUri = item.collectorId
+      ? `browser-bookmark://${encodeURIComponent(item.collectorId)}/${encodeURIComponent(item.id)}`
+      : bookmarkSourceUri(item.id, filter.cleanUrl);
     const sourceId = browserSourceId("bookmark", sourceUri);
 
     validItems.push({
@@ -151,6 +182,7 @@ export async function processBookmarksBatch(
       sourceId,
       sourceUri,
       pageEntity: pageEntityName(filter.cleanUrl),
+      original: item,
     });
   }
 
@@ -158,6 +190,7 @@ export async function processBookmarksBatch(
     sdk.logger.info(
       `[Bookmarks] 0 valid items in batch (${skippedCount} excluded/skipped).`,
     );
+    sdk.database.transaction(afterCommit)();
     return { ingestedCount: 0, skippedCount };
   }
 
@@ -167,7 +200,7 @@ export async function processBookmarksBatch(
 
   // Batch embed all items simultaneously
   const texts = validItems.map((v) => v.textContent);
-  const embeddings = await sdk.embed(texts);
+  const embeddings = await embedBounded(sdk, texts, settings);
 
   sdk.database.transaction(() => {
     for (let i = 0; i < validItems.length; i++) {
@@ -192,11 +225,12 @@ export async function processBookmarksBatch(
         ],
         namespace,
       });
-  
-      commitCatalogGraph(sdk,v,namespace);
+
+      commitCatalogGraph(sdk, v, namespace);
+      recordCatalog(sdk, "bookmark", v.original, v.sourceId);
     }
+    afterCommit();
   })();
 
   return { ingestedCount: validItems.length, skippedCount };
 }
-

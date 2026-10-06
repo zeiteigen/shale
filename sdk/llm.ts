@@ -4,6 +4,7 @@ import {
   createOpenAIClient,
   queryLLM as coreQueryLLM,
   fetchOpenAIChatCompletion,
+  fetchOpenAIChatCompletions,
   resolveChatEndpoint,
   normalizeImageContentPart,
   type LLMOptions,
@@ -57,6 +58,17 @@ export class LLMClient {
   ): Promise<LLMResponse> {
     return fetchOpenAIChatCompletion(input, this.options(options));
   }
+
+  completeBatch(inputs: readonly (string | LLMQueryInput)[], options?: LLMOptions): Promise<LLMResponse[]> {
+    return fetchOpenAIChatCompletions(inputs, this.options(options));
+  }
+
+  async queryBatch(inputs: readonly (string | LLMQueryInput)[], options: LLMOptions & { detailed: true }): Promise<LLMResponse[]>;
+  async queryBatch(inputs: readonly (string | LLMQueryInput)[], options?: LLMOptions): Promise<string[]>;
+  async queryBatch(inputs: readonly (string | LLMQueryInput)[], options?: LLMOptions): Promise<string[] | LLMResponse[]> {
+    const results = await this.completeBatch(inputs, options);
+    return this.options(options).detailed ? results : results.map(result => result.content);
+  }
 }
 
 /**
@@ -89,6 +101,7 @@ export {
   resolveChatEndpoint,
   normalizeImageContentPart,
   fetchOpenAIChatCompletion,
+  fetchOpenAIChatCompletions,
 };
 
 export default LLMClient;

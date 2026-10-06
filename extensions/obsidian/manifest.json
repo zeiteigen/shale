@@ -1,7 +1,7 @@
 {
     "name": "obsidian parser",
     "version": "0.0.1",
-    "description": "A parser for Obsidian markdown files.",
+    "description": "Indexes notes, images, and document attachments across Obsidian vaults.",
     "namespace": "obsidian",
     "checkpoint_recover": "recover.ts",
     "crons": [

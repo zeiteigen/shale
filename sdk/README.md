@@ -52,13 +52,13 @@ Generates vector embeddings using any OpenAI-compatible endpoint (OpenAI, Ollama
 
 See [Model configuration and batches](MODELS.md) for independent chat/embedding profiles, GPU scheduling, and index migration.
 
-Configured via `.env`:
+Non-secret configuration belongs in root `settings.json` and is read fresh on every request. Use the local web interface’s **Settings → Shale host** page, `bun run settings list root`, `bun run settings set root <key> <value>`, or `bun run settings tui root`. API keys remain in `.env`.
 
-- `OPENAI_API_KEY`: API key for the embedding provider.
-- `OPENAI_BASE_URL`: Base URL (default: `https://api.openai.com/v1`).
+- `OPENAI_API_KEY`: API key for the embedding provider, kept in `.env`.
+- `OPENAI_BASE_URL`: Shared base URL (default: `https://api.openai.com/v1`). Chat and embedding paths are appended automatically.
 - `EMBEDDING_ENDPOINT`: Optional full embedding endpoint URL. Use `OPENAI_CHAT_ENDPOINT` for chat.
 - `OPENAI_EMBEDDING_MODEL`: Model name (default: `text-embedding-3-small`).
-- `EMBEDDING_DIMENSIONS`: Storage padding (default: 4096 for SQLite vec0); larger vectors are rejected.
+- `EMBEDDING_DIMENSIONS`: Storage padding and new/empty SQLite index size (default: 4096); larger vectors are rejected. Reindex populated databases after changing the model or storage size.
 
 ### 6. Chunk Search (`sdk.search` / `search`)
 

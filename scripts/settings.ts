@@ -1,364 +1,10 @@
 #!/usr/bin/env bun
-import path from "node:path";
-import fs from "node:fs";
 import { Command } from "commander";
 import * as p from "@clack/prompts";
 
-export interface SettingHelpItem {
-  type: "boolean" | "number" | "string" | "string[]" | "array" | "object" | string;
-  description: string;
-  default?: any;
-  possibleValues?: any[];
-  range?: { min?: number; max?: number };
-  examples?: any[];
-}
-
-export interface SettingsHelp {
-  extension: string;
-  settings: Record<string, SettingHelpItem>;
-}
-
-export interface ExtensionInfo {
-  name: string;
-  dir: string;
-  hasSettings: boolean;
-  hasHelp: boolean;
-  manifest?: Record<string, any>;
-}
-
-/**
- * Locate root directory containing extensions/ and package.json.
- */
-export function findProjectRoot(): string {
-  let current = process.cwd();
-  while (current !== path.dirname(current)) {
-    if (fs.existsSync(path.join(current, "package.json")) && fs.existsSync(path.join(current, "extensions"))) {
-      return current;
-    }
-    current = path.dirname(current);
-  }
-  return process.cwd();
-}
-
-/**
- * Find extension directory for a given extension name.
- */
-export function getExtensionDir(extensionName: string, rootDir = findProjectRoot()): string {
-  return path.join(rootDir, "extensions", extensionName);
-}
-
-/**
- * Discover all extensions under extensions/ directory.
- */
-export function discoverExtensions(rootDir = findProjectRoot()): ExtensionInfo[] {
-  const extensionsDir = path.join(rootDir, "extensions");
-  if (!fs.existsSync(extensionsDir)) {
-    return [];
-  }
-  const entries = fs.readdirSync(extensionsDir, { withFileTypes: true });
-  const results: ExtensionInfo[] = [];
-
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      const extDir = path.join(extensionsDir, entry.name);
-      const manifestPath = path.join(extDir, "manifest.json");
-      const settingsPath = path.join(extDir, "settings.json");
-      const helpPath = path.join(extDir, "settings.help.json");
-
-      let manifest: Record<string, any> | undefined;
-      if (fs.existsSync(manifestPath)) {
-        try {
-          manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-        } catch {
-          // ignore error
-        }
-      }
-
-      results.push({
-        name: entry.name,
-        dir: extDir,
-        hasSettings: fs.existsSync(settingsPath),
-        hasHelp: fs.existsSync(helpPath),
-        manifest,
-      });
-    }
-  }
-
-  return results.sort((a, b) => a.name.localeCompare(b.name));
-}
-
-/**
- * Load settings.json for an extension.
- */
-export function loadSettings(extensionName: string, rootDir = findProjectRoot()): Record<string, any> {
-  const extDir = getExtensionDir(extensionName, rootDir);
-  if (!fs.existsSync(extDir)) {
-    throw new Error(`Extension "${extensionName}" not found at ${extDir}`);
-  }
-  const settingsPath = path.join(extDir, "settings.json");
-  if (!fs.existsSync(settingsPath)) {
-    return {};
-  }
-  try {
-    return JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-  } catch (err: any) {
-    throw new Error(`Failed to parse settings.json for extension "${extensionName}": ${err.message}`);
-  }
-}
-
-/**
- * Save settings.json for an extension.
- */
-export function saveSettings(
-  extensionName: string,
-  settings: Record<string, any>,
-  rootDir = findProjectRoot()
-): void {
-  const extDir = getExtensionDir(extensionName, rootDir);
-  if (!fs.existsSync(extDir)) {
-    throw new Error(`Extension "${extensionName}" not found at ${extDir}`);
-  }
-  const settingsPath = path.join(extDir, "settings.json");
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-}
-
-/**
- * Load settings.help.json for an extension.
- */
-export function loadSettingsHelp(
-  extensionName: string,
-  rootDir = findProjectRoot()
-): SettingsHelp | null {
-  const extDir = getExtensionDir(extensionName, rootDir);
-  const helpPath = path.join(extDir, "settings.help.json");
-  if (!fs.existsSync(helpPath)) {
-    return null;
-  }
-  try {
-    return JSON.parse(fs.readFileSync(helpPath, "utf-8")) as SettingsHelp;
-  } catch (err: any) {
-    throw new Error(`Failed to parse settings.help.json for extension "${extensionName}": ${err.message}`);
-  }
-}
-
-/**
- * Validate and coerce string input into appropriate type based on help metadata.
- */
-export function parseAndValidateValue(
-  rawInput: string,
-  helpItem?: SettingHelpItem
-): { ok: true; value: any } | { ok: false; error: string } {
-  const trimmed = rawInput.trim();
-
-  if (!helpItem) {
-    // No metadata: infer JSON or string
-    try {
-      return { ok: true, value: JSON.parse(rawInput) };
-    } catch {
-      return { ok: true, value: rawInput };
-    }
-  }
-
-  const expectedType = helpItem.type;
-
-  if (expectedType === "boolean") {
-    const lower = trimmed.toLowerCase();
-    if (lower === "true" || lower === "1" || lower === "yes" || lower === "on") {
-      return { ok: true, value: true };
-    }
-    if (lower === "false" || lower === "0" || lower === "no" || lower === "off") {
-      return { ok: true, value: false };
-    }
-    return { ok: false, error: `Expected boolean (true/false), received: "${rawInput}"` };
-  }
-
-  if (expectedType === "number") {
-    if (trimmed === "") {
-      return { ok: false, error: "Number cannot be empty" };
-    }
-    const num = Number(trimmed);
-    if (isNaN(num)) {
-      return { ok: false, error: `Expected valid number, received: "${rawInput}"` };
-    }
-    if (helpItem.range) {
-      if (helpItem.range.min !== undefined && num < helpItem.range.min) {
-        return { ok: false, error: `Value ${num} is below minimum ${helpItem.range.min}` };
-      }
-      if (helpItem.range.max !== undefined && num > helpItem.range.max) {
-        return { ok: false, error: `Value ${num} exceeds maximum ${helpItem.range.max}` };
-      }
-    }
-    if (helpItem.possibleValues && !helpItem.possibleValues.includes(num)) {
-      return {
-        ok: false,
-        error: `Value ${num} is not one of allowed values: ${helpItem.possibleValues.join(", ")}`,
-      };
-    }
-    return { ok: true, value: num };
-  }
-
-  if (expectedType === "string[]") {
-    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
-          return { ok: false, error: `Expected array of strings, received: "${rawInput}"` };
-        }
-        return { ok: true, value: parsed };
-      } catch (err: any) {
-        return { ok: false, error: `Invalid JSON array: ${err.message}` };
-      }
-    }
-    // Comma-separated strings
-    const items = trimmed
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    return { ok: true, value: items };
-  }
-
-  if (expectedType === "array") {
-    try {
-      const parsed = JSON.parse(rawInput);
-      if (!Array.isArray(parsed)) {
-        return { ok: false, error: `Expected array, received non-array JSON` };
-      }
-      return { ok: true, value: parsed };
-    } catch (err: any) {
-      return { ok: false, error: `Invalid JSON array: ${err.message}` };
-    }
-  }
-
-  if (expectedType === "object") {
-    try {
-      const parsed = JSON.parse(rawInput);
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        return { ok: false, error: `Expected JSON object, received non-object` };
-      }
-      return { ok: true, value: parsed };
-    } catch (err: any) {
-      return { ok: false, error: `Invalid JSON object: ${err.message}` };
-    }
-  }
-
-  if (expectedType === "string") {
-    if (helpItem.possibleValues && !helpItem.possibleValues.includes(rawInput)) {
-      return {
-        ok: false,
-        error: `Value "${rawInput}" is not one of allowed values: ${helpItem.possibleValues.join(", ")}`,
-      };
-    }
-    return { ok: true, value: rawInput };
-  }
-
-  return { ok: true, value: rawInput };
-}
-
-/**
- * Get setting value (or all settings if key omitted).
- */
-export function getSettingValue(
-  extensionName: string,
-  key?: string,
-  rootDir = findProjectRoot()
-): any {
-  const settings = loadSettings(extensionName, rootDir);
-  if (!key) {
-    return settings;
-  }
-  return settings[key];
-}
-
-/**
- * Set a setting value with validation against settings.help.json.
- */
-export function setSettingValue(
-  extensionName: string,
-  key: string,
-  rawValue: any,
-  rootDir = findProjectRoot()
-): { key: string; oldValue: any; newValue: any } {
-  const help = loadSettingsHelp(extensionName, rootDir);
-  const helpItem = help?.settings?.[key];
-
-  let parsedValue: any;
-  if (typeof rawValue === "string") {
-    const result = parseAndValidateValue(rawValue, helpItem);
-    if (!result.ok) {
-      throw new Error(`Validation failed for "${key}": ${result.error}`);
-    }
-    parsedValue = result.value;
-  } else {
-    parsedValue = rawValue;
-  }
-
-  const current = loadSettings(extensionName, rootDir);
-  const oldValue = current[key];
-  current[key] = parsedValue;
-
-  saveSettings(extensionName, current, rootDir);
-  return { key, oldValue, newValue: parsedValue };
-}
-
-/**
- * Describe setting(s) based on settings.help.json.
- */
-export function describeSetting(
-  extensionName: string,
-  key?: string,
-  rootDir = findProjectRoot()
-): SettingHelpItem | Record<string, SettingHelpItem> | null {
-  const help = loadSettingsHelp(extensionName, rootDir);
-  if (!help || !help.settings) {
-    return null;
-  }
-  if (key) {
-    return help.settings[key] || null;
-  }
-  return help.settings;
-}
-
-/**
- * Reset setting(s) to default value defined in settings.help.json.
- */
-export function resetSettingValue(
-  extensionName: string,
-  key?: string,
-  rootDir = findProjectRoot()
-): { resetKeys: string[]; settings: Record<string, any> } {
-  const help = loadSettingsHelp(extensionName, rootDir);
-  if (!help || !help.settings) {
-    throw new Error(`No settings.help.json found for extension "${extensionName}" to reset defaults.`);
-  }
-
-  const current = loadSettings(extensionName, rootDir);
-  const resetKeys: string[] = [];
-
-  if (key) {
-    const item = help.settings[key];
-    if (!item) {
-      throw new Error(`Setting "${key}" not found in help definition for "${extensionName}".`);
-    }
-    if (item.default !== undefined && item.default !== null) {
-      current[key] = item.default;
-    } else {
-      delete current[key];
-    }
-    resetKeys.push(key);
-  } else {
-    for (const [k, item] of Object.entries(help.settings)) {
-      if (item.default !== undefined && item.default !== null) {
-        current[k] = item.default;
-      } else {
-        delete current[k];
-      }
-      resetKeys.push(k);
-    }
-  }
-
-  saveSettings(extensionName, current, rootDir);
-  return { resetKeys, settings: current };
-}
+import { discoverExtensions, discoverSettingsTargets, loadSettings, saveSettings, loadSettingsHelp, getSettingValue, setSettingValue, describeSetting, resetSettingValue, parseAndValidateValue, findProjectRoot, getExtensionDir, type ExtensionInfo, type SettingsHelp, type SettingHelpItem } from "../lib/settings-editor";
+export { discoverExtensions, discoverSettingsTargets, loadSettings, saveSettings, loadSettingsHelp, getSettingValue, setSettingValue, describeSetting, resetSettingValue, parseAndValidateValue, findProjectRoot, getExtensionDir } from "../lib/settings-editor";
+export type { ExtensionInfo, SettingsHelp, SettingHelpItem } from "../lib/settings-editor";
 
 /**
  * Build commander CLI program.
@@ -368,8 +14,17 @@ export function createCli(rootDir = findProjectRoot()): Command {
 
   program
     .name("settings")
-    .description("CLI & TUI utility to manage Shale extension configurations")
+    .description("CLI & TUI utility to manage Shale settings; use root for project settings.json or an extension name")
     .version("0.1.0");
+
+  program
+    .command("list-targets")
+    .alias("targets")
+    .description("List root and extension settings targets")
+    .action(() => {
+      for (const target of discoverSettingsTargets(rootDir))
+        console.log(`${target.name}: ${target.dir}`);
+    });
 
   program
     .command("list-extensions")
@@ -533,9 +188,9 @@ export function createCli(rootDir = findProjectRoot()): Command {
  * Interactive Terminal User Interface using @clack/prompts.
  */
 export async function runTui(rootDir = findProjectRoot(), defaultExtension?: string): Promise<void> {
-  p.intro("⚙️  \x1b[1mExtension Settings Manager\x1b[0m");
+  p.intro("⚙️  \x1b[1mShale Settings Manager\x1b[0m");
 
-  const extensions = discoverExtensions(rootDir);
+  const extensions = discoverSettingsTargets(rootDir);
   if (extensions.length === 0) {
     p.cancel("No extensions found in extensions/ directory.");
     return;
@@ -548,7 +203,7 @@ export async function runTui(rootDir = findProjectRoot(), defaultExtension?: str
       selectedExtName = extensions[0].name;
     } else {
       const extChoice = await p.select({
-        message: "Select an extension to configure:",
+        message: "Select root or an extension to configure:",
         options: extensions.map((e) => ({
           value: e.name,
           label: `${e.name} ${e.manifest?.name ? `(${e.manifest.name})` : ""}`,

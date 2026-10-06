@@ -1,0 +1,14 @@
+{
+  "supportedExtensions": ["pdf", "docx", "pptx", "xlsx", "odt", "odp", "ods", "rtf", "txt", "csv", "md", "html", "epub"],
+  "maxFileSizeMB": 50,
+  "parserTimeoutMs": 60000,
+  "chunkSize": 1800,
+  "includeNotes": true,
+  "summarizeDocuments": false,
+  "summaryPrompt": "Summarize the main subjects, findings, and key details of this document.",
+  "summaryMaxChars": 16000,
+  "summaryTimeoutMs": 60000,
+  "embeddingBatchSize": 64,
+  "defaultEntityType": "Document",
+  "defaultRelation": "CONTAINED_IN"
+}

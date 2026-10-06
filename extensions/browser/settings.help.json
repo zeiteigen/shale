@@ -15,7 +15,11 @@
         "youtube.com"
       ],
       "examples": [
-        ["x.com", "reddit.com", "facebook.com"]
+        [
+          "x.com",
+          "reddit.com",
+          "facebook.com"
+        ]
       ]
     },
     "excludePatterns": {
@@ -29,14 +33,20 @@
         "*signin*"
       ],
       "examples": [
-        ["*mail.google.com*", "*banking*"]
+        [
+          "*mail.google.com*",
+          "*banking*"
+        ]
       ]
     },
     "excludePrivateBrowsing": {
       "type": "boolean",
       "description": "Whether to ignore pages visited in private or incognito browsing windows.",
       "default": true,
-      "possibleValues": [true, false]
+      "possibleValues": [
+        true,
+        false
+      ]
     },
     "sessionInactivityMinutes": {
       "type": "number",
@@ -51,19 +61,28 @@
       "type": "boolean",
       "description": "Whether to analyze web pages using an LLM to generate summaries, topics, and classifications.",
       "default": true,
-      "possibleValues": [true, false]
+      "possibleValues": [
+        true,
+        false
+      ]
     },
     "generateSessionSummaries": {
       "type": "boolean",
       "description": "Whether to synthesize web activity within a single browsing session into a cohesive narrative.",
       "default": true,
-      "possibleValues": [true, false]
+      "possibleValues": [
+        true,
+        false
+      ]
     },
     "extractTopics": {
       "type": "boolean",
       "description": "Whether to extract key concept and topic nodes from web content for the knowledge graph.",
       "default": true,
-      "possibleValues": [true, false]
+      "possibleValues": [
+        true,
+        false
+      ]
     },
     "minContentLength": {
       "type": "number",
@@ -96,13 +115,143 @@
       "type": "string",
       "description": "Optional model override for chat completion analysis (defaults to host OPENAI_CHAT_MODEL).",
       "default": null,
-      "examples": ["gpt-4o-mini", "llama3:8b", "qwen2.5:7b"]
+      "examples": [
+        "gpt-4o-mini",
+        "llama3:8b",
+        "qwen2.5:7b"
+      ]
     },
     "namespace": {
       "type": "string",
       "description": "Knowledge graph namespace for generated entities and edges.",
       "default": "browser",
-      "examples": ["browser", "web", "research"]
+      "examples": [
+        "browser",
+        "web",
+        "research"
+      ]
+    },
+    "enableImageAnalysis": {
+      "type": "boolean",
+      "default": false,
+      "description": "Analyze selected page images with the vision model.",
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "refineResearchContexts": {
+      "type": "boolean",
+      "default": false,
+      "description": "Refine proposed research labels and goals with the chat model.",
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "retainRemovedCatalogEvidence": {
+      "type": "boolean",
+      "default": true,
+      "description": "Retain historical evidence when bookmarks or history are removed.",
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "maxPendingJobs": {
+      "type": "number",
+      "default": 5000,
+      "description": "Maximum pending browser jobs before transport backpressure.",
+      "range": {
+        "min": 1,
+        "max": 50000
+      }
+    },
+    "maxPendingBytes": {
+      "type": "number",
+      "default": 50000000,
+      "description": "Maximum pending browser payload bytes.",
+      "range": {
+        "min": 1000000,
+        "max": 500000000
+      }
+    },
+    "maxJobsPerRun": {
+      "type": "number",
+      "default": 20,
+      "description": "Maximum jobs selected for one chat-then-embedding batch.",
+      "range": {
+        "min": 1,
+        "max": 100
+      }
+    },
+    "maxBatchBytes": {
+      "type": "number",
+      "default": 1000000,
+      "description": "Maximum payload bytes prepared in one worker batch.",
+      "range": {
+        "min": 100000,
+        "max": 10000000
+      }
+    },
+    "maxJobAttempts": {
+      "type": "number",
+      "default": 5,
+      "description": "Maximum processing attempts before a visible failed status.",
+      "range": {
+        "min": 1,
+        "max": 20
+      }
+    },
+    "maxSessionsPerRun": {
+      "type": "number",
+      "default": 3,
+      "description": "Maximum closed session contexts processed per batch.",
+      "range": {
+        "min": 1,
+        "max": 20
+      }
+    },
+    "maxSessionEvents": {
+      "type": "number",
+      "default": 200,
+      "description": "Split long observed sessions at this event budget.",
+      "range": {
+        "min": 10,
+        "max": 500
+      }
+    },
+    "collectionWindowMs": {
+      "type": "number",
+      "default": 3000,
+      "description": "Delay to coalesce new captures before waking the worker.",
+      "range": {
+        "min": 100,
+        "max": 60000
+      }
+    },
+    "maxEmbeddingTexts": {
+      "type": "number",
+      "default": 64,
+      "description": "Maximum texts per embedding request.",
+      "range": {
+        "min": 1,
+        "max": 256
+      }
+    },
+    "allowPublicPageEnrichment": {
+      "type": "boolean",
+      "description": "Accept explicitly requested public-page enrichment jobs. Requires web-page-parser allowFetch; fetched pages stay separate from live DOM captures.",
+      "default": false
+    },
+    "maxPublicPagesPerRun": {
+      "type": "number",
+      "description": "Maximum explicit public-page enrichment jobs prepared in one worker batch.",
+      "default": 2,
+      "range": {
+        "min": 1,
+        "max": 10
+      }
     }
   }
 }

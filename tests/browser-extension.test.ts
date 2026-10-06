@@ -1011,7 +1011,7 @@ describe("Browser Ingestion Extension", () => {
   });
 
   describe("9. Cron & Push Ingestion Hook", () => {
-    it("coalesces duplicate page events and caps queued DOM material", async () => {
+    it("retains distinct page captures with validated DOM material", async () => {
       const makeMaterial = (title: string) => ({
         target_processor: "browser",
         content: JSON.stringify({
@@ -1027,11 +1027,10 @@ describe("Browser Ingestion Extension", () => {
       await subscribe(makeMaterial("Older"), testSdk);
       await subscribe(makeMaterial("Newest"), testSdk);
 
-      const queue = testSdk.state.getJson<any[]>("pending-ingest")!;
-      expect(queue).toHaveLength(1);
-      expect(queue[0].payload.title).toBe("Newest");
-      expect(queue[0].payload.textContent).toHaveLength(20_000);
-      expect(queue[0].payload.html).toHaveLength(20_000);
+      const queue = testDb.query<{payload:string},[]>("SELECT payload FROM browser_jobs").all().map(row=>JSON.parse(row.payload));
+      expect(queue).toHaveLength(2);
+      expect(queue.map(page=>page.title).sort()).toEqual(["Newest","Older"]);
+      expect(queue.every(page=>page.textContent.length===25_000 && page.html.length===30_000)).toBe(true);
     });
 
     it("queues inbound IngestMaterial and lets the cron parse it", async () => {
@@ -1276,7 +1275,7 @@ describe("Browser Ingestion Extension", () => {
       await subscribe(material, testSdk);
 
       const cronResult = await runCron(testSdk);
-      expect(cronResult.processedPayloads).toBe(1);
+      expect(cronResult.processedPayloads).toBe(2);
 
       const src1 = testDb
         .query<any, any>("SELECT * FROM sources WHERE uri = ?")

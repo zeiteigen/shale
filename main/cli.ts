@@ -1,9 +1,11 @@
+import { getRootSetting } from "../lib/settings";
 import * as readline from "node:readline";
 import { crons as loadedCrons, extensionNamespaces } from "./load-extensions";
 import { runCron as defaultRunCron, runAllCrons as defaultRunAllCrons } from "./index";
 import type { CronExtension } from "../lib/extension";
 import {
   discoverExtensions,
+  discoverSettingsTargets,
   loadSettings,
   saveSettings,
   loadSettingsHelp,
@@ -214,6 +216,8 @@ export function buildCandidates(options?: CliOptions): string[] {
     "help",
     "settings",
     "settings list-extensions",
+    "settings list-targets",
+    "settings targets",
     "settings help",
     "settings list",
     "settings get",
@@ -239,7 +243,7 @@ export function buildCandidates(options?: CliOptions): string[] {
 
   let exts: ExtensionInfo[] = [];
   try {
-    exts = discoverExtensions(rootDir);
+    exts = discoverSettingsTargets(rootDir);
   } catch {}
 
   for (const ext of exts) {
@@ -355,7 +359,8 @@ export async function handleSettingsCliCommand(
   if (!sub || sub === "help" || sub === "?") {
     return {
       output: [
-        "Extension Settings Commands:",
+        "Settings Commands (use root for project settings.json):",
+        "  settings list-targets                  List root and extension settings targets",
         "  settings list-extensions               List all available extensions and their settings files",
         "  settings list <extension>              List all current settings for an extension",
         "  settings get <extension> [key]         Get a specific setting value or all settings",
@@ -373,13 +378,14 @@ export async function handleSettingsCliCommand(
   }
 
   // settings list-extensions / settings extensions
-  if (sub === "list-extensions" || sub === "extensions") {
+  if (sub === "list-extensions" || sub === "extensions" || sub === "list-targets" || sub === "targets") {
     try {
-      const exts = discoverExtensions(rootDir);
+      const includeRoot = sub === "list-targets" || sub === "targets";
+      const exts = includeRoot ? discoverSettingsTargets(rootDir) : discoverExtensions(rootDir);
       if (exts.length === 0) {
         return { output: "No extensions found.", success: true };
       }
-      const lines: string[] = [`Discovered ${exts.length} extension(s):\n`];
+      const lines: string[] = [`Discovered ${exts.length} ${includeRoot ? "settings target(s)" : "extension(s)"}:\n`];
       for (const ext of exts) {
         const title = ext.manifest?.name || ext.name;
         const flags = [
@@ -615,11 +621,13 @@ export async function handleCliCommand(
         "  cron run <name>                Trigger a specific cron job (e.g. \"cron run db-backup-cron\")",
         "  cron run all                   Trigger all registered cron jobs sequentially",
         "  settings list-extensions       List all available extensions and their settings status",
+        "  settings list-targets          List root and extension settings targets",
         "  settings list <extension>      List all settings for an extension",
         "  settings get <extension> [key] Get a specific setting value or all settings",
         "  settings set <ext> <key> <val> Update a setting with schema validation",
         "  settings describe <ext> [key]  Show parameter documentation and constraints",
         "  settings reset <ext> [key]     Reset setting(s) to defaults",
+        "  settings list root             View root settings.json (root supports get/set/reset/tui)",
         "  status                         Display host daemon status and active extensions",
         "  help, ?                        Show this help message",
         "  exit, quit                     Shutdown the Shale host daemon",
@@ -636,7 +644,7 @@ export async function handleCliCommand(
 
   // Status
   if (root === "status") {
-    const port = process.env.PORT || "7425";
+    const port = getRootSetting("PORT") || "7425";
     const uptimeSec = Math.floor(process.uptime());
     const mem = process.memoryUsage();
     const memMb = (mem.rss / 1024 / 1024).toFixed(1);
@@ -772,7 +780,7 @@ export function startCli(options?: CliOptions): readline.Interface {
   };
 
   if (isTTY) {
-    const port = process.env.PORT || "7425";
+    const port = getRootSetting("PORT") || "7425";
     writeOutput("======================================================");
     writeOutput(`  Shale Host Daemon (Port ${port})`);
     writeOutput('  Interactive CLI ready. Type "help", "cron list", or "settings".');

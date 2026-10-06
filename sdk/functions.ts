@@ -260,6 +260,12 @@ export async function queryLLM(
   return getActiveSDK().queryLLM(input, options as any);
 }
 
+export function queryLLMBatch(inputs: readonly (string | LLMQueryInput)[], options: LLMOptions & { detailed: true }): Promise<LLMResponse[]>;
+export function queryLLMBatch(inputs: readonly (string | LLMQueryInput)[], options?: LLMOptions): Promise<string[]>;
+export function queryLLMBatch(inputs: readonly (string | LLMQueryInput)[], options?: LLMOptions): Promise<string[] | LLMResponse[]> {
+  return getActiveSDK().queryLLMBatch(inputs, options as any);
+}
+
 // Logger functions (delegating to active SDK instance)
 export const log = (...args: any[]): void => getActiveSDK().logger.log(...args);
 export const info = (...args: any[]): void =>

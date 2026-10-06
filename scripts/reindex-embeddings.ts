@@ -5,7 +5,7 @@ import { reindexEmbeddings } from "../lib/reindex-embeddings";
 
 if (import.meta.main) {
   const path = resolve(process.argv[2] ?? "production.db");
-  const database = new Database(path, { create: false });
+  const database = new Database(path, { readwrite: true, create: false });
   sqliteVec.load(database);
   database.run("PRAGMA foreign_keys = ON");
   try {

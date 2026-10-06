@@ -70,6 +70,7 @@ export async function describeImageWithChatModel(
   promptOverride?: string,
   signal?: AbortSignal,
   provenance?: (method: "vision" | "fallback", model?: string) => void,
+  requireDescription = false,
 ): Promise<string> {
   const describeEnabled =
     sdk?.settings.get<boolean>("describeImages") ??
@@ -124,12 +125,14 @@ Your description must thoroughly cover two essential aspects:
     }
   } catch (err) {
     signal?.throwIfAborted();
+    if (requireDescription) throw err;
     (sdk?.logger ?? logger).warn(
       `Chat model description failed for image "${imageName}":`,
       err,
     );
   }
 
+  if (requireDescription) throw new Error(`No visual description returned for ${imageName}`);
   // Graceful fallback for offline testing or API failures
   provenance?.("fallback");
   return defaultFallback;
@@ -210,7 +213,7 @@ export interface ParsedImageInfo {
 export async function parseImageFile(
   filePath: string,
   sdkOverride?: ShaleSDK,
-  options?: { timeoutMs?: number; prompt?: string; signal?: AbortSignal },
+  options?: { timeoutMs?: number; prompt?: string; signal?: AbortSignal; requireDescription?: boolean },
 ): Promise<ParsedImageInfo> {
   const sdk = sdkOverride ?? getSDK();
   const imageTitle = imageDisplayName(filePath);
@@ -242,6 +245,7 @@ export async function parseImageFile(
     options?.prompt,
     options?.signal,
     (origin, usedModel) => { method = origin; model = usedModel; },
+    options?.requireDescription,
   );
 
   const { layoutDescription, meaningDescription } = splitImageDescription(

@@ -6,6 +6,19 @@ export type FetchFn = (
 ) => Promise<Response>;
 
 export interface AIClientOptions {
+  /** Concurrent completion requests or the asynchronous OpenAI Batch API. */
+  batchMode?: "concurrent" | "api";
+  /** Full /batches URL; each role resolves its own endpoint. */
+  batchEndpoint?: string;
+  /** Overall Batch API deadline, independent of the HTTP request timeout. */
+  batchTimeoutMs?: number;
+  batchPollIntervalMs?: number;
+  /** Persistent submitted batch IDs for recovery. SDK clients provide this automatically. */
+  batchStore?: {
+    get(key: string): { inputFileId: string; batchId?: string } | null;
+    set(key: string, value: { inputFileId: string; batchId?: string }): void;
+    delete(key: string): void;
+  };
   apiKey?: string;
   baseUrl?: string;
   endpoint?: string;
@@ -19,6 +32,12 @@ export interface AIClientOptions {
 }
 
 export interface EmbedderOptions extends AIClientOptions {
+  /** Maximum texts per embedding request (default 64). */
+  batchSize?: number;
+  /** Maximum padded characters per synchronous request (default 16384); larger texts run alone. */
+  batchMaxChars?: number;
+  /** Maximum concurrent embedding requests (default 1). */
+  concurrency?: number;
   model?: string;
   dimensions?: number;
   padToDimensions?: number | null;
@@ -48,6 +67,10 @@ export type LLMReasoningEffort =
   "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
 
 export interface LLMOptions extends AIClientOptions {
+  /** Maximum preparation tasks per dedicated chat batch (default 32). */
+  batchSize?: number;
+  /** Maximum concurrent chat requests in a batch (default 4). */
+  concurrency?: number;
   model?: string;
   system?: string;
   temperature?: number;

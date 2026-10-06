@@ -15,8 +15,9 @@ it("retains captures received for an in-flight URL until their own revision is a
     acknowledgeQueuedBrowserPayloads(sdk, snapshot.map((item) => item.id));
     const current = getQueuedBrowserPayloads(sdk);
     expect(current).toHaveLength(2);
-    expect(current[0].payload).toMatchObject({ textContent: "new capture" });
-    acknowledgeQueuedBrowserPayloads(sdk, [current[0].id]);
+    const newer = current.find(item => (item.payload as any).textContent === "new capture")!;
+    expect(newer).toBeDefined();
+    acknowledgeQueuedBrowserPayloads(sdk, [newer.id]);
     expect(getQueuedBrowserPayloads(sdk)).toHaveLength(1);
   } finally {
     database.close();

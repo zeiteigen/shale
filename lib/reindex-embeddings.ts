@@ -4,6 +4,7 @@ import type { EmbedderOptions } from "./ai/types";
 import { modelCoordinator } from "./ai/scheduler";
 import { resolveModelResource, resolveEmbeddingEndpoint } from "./ai/config";
 import { getIndexDimension, vectorBuffer } from "./embedding-index";
+import { embeddingStorageDimensions } from "./embedding-storage";
 import {
   writeEmbeddingProfile,
   embeddingProfile,
@@ -26,9 +27,20 @@ export async function reindexEmbeddings(
       )
       .all();
   const snapshot = chunks();
-  const dimension = getIndexDimension(database);
+  const oldDimension = getIndexDimension(database);
   readEmbeddingProfile(database);
-  const resolved = { ...options, padToDimensions: dimension };
+  const resolved = {
+    ...options,
+    padToDimensions:
+      options.padToDimensions !== undefined
+        ? options.padToDimensions
+        : embeddingStorageDimensions(oldDimension),
+  };
+  if (
+    resolved.padToDimensions !== null &&
+    (!Number.isInteger(resolved.padToDimensions) || resolved.padToDimensions <= 0)
+  )
+    throw new Error("Embedding storage dimensions must be a positive integer");
   const endpoint = resolveEmbeddingEndpoint(resolved);
   const resource = resolveModelResource(endpoint, options.resource);
   return modelCoordinator.exclusive(resource, () =>
@@ -58,7 +70,10 @@ export async function reindexEmbeddings(
               );
             }
             profile = current;
-            insert.run(batch[i].id, vectorBuffer(vectors[i], dimension));
+            insert.run(
+              batch[i].id,
+              vectorBuffer(vectors[i], current.storageDimensions),
+            );
           }
         }
         database.transaction(() => {
@@ -67,7 +82,16 @@ export async function reindexEmbeddings(
               "Chunks changed during reindexing; old index retained. Retry when ingestion is idle.",
             );
           }
-          database.run("DELETE FROM vector_index");
+          const dimension =
+            profile?.storageDimensions ?? resolved.padToDimensions ?? oldDimension;
+          if (dimension !== oldDimension) {
+            database.run("DROP TABLE vector_index");
+            database.run(`CREATE VIRTUAL TABLE vector_index USING vec0(
+              embedding float[${dimension}] distance_metric=cosine
+            )`);
+          } else {
+            database.run("DELETE FROM vector_index");
+          }
           database.run(
             "INSERT INTO vector_index (rowid, embedding) SELECT id, embedding FROM reindex_vectors",
           );

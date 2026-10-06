@@ -1,3 +1,6 @@
+import { parseDocumentReferences, type DocumentReference } from "./document-references";
+import { isDocumentFile } from "./document-files";
+
 export interface ParsedNote {
   title: string;
   body: string;
@@ -5,6 +8,7 @@ export interface ParsedNote {
   wikilinks: string[];
   references?: Array<{target:string;raw:string;alias?:string;heading?:string;position:number}>;
   images: string[];
+  documents?: DocumentReference[];
   tags: string[];
   frontmatter: Record<string, unknown>;
 }
@@ -141,7 +145,7 @@ export function parseNoteContent(
   const linkRegex = /\[\[(.*?)\]\]/g;
   while ((match = linkRegex.exec(textWithoutEmbeds)) !== null) {
     const target = normalizeWikilink(match[1]);
-    if (target && target !== defaultTitle) {
+    if (target && target !== defaultTitle && !isDocumentFile(target)) {
       wikilinks.add(target);
       const [destination,alias] = match[1].split('|');
       references.push({target,raw:match[0],alias,heading:destination.split('#').slice(1).join('#') || undefined,
@@ -166,6 +170,7 @@ export function parseNoteContent(
     wikilinks: Array.from(wikilinks),
     references,
     images: Array.from(images),
+    documents: parseDocumentReferences(body),
     tags: Array.from(new Set(tags)),
     frontmatter,
   };

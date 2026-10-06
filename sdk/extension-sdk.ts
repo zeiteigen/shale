@@ -15,6 +15,7 @@ import {
 import { ChunkSearcher } from "./search";
 import { SettingsManager } from "./settings";
 import { ModelBatches } from "./models";
+import { modelBatchStore } from "./model-batch-store";
 import type { ExtensionSDKOptions } from "./sdk-options";
 import { mergeOptions } from "../lib/ai/options";
 import { Logger } from "./logger";
@@ -98,10 +99,11 @@ export class ShaleSDK {
     this.checkpoint = new CheckpointManager(this.extensionId, this.database);
     this.graph = new GraphIngestor(this.namespace, this.database);
     this.ingest = new UnifiedIngestor(this.namespace, this.database);
-    this.embedder = new EmbedderClient(defaultEmbedderOptions);
+    const batchStore = modelBatchStore(this.state);
+    this.embedder = new EmbedderClient({ batchStore, ...defaultEmbedderOptions });
     this.search = new ChunkSearcher(this.database, this.embedder);
 
-    this.llm = new LLMClient(defaultLLMOptions);
+    this.llm = new LLMClient({ batchStore, ...defaultLLMOptions });
     this.models = new ModelBatches(this.llm, this.embedder);
   }
 
@@ -136,6 +138,12 @@ export class ShaleSDK {
     options?: LLMOptions & { detailed?: boolean },
   ): Promise<string | LLMResponse> {
     return this.llm.query(input, options as any);
+  }
+
+  queryLLMBatch(inputs: readonly (string | LLMQueryInput)[], options: LLMOptions & { detailed: true }): Promise<LLMResponse[]>;
+  queryLLMBatch(inputs: readonly (string | LLMQueryInput)[], options?: LLMOptions): Promise<string[]>;
+  queryLLMBatch(inputs: readonly (string | LLMQueryInput)[], options?: LLMOptions): Promise<string[] | LLMResponse[]> {
+    return this.llm.queryBatch(inputs, options as any);
   }
 
   /**

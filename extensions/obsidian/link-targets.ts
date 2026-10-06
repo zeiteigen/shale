@@ -1,5 +1,6 @@
 import { basename, dirname, resolve } from 'node:path';
 import { readdirSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import type { ParsedFile } from './parse-file';
 
 /** Build once per discovery batch; retain resolutions in the checkpoint. */
@@ -45,5 +46,12 @@ export function resolveNoteLinks(file: ParsedFile, vaultPath: string, index: Ret
       .filter(path=>index.files.has(path));
     const matches = candidates.length ? candidates : target.includes('/') ? [] : index.byName.get(target) ?? [];
     if (matches.length === 1) file.assetTargets[target] = `file://${matches[0]}`;
+  }
+  file.documentTargets = {};
+  for (const {target} of file.parsed.documents ?? []) {
+    const candidates = [...new Set([resolve(dirname(file.filePath),target),resolve(vaultPath,target)])]
+      .filter(path => index.files.has(path));
+    const matches = candidates.length ? candidates : target.includes('/') ? [] : index.byName.get(target) ?? [];
+    if (matches.length === 1) file.documentTargets[target] = pathToFileURL(matches[0]).href;
   }
 }

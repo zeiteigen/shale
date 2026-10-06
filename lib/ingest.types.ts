@@ -21,6 +21,6 @@ export function isIngestMaterial(item: any): item is IngestMaterial {
         item.metadata !== null &&
         typeof item.metadata.connector === "string" &&
         typeof item.metadata.data_origin === "string" &&
-        (item.metadata.time === undefined || typeof item.metadata.time === "number")
+        (item.metadata.time === undefined || (typeof item.metadata.time === "number" && Number.isSafeInteger(item.metadata.time) && item.metadata.time >= 0))
     )
 }

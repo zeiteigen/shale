@@ -1,71 +1,50 @@
-# Shale Browser Ingestor - Chrome Extension (Manifest V3)
+# Shale Browser Ingestor
 
-A Chrome extension to ingest active web pages, browser history, bookmarks, and browsing sessions into your local [Shale](https://github.com/munch/shale) knowledge graph.
+Chrome/Chromium 106 or newer. The extension captures readable page content, navigation and attention observations, bookmarks, and history for the local Shale server.
 
----
+## Install or upgrade
 
-## Features
+1. Run `bun install` and `bun run browser:build` from the repository root.
+2. Start Shale with `bun run main/index.ts` (or `--no-cli`).
+3. Open `chrome://extensions`, enable Developer mode, and load `scripts/browser-chrome-extension` unpacked. For an existing installation, click **Reload**.
+4. Open the popup and verify **Connector ready**. The default endpoint is `http://127.0.0.1:7425/ingest`; previously saved endpoints remain unchanged.
+5. Choose the data to import. Import commands return immediately; reopening the popup shows persisted progress. Initial setup does not start a library import automatically.
 
-- **Initial Data Import & Bootstrap**:
-  - Automatically prompts on first run to bootstrap your knowledge graph with existing bookmarks, open tabs, and past browsing history.
-  - Paginated batch streaming for history across selectable time horizons:
-    - **Last 24 Hours**
-    - **Last 7 Days**
-    - **Last 30 Days**
-    - **Last 90 Days**
-    - **All Time (Full History)**
-  - Manual trigger button available anytime for testing, partial re-syncs, or recovering from connection errors.
-  - "Reset Onboarding State" button to easily reset sync flags for development and testing.
-- **Live Active Page Sync**: Captures pages as you browse, extracts clean readable content, and sends them to the Shale server.
-- **Explicit Session Grouping**: Tracks real navigation trails within cohesive research sessions (`WebSession`). Manual captures and open-tab snapshots are indexed without being mistaken for navigation.
-- **History Sync**: Ingests your recent browser history with domain relationships and deduplication.
-- **Bookmarks Sync**: Extracts your bookmark hierarchy into `BookmarkFolder` knowledge graph entities.
-- **Privacy & Collision Avoidance**: Automatically excludes social media apps (Twitter/X, Reddit, Instagram, Facebook, TikTok, LinkedIn) and private sites (Google Account login, webmail, banking) with customizable rules.
-- **Popup Control Panel**: Quick actions to ingest the active tab, ingest all open tabs, sync history, sync bookmarks, and adjust settings.
+Upgrade the server before the Chrome extension. The connection test checks Shale identity, durable browser admission, protocol version, and capture policy. A generic HTTP success is insufficient.
 
----
+## Capture and delivery
 
-## Installation Instructions
+Page captures and activity events are written to IndexedDB before HTTP delivery. Each record has an immutable ID and a stored destination. Network failures, timeouts, overload, and transient server failures use persisted backoff; a one-minute alarm resumes delivery and imports. The server's acknowledgement means SQLite admission, while **indexed** means a searchable commit. Permanent failures remain visible and can be retried after correction.
 
-1. Open **Google Chrome** (or Brave / Chromium / Edge).
-2. Navigate to `chrome://extensions/` in the address bar.
-3. Enable **Developer mode** using the toggle switch in the top-right corner.
-4. Click **Load unpacked** in the top-left corner.
-5. Select the browser extension directory inside this repository:
-   ```text
-   /home/munch/Projects/shale/scripts/browser-chrome-extension
-   ```
-6. The **Shale Browser Ingestor** extension icon will appear in your Chrome toolbar. Pin it for quick access!
+The popup distinguishes locally queued records, server indexing, indexed receipts, skips, and failures. Receipt history is bounded to the latest 1,000 terminal records; the lifetime received counter remains cumulative. The outbox allows at most 10,000 unresolved records and 50 MB of retained unresolved data. A full queue pauses imports with a visible error. Changing the endpoint preserves existing queued destinations; restore an import's original destination before resuming it.
 
----
+Live collection uses top-frame committed navigation and SPA route events. Completed loads trigger document-bound extraction rather than creating another visit. Repeated A→B→A navigation keeps three event IDs, even when content analysis is reused. Activation, window focus, idle state, and bounded attention intervals provide context without collecting keystrokes or form input. A background window does not count as attended.
 
-## Initial Setup & Full Import
+Extraction waits for bounded DOM settling and preserves headings, paragraphs, lists, tables, code whitespace, quotations, and captions. Navigation clutter, forms, hidden content, and executable attributes are removed. Injection failures produce labelled metadata captures with a diagnostic reason. Content is bounded and reports quality/truncation. Chrome's scripting result is verified against the expected URL/document before persistence.
 
-When you first open the extension popup:
-1. Ensure your Shale server is running (`bun main/index.ts` on port 7425). The status indicator will turn **Connected** (green dot).
-2. You will see the **Initial Data Import** banner. Click **Run Full Initial Import** to import your open tabs, bookmarks, and the past 7 days of history.
-3. If you want to import older history (e.g. **Last 30 Days** or **All Time**), use the **Data Import & Bootstrap** card:
-   - Select your desired history timeframe from the dropdown.
-   - Click **Start Full Import**.
-   - Watch the live progress bar and counts update in real-time.
+## Privacy and goals
 
-### What each import contains
+Incognito tabs are excluded before extraction or durable storage. Custom excluded domains combine with the server's policy. Until policy is available, built-in exclusions cover common mail, login, and banking URL patterns. A cached server policy remains available offline; server admission rechecks current policy and explains terminal skips.
 
-- **Open tabs / active page:** visible readable text, capped page HTML, outbound links, image URLs and alt text, author metadata, favicon, and tab/session metadata. Shale's web-page parser can use the HTML and image URLs for image analysis.
-- **Bookmarks:** URL, title, bookmark folder, and date added.
-- **History:** URL, title, last visit time, visit count, and typed count.
+**Researching** attaches an optional explicit goal to new activity. The server groups observed sessions by collector, browser instance, inactivity, and bounded size. A session may contain several research threads; a goal can continue across sessions. Inferred labels remain proposals. Existing event assignments can be renamed, merged, or split through the server's context API without changing raw observations.
 
-Chrome's bookmarks and history APIs do not provide archived page HTML or images. To capture rich content for those URLs, open the pages and use **Capture this page** or **Capture open tabs**.
+## History and bookmarks
 
-Page captures, history records, and bookmarks are stored as separate source records, while all three point to the same canonical URL node in the graph. This preserves rich captured content during later history/bookmark syncs. Session state also survives Manifest V3 service-worker restarts.
+Open tabs provide live DOM content. History and bookmarks provide catalog metadata, not archived page bodies or historical attention.
 
----
+History import uses persisted time windows and bisects saturated windows rather than dropping timestamp ties. Saturation at a single timestamp is reported as incomplete. Optional **Backfill individual visits** calls `history.getVisits()` for enumerated URLs, filters the requested interval, and limits each URL to 500 visits. These records use `history_backfill`, have no live tab/attention evidence, and do not create inferred navigation edges. Chrome API enumeration limits remain visible; this is not a promise of a complete historical archive.
 
-## Manual Triggering & Testing
+Bookmark folders use collector-scoped Chrome IDs, preserving folder labels containing slashes. Create, change, move, and remove events update current catalog state. Each imported bookmark snapshot has a sequence, so an older paused import cannot undo a newer move or deletion. History updates and removals are also observed. Removed catalog evidence is retained by default; configure `retainRemovedCatalogEvidence` on the server to change that policy.
 
-To test or re-import data at any time:
-- In the **Data Import & Bootstrap** card:
-  - Check or uncheck **Open Tabs**, **Bookmarks**, or **Past History**.
-  - Choose any timeframe (**24h**, **7d**, **30d**, **90d**, **All Time**).
-  - Click **Start Full Import**.
-- To reset the initial onboarding prompt for testing, click **Reset Onboarding State** at the bottom of the card.
+Public-page enrichment is a separate, explicit server job, disabled by default. It uses no browser cookies and stores fetched evidence separately from live captures. See [browser server documentation](../../extensions/browser/README.md).
+
+## Developer checks
+
+```bash
+bun run browser:build       # Generate shared protocol and extraction bundles
+bun run browser:check       # Reject stale generated files
+bun run test:browser        # Server, extraction, outbox, retrieval regressions
+bun run test:browser:chrome # Actual unpacked extension with an isolated Chromium profile
+```
+
+The Chromium test uses `/usr/bin/chromium` by default; set `SHALE_CHROMIUM_PATH` for another compatible executable. It uses temporary databases/profiles and mocked model endpoints, testing hydrated pages, offline host recovery, service-worker termination, profile restart, popup closure, receipts, and indexing. It does not contact a production daemon or model endpoint.

@@ -3,6 +3,7 @@ export * from "./ai/types";
 export * from "./ai/config";
 export * from "./ai/client";
 export * from "./ai/chat";
+export * from "./ai/chat-batch";
 export * from "./ai/embeddings";
 export * from "./ai/images";
 export { normalizeVectorDimensions } from "./embedding-index";
@@ -13,6 +14,7 @@ import {
   fetchOpenAIEmbeddings,
 } from "./ai/embeddings";
 import { queryLLM, fetchOpenAIChatCompletion } from "./ai/chat";
+import { fetchOpenAIChatCompletions } from "./ai/chat-batch";
 import {
   resolveEmbeddingEndpoint,
   resolveChatEndpoint,
@@ -28,6 +30,7 @@ export default {
   fetchOpenAIEmbeddings,
   queryLLM,
   fetchOpenAIChatCompletion,
+  fetchOpenAIChatCompletions,
   resolveEmbeddingEndpoint,
   resolveChatEndpoint,
   isLocalEndpoint,

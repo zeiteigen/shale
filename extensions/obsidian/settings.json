@@ -1,6 +1,9 @@
 {
   "includeMarkdown": true,
   "includeImages": true,
+  "includeDocuments": true,
+  "documentExtensions": ["pdf", "docx", "pptx", "xlsx", "odt", "odp", "ods", "rtf", "txt", "csv", "html", "epub"],
+  "documentRequestTimeoutMs": 180000,
   "ignoredDirectories": [],
   "imageExtensions": [
     "png",

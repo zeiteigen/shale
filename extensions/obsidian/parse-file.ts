@@ -20,6 +20,7 @@ export interface ParsedFile {
   parsed: ParsedNote;
   linkTargets?: Record<string,string>;
   assetTargets?: Record<string,string>;
+  documentTargets?: Record<string,string>;
   chunks: MarkdownChunk[];
   contextualChunks: ContextualChunk[];
 }

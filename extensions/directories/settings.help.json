@@ -1,0 +1,15 @@
+{
+  "extension": "directories",
+  "settings": {
+    "directories": { "type": "string[]", "description": "Selected local directory paths. Supports absolute paths, paths relative to the daemon working directory, and ~/ paths. No directories are scanned until configured.", "default": [] },
+    "recursive": { "type": "boolean", "description": "Scan subdirectories recursively. Nested symbolic links are always skipped.", "default": true, "possibleValues": [true, false] },
+    "ignoreHidden": { "type": "boolean", "description": "Skip files and directories whose names start with a dot.", "default": true, "possibleValues": [true, false] },
+    "ignoredDirectories": { "type": "string[]", "description": "Directory basenames to skip at any depth, compared case-insensitively.", "default": ["node_modules", "vendor", "dist", "build"] },
+    "fileExtensions": { "type": "string[]", "description": "File extensions to scan, with or without a leading dot. An empty list asks installed processors about every regular file; unsupported files are skipped.", "default": ["pdf", "docx", "pptx", "xlsx", "odt", "odp", "ods", "rtf", "txt", "csv", "md", "html", "epub", "png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "tiff"] },
+    "maxFileSizeMB": { "type": "number", "description": "Maximum file size in MiB; larger files report an error and remain eligible for retry.", "default": 50, "range": { "min": 1, "max": 500 } },
+    "processingTimeoutMs": { "type": "number", "description": "Timeout per document or image processing request, in milliseconds.", "default": 120000, "range": { "min": 1000, "max": 600000 } },
+    "embeddingBatchSize": { "type": "number", "description": "Maximum number of chunks in each embedding request.", "default": 64, "range": { "min": 1, "max": 512 } },
+    "forceAll": { "type": "boolean", "description": "Reprocess selected files even when their recorded versions are unchanged.", "default": false, "possibleValues": [true, false] },
+    "namespace": { "type": "string", "description": "Namespace for directory entities and source graph claims.", "default": "directories" }
+  }
+}

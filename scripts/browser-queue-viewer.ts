@@ -1,3 +1,4 @@
+import { getRootSetting } from "../lib/settings";
 /**
  * Small read-only browser queue viewer.
  *
@@ -6,7 +7,7 @@
  */
 import { createExtensionSDK } from "../sdk";
 
-const port = Number(process.env.SHALE_QUEUE_VIEWER_PORT) || 7426;
+const port = Number(getRootSetting("SHALE_QUEUE_VIEWER_PORT")) || 7426;
 const sdk = createExtensionSDK("browser", "browser");
 
 type QueueItem = {
@@ -16,18 +17,11 @@ type QueueItem = {
 };
 
 function getQueue(): QueueItem[] {
-  const row = sdk.database
-    .query<{ value: string }, { $extension_id: string; $state_key: string }>(
-      "SELECT value FROM extension_state WHERE extension_id = $extension_id AND state_key = $state_key",
-    )
-    .get({ $extension_id: "browser", $state_key: "pending-ingest" });
-  if (!row?.value) return [];
-  try {
-    const queue = JSON.parse(row.value);
-    return Array.isArray(queue) ? queue : [];
-  } catch {
-    return [];
-  }
+  const exists=sdk.database.query("SELECT 1 FROM sqlite_master WHERE name='browser_jobs'").get();
+  if(!exists)return [];
+  return sdk.database.query<any,[string]>(`SELECT id,received_at AS receivedAt,state,attempts,error,payload FROM browser_jobs
+    WHERE extension_id=? AND state IN ('received','prepared','failed') ORDER BY received_at LIMIT 1000`).all('browser')
+    .map(row=>({...row,payload:JSON.parse(row.payload)}));
 }
 
 function queueResponse(): Response {
@@ -79,7 +73,7 @@ const html = String.raw`<!doctype html>
   <header><div><h1><span>SHALE</span> Browser Queue</h1><div class="subtitle">Read-only view of pending browser captures</div></div><div id="updated" class="time">Loading…</div></header>
   <div class="toolbar"><input id="filter" type="search" placeholder="Filter by type, URL, title, or payload…" autocomplete="off"><button id="refresh">Refresh</button><label class="muted"><input id="auto" type="checkbox" checked style="width:auto;vertical-align:middle"> Auto-refresh (5s)</label></div>
   <div id="summary" class="summary"></div><section id="queue" aria-live="polite"></section>
-  <footer>The queue is drained by the browser extension cron. This page never changes it.</footer>
+  <footer>The worker indexes captures; the cron provides a recovery fallback. This page never changes it.</footer>
 </main>
 <script>
   const queue = document.querySelector('#queue'), summary = document.querySelector('#summary'), filter = document.querySelector('#filter'), updated = document.querySelector('#updated');
@@ -101,6 +95,7 @@ const html = String.raw`<!doctype html>
 if (import.meta.main) {
   Bun.serve({
     port,
+    hostname:"127.0.0.1",
     routes: {
       "/": () => new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } }),
       "/api/queue": () => queueResponse(),

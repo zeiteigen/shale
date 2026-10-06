@@ -1,4 +1,19 @@
 export interface BrowserExtensionSettings {
+  allowPublicPageEnrichment?: boolean;
+  maxPublicPagesPerRun?: number;
+  enableImageAnalysis: boolean;
+  refineResearchContexts: boolean;
+  retainRemovedCatalogEvidence: boolean;
+  maxPendingJobs: number;
+  maxPendingBytes: number;
+  maxJobsPerRun: number;
+  maxBatchBytes: number;
+  maxJobAttempts: number;
+  maxSessionsPerRun: number;
+  maxSessionEvents: number;
+  collectionWindowMs: number;
+  maxEmbeddingTexts: number;
+
   /**
    * List of domain names or hostnames to exclude from ingestion (e.g. social media, messaging).
    */

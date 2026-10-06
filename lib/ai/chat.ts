@@ -5,6 +5,10 @@ import { resolveChatEndpoint, resolveTimeout } from "./config";
 import { normalizeImageContentPart } from "./images";
 import { modelRequest } from "./request";
 import { normalizeChatOptions } from "./options";
+import { resolveBatchMode, resolveBatchEndpoint, resolveConcurrency } from "./batch-config";
+import { limitModelRequest } from "./request-limit";
+import { dispatchBatchRequest } from "./batch-dispatch";
+import { getRootSetting } from "../settings";
 
 /**
  * Queries an OpenAI-compatible chat completion model with support for text and images.
@@ -14,12 +18,13 @@ export async function fetchOpenAIChatCompletion(
   options?: LLMOptions,
 ): Promise<LLMResponse> {
   options = normalizeChatOptions(options);
-  const client = createOpenAIClient(options, "chat");
-  const endpoint = resolveChatEndpoint(options);
+  const batchAPI = resolveBatchMode("chat", options) === "api";
+  const endpoint = batchAPI ? resolveBatchEndpoint("chat", options) : resolveChatEndpoint(options);
+  const transportOptions = { ...options, endpoint };
+  const client = createOpenAIClient(transportOptions, "chat");
   const model =
     options?.model ??
-    process.env.OPENAI_CHAT_MODEL ??
-    process.env.OPENAI_MODEL ??
+    getRootSetting("OPENAI_CHAT_MODEL") ??
     "gpt-4o-mini";
 
   const prompt = typeof input === "string" ? input : input.prompt;
@@ -85,7 +90,7 @@ export async function fetchOpenAIChatCompletion(
     body.response_format = options.responseFormat;
   }
 
-  const envEffort = process.env.OPENAI_REASONING_EFFORT;
+  const envEffort = getRootSetting("OPENAI_REASONING_EFFORT");
   const defaultEffort =
     envEffort !== undefined ? envEffort || undefined : "low";
   const reasoningEffort =
@@ -97,10 +102,7 @@ export async function fetchOpenAIChatCompletion(
     body.reasoning_effort = reasoningEffort as any;
   }
 
-  const envThinking =
-    process.env.OPENAI_MAX_THINKING_TOKENS ??
-    process.env.MAX_THINKING_TOKENS ??
-    process.env.OPENAI_THINKING_BUDGET;
+  const envThinking = getRootSetting("OPENAI_MAX_THINKING_TOKENS");
   const defaultThinkingTokens =
     envThinking !== undefined
       ? envThinking === ""
@@ -126,14 +128,17 @@ export async function fetchOpenAIChatCompletion(
 
   const requestOptions: any = {
     path: endpoint,
-    timeout: resolveTimeout(options, "chat"),
+    timeout: resolveTimeout(transportOptions, "chat"),
     signal: options.signal,
   };
 
   const completion = await modelRequest(
     "chat",
     endpoint,
-    () => client.chat.completions.create(body, requestOptions),
+    () => batchAPI
+      ? dispatchBatchRequest<OpenAI.Chat.Completions.ChatCompletion>("chat", body, options)
+      : limitModelRequest(`chat:${endpoint}`, resolveConcurrency("chat", options?.concurrency),
+        () => { options?.signal?.throwIfAborted(); return client.chat.completions.create(body, requestOptions); }),
     options?.resource,
   );
 

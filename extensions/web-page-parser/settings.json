@@ -3,5 +3,6 @@
   "maxFetchChars": 100000,
   "maxImages": 8,
   "enableLlmContext": true,
-  "llmModel": null
+  "llmModel": null,
+  "allowFetch": false
 }

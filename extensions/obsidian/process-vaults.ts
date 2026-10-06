@@ -1,5 +1,8 @@
 import { commitNote, commitImage } from "./commit";
 import { createNoteIndex } from "./link-targets";
+import { findDocumentFiles } from "./document-files";
+import { documentWatermarkKey, finalizeDocument, prepareVaultDocuments } from "./document-vault";
+import type { ParsedDocument } from "./parse-document";
 import { join } from "node:path";
 import { readdirSync, statSync } from "node:fs";
 import { getSDK, logger, getSetting, type ShaleSDK } from "@shale/sdk";
@@ -34,9 +37,11 @@ export interface ProcessVaultResult {
   vaultName: string;
   notesProcessed: number;
   imagesProcessed: number;
+  documentsProcessed: number;
   chunksCreated: number;
   edgesCreated: number;
   watermarkAdvancedTo: number;
+  documentWatermarkAdvancedTo?: number;
 }
 
 // Re-export file parsing and ingestion primitives for convenient access
@@ -52,6 +57,8 @@ export {
   type ContextualChunk,
   type ParseFileOptions,
 };
+export { findDocumentFiles } from "./document-files";
+export { parseDocumentFile, type ParsedDocument } from "./parse-document";
 export {
   ingestFile,
   ingestImageFile,
@@ -193,13 +200,14 @@ export function filterModifiedFiles(
 
 /**
  * Processes an individual Obsidian vault using the Shale SDK:
- * 1. Discovers and filters modified markdown notes and images.
+ * 1. Discovers and filters modified notes, images, and documents.
  */
 export interface PreparedVault {
   namespace?: string;
   checkpointId?: string;
   vault: VaultInfo;
   maxMtime: number;
+  maxDocumentMtime?: number;
   preparationFailed?: boolean;
   vaultEntityName: string;
   entities: Array<{ name: string; type: string }>;
@@ -210,6 +218,7 @@ export interface PreparedVault {
     entities: Array<{ name: string; type: string }>;
     edges: Array<{ source: string; target: string; relation: string }>;
   }>;
+  parsedDocuments: ParsedDocument[];
   parsedImages: Array<{
     filePath: string;
     parsedImage: ParsedImage;
@@ -219,7 +228,7 @@ export interface PreparedVault {
 }
 
 /**
- * Phase 1: Discovers modified notes and images and executes all Chat model operations
+ * Phase 1: Discovers modified notes, images, and documents and executes all Chat work
  * (summaries, note content expansion, multimodal image descriptions).
  * Zero embedding calls happen in this phase, keeping the Chat model loaded in GPU memory.
  */
@@ -250,6 +259,7 @@ export async function prepareVault(
   const includeImages =
     sdk.settings.get<boolean>("includeImages") ??
     getSetting<boolean>("includeImages", true);
+  const includeDocuments = sdk.settings.get<boolean>("includeDocuments") ?? true;
   const ignoredDirectories =
     sdk.settings.get<string[]>("ignoredDirectories") ??
     getSetting<string[]>("ignoredDirectories");
@@ -260,11 +270,19 @@ export async function prepareVault(
   const allImageFiles = includeImages
     ? findImageFiles(vault.path, vault.path, ignoredDirectories)
     : [];
+  const allDocumentFiles = includeDocuments
+    ? findDocumentFiles(vault.path, ignoredDirectories, sdk.settings.get<string[]>("documentExtensions"))
+    : [];
 
   const { modifiedFiles: modifiedNotes, maxMtime: maxNoteMtime } =
     filterModifiedFiles(allMdFiles, lastWatermark);
   const { modifiedFiles: modifiedImages, maxMtime: maxImageMtime } =
     filterModifiedFiles(allImageFiles, lastWatermark);
+  // Documents have their own cursor so existing note/image cursors cannot skip
+  // older attachments when this connector gains document support.
+  const lastDocumentWatermark = force ? 0 : Number(sdk.state.getWatermark(documentWatermarkKey(vault.path)) ?? "0");
+  const { modifiedFiles: modifiedDocuments, maxMtime: maxDocumentMtime } =
+    filterModifiedFiles(allDocumentFiles, lastDocumentWatermark);
 
   const maxMtime = Math.max(maxNoteMtime, maxImageMtime);
   const vaultEntityName = `Vault: ${vault.name}`;
@@ -273,26 +291,28 @@ export async function prepareVault(
     vault,
     namespace:sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian",
     maxMtime,
+    maxDocumentMtime: includeDocuments ? maxDocumentMtime : undefined,
     vaultEntityName,
     entities: [{ name: vaultEntityName, type: "Vault" }],
     edges: [],
     parsedNotes: [],
     parsedImages: [],
+    parsedDocuments: [],
   };
 
-  if (modifiedNotes.length === 0 && modifiedImages.length === 0) {
+  if (modifiedNotes.length === 0 && modifiedImages.length === 0 && modifiedDocuments.length === 0) {
     sdk.logger.log(`Vault "${vault.name}" has no updates since last run.`);
     return prepared;
   }
 
   sdk.logger.log(
-    `[Phase 1: Chat Model] Processing ${modifiedNotes.length} updated note(s) and ${modifiedImages.length} updated image(s) with Chat model in "${vault.name}"...`,
+    `[Phase 1: Chat Model] Processing ${modifiedNotes.length} note(s), ${modifiedImages.length} image(s), and ${modifiedDocuments.length} document(s) in "${vault.name}"...`,
   );
 
-  const noteIndex = createNoteIndex([...allMdFiles,...allImageFiles]);
+  const noteIndex = createNoteIndex([...allMdFiles,...allImageFiles,...allDocumentFiles]);
 
   // 1. Process modified notes via ingestFile with deferEmbedding: true (calls parseFile & Chat model expansion)
-  for (const filePath of modifiedNotes) {
+  await sdk.models.mapChat(modifiedNotes, async (filePath) => {
     try {
       const fileResult = await ingestFile(filePath, vaultEntityName, sdk, {
         deferEmbedding: true,
@@ -329,7 +349,7 @@ export async function prepareVault(
       prepared.preparationFailed = true;
       sdk.logger.error(`Failed to process note at ${filePath}:`, noteErr);
     }
-  }
+  });
 
   // 2. Process modified images via bulk parsing with deferEmbedding: true
   if (modifiedImages.length > 0) {
@@ -354,27 +374,7 @@ export async function prepareVault(
         `Failed to batch parse images in "${vault.name}":`,
         batchErr,
       );
-      for (const imagePath of modifiedImages) {
-        try {
-          const imageResult = await ingestImageFile(
-            imagePath,
-            vaultEntityName,
-            sdk,
-            { deferEmbedding: true },
-          );
-          if (imageResult.parsedImage) {
-            prepared.parsedImages.push({
-              filePath: imagePath,
-              parsedImage: imageResult.parsedImage,
-              entities: imageResult.entities,
-              edges: imageResult.edges,
-            });
-          }
-        } catch (imgErr) {
-          prepared.preparationFailed = true;
-          sdk.logger.error(`Failed to process image at ${imagePath}:`, imgErr);
-        }
-      }
+      prepared.preparationFailed = true;
     }
   }
 
@@ -399,19 +399,24 @@ export async function prepareVault(
     );
   }
 
+  const documentBatch = await prepareVaultDocuments(modifiedDocuments, vault, sdk, prepared.namespace!);
+  prepared.parsedDocuments = documentBatch.documents;
+  if (documentBatch.failed) prepared.preparationFailed = true;
+
   prepared.checkpointId = `vault_batch:${vault.path}`;
   sdk.saveCheckpoint(
     {
       type: "vault_batch",
       vault: { name: vault.name, path: vault.path },
       maxMtime,
+      maxDocumentMtime: prepared.maxDocumentMtime,
       preparationFailed: prepared.preparationFailed ?? false,
     },
     { id: prepared.checkpointId, key: prepared.checkpointId },
   );
 
   sdk.logger.log(
-    `[Phase 1: Chat Model] Finished Chat model operations for "${vault.name}" (${prepared.parsedNotes.length} note(s), ${prepared.parsedImages.length} image(s)).`,
+    `[Phase 1: Chat Model] Finished preparation for "${vault.name}" (${prepared.parsedNotes.length} note(s), ${prepared.parsedImages.length} image(s), ${prepared.parsedDocuments.length} document(s)).`,
   );
 
   return prepared;
@@ -428,26 +433,30 @@ export async function finalizeVault(
 ): Promise<ProcessVaultResult> {
   const sdk = sdkOverride ?? getSDK();
 
-  if (prepared.parsedNotes.length === 0 && prepared.parsedImages.length === 0) {
+  const documents = prepared.parsedDocuments ?? [];
+  if (prepared.parsedNotes.length === 0 && prepared.parsedImages.length === 0 && documents.length === 0) {
     if (prepared.preparationFailed)
       throw new Error("Vault preparation failed; watermark retained for retry");
     return {
       vaultName: prepared.vault.name,
       notesProcessed: 0,
       imagesProcessed: 0,
+      documentsProcessed: 0,
       chunksCreated: 0,
       edgesCreated: 0,
       watermarkAdvancedTo: prepared.maxMtime,
+      documentWatermarkAdvancedTo: prepared.maxDocumentMtime,
     };
   }
 
   sdk.logger.log(
-    `[Phase 2: Embedding Model] Embedding and ingesting ${prepared.parsedNotes.length} note(s) and ${prepared.parsedImages.length} image(s) for "${prepared.vault.name}"...`,
+    `[Phase 2: Embedding Model] Embedding and ingesting ${prepared.parsedNotes.length} note(s), ${prepared.parsedImages.length} image(s), and ${documents.length} document(s) for "${prepared.vault.name}"...`,
   );
 
   let totalChunksCreated = 0;
   let notesProcessed = 0;
   let imagesProcessed = 0;
+  let documentsProcessed = 0;
   let failures = prepared.preparationFailed ? 1 : 0;
   let edgesCreated = 0;
   const namespace = prepared.namespace ?? sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian";
@@ -502,6 +511,18 @@ export async function finalizeVault(
     }
   }
 
+  for (const document of documents) {
+    try {
+      const result = await finalizeDocument(document, prepared.vault, sdk, namespace);
+      totalChunksCreated += result.chunksCount;
+      edgesCreated += result.edgesCreated;
+      documentsProcessed++;
+    } catch (error) {
+      failures++;
+      sdk.logger.error(`Failed to embed and ingest document at ${document.filePath}:`, error);
+    }
+  }
+
   // 3. Commit Graph entities & edges
   if (failures)
     throw new Error(
@@ -513,25 +534,30 @@ export async function finalizeVault(
     const watermarkKey = `vault:${prepared.vault.path}:mtime`;
     sdk.state.setWatermark(String(prepared.maxMtime), watermarkKey);
   }
+  if (prepared.maxDocumentMtime !== undefined && prepared.maxDocumentMtime > 0) {
+    sdk.state.setWatermark(String(prepared.maxDocumentMtime), documentWatermarkKey(prepared.vault.path));
+  }
   if (prepared.checkpointId) sdk.deleteCheckpoint(prepared.checkpointId);
 
   sdk.logger.log(
-    `Vault "${prepared.vault.name}" processed successfully (${notesProcessed} notes, ${imagesProcessed} images). Watermark advanced to ${prepared.maxMtime}.`,
+    `Vault "${prepared.vault.name}" processed successfully (${notesProcessed} notes, ${imagesProcessed} images, ${documentsProcessed} documents).`,
   );
 
   return {
     vaultName: prepared.vault.name,
     notesProcessed,
     imagesProcessed,
+    documentsProcessed,
     chunksCreated: totalChunksCreated,
     edgesCreated,
     watermarkAdvancedTo: prepared.maxMtime,
+    documentWatermarkAdvancedTo: prepared.maxDocumentMtime,
   };
 }
 
 /**
  * Processes an individual Obsidian vault using the two-phase pipeline:
- * Phase 1: All Chat model work (content expansion, image descriptions).
+ * Phase 1: All parsing and Chat model work (content expansion, image/document descriptions).
  * Phase 2: All Embedding model work (embeddings, DB chunk ingestion, graph edges).
  */
 export async function processVault(

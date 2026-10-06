@@ -92,7 +92,7 @@ export async function processImageFilesBatch(
 
   const prepare = async () => {
     // Phase 1: Chat Model Only across all images (Zero embeddings)
-    for (const item of items) {
+    await sdk.models.mapChat(items, async (item, index) => {
       signal?.throwIfAborted();
       const rawPath = item.filePath.startsWith("file://")
         ? item.filePath.slice(7)
@@ -102,6 +102,7 @@ export async function processImageFilesBatch(
           timeoutMs: item.options?.timeoutMs,
           prompt: item.options?.customPrompt,
           signal,
+          requireDescription: true,
         });
 
         const entities: ProcessedEntity[] = [
@@ -134,7 +135,7 @@ export async function processImageFilesBatch(
               : undefined,
         }));
 
-        results.push({
+        results[index] = {
           success: true,
           filePath: item.filePath,
           fileType: "image",
@@ -153,7 +154,7 @@ export async function processImageFilesBatch(
             updatedAt: parsed.updatedAt,
             assetHash: parsed.assetHash,
           },
-        });
+        };
       } catch (err: any) {
         sdk.logger.error(
           `Error parsing image ${item.filePath} in Phase 1:`,
@@ -164,7 +165,7 @@ export async function processImageFilesBatch(
           error: err?.message || String(err),
         });
         const title = imageDisplayName(item.filePath);
-        results.push({
+        results[index] = {
           success: false,
           filePath: item.filePath,
           fileType: "image",
@@ -178,12 +179,12 @@ export async function processImageFilesBatch(
           entities: [],
           edges: [],
           error: err?.message || String(err),
-        });
+        };
       }
-    }
+    });
 
     sdk.logger.info(
-      `[process-image] [Phase 1: Chat Model] Completed parsing of ${results.length} image(s). (Zero embeddings performed)`,
+      `[process-image] [Phase 1: Chat Model] Parsed ${results.filter(result => result.success).length} image(s), ${errors.length} failed. (Zero embeddings performed)`,
     );
 
     return results;

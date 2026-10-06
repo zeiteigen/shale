@@ -1,0 +1,8 @@
+{
+  "name": "directories",
+  "namespace": "directories",
+  "version": "0.1.0",
+  "description": "Recursively ingest selected local directories through document and image processors.",
+  "checkpoint_recover": "recover.ts",
+  "crons": [{ "name": "directories-parser-cron", "schedule": "0 */6 * * *", "script": "index.ts", "run_on_startup": true }]
+}

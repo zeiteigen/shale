@@ -4,10 +4,10 @@ import { createExtensionSDK, type ChunkSearchResult } from "../sdk";
 import { getGraphData as buildGraphData } from "./graph-data";
 import { sourceEntityName, graphIdentityFromSourceUri } from "../lib/source-identity";
 import { knowledgeApi } from "./knowledge-api";
+import { rejectNonLocalRequest } from "../main/local-request";
 import type { ClaimFilter } from "../sdk/graph/types";
 
 const sdk = createExtensionSDK("visualizer");
-const db = sdk.database;
 const distDir = join(import.meta.dir, "dist");
 
 export { type GraphData } from "./graph-data";
@@ -21,7 +21,7 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function enrichResults(results: ChunkSearchResult[]) {
+function enrichResults(results: ChunkSearchResult[], db = sdk.database) {
   const entityBySource = db.query<{ id: number }, { $uri: string; $title: string; $identity: string }>(
     `SELECT id FROM entities WHERE name = $identity OR name = $uri
       OR (lower(name) = lower($title) AND (SELECT count(*) FROM sources WHERE lower(title) = lower($title)) = 1)
@@ -40,7 +40,7 @@ function enrichResults(results: ChunkSearchResult[]) {
   }));
 }
 
-async function search(req: Request, mode: "hybrid" | "vector" | "bm25") {
+async function search(req: Request, mode: "hybrid" | "vector" | "bm25", sdk = createExtensionSDK("visualizer")) {
   const body = (await req.json()) as { query?: string; limit?: number };
   const query = body.query?.trim();
   if (!query) return json({ error: "A query is required." }, 400);
@@ -52,11 +52,11 @@ async function search(req: Request, mode: "hybrid" | "vector" | "bm25") {
       : mode === "bm25"
         ? await sdk.search.bm25({ query, limit })
         : await sdk.search.hybrid({ query, limit });
-    return json({ query, results: enrichResults(results) });
+    return json({ query, results: enrichResults(results, sdk.database) });
   } catch (error: any) {
     if (mode === "hybrid") {
       try {
-        return json({ query, results: enrichResults(await sdk.search.bm25({ query, limit })), fallback: "bm25" });
+        return json({ query, results: enrichResults(await sdk.search.bm25({ query, limit }), sdk.database), fallback: "bm25" });
       } catch {}
     }
     return json({ error: error?.message || "Search failed." }, 500);
@@ -64,6 +64,7 @@ async function search(req: Request, mode: "hybrid" | "vector" | "bm25") {
 }
 
 function staticFile(pathname: string): Response {
+  if (pathname.startsWith("/api/")) return json({ error: "Unknown API endpoint." }, 404);
   const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
   const candidate = normalize(join(distDir, relativePath));
   const isWithinDist = candidate === distDir || candidate.startsWith(`${distDir}/`);
@@ -77,18 +78,13 @@ function staticFile(pathname: string): Response {
   return new Response(Bun.file(filePath));
 }
 
-export function startVisualizerServer(port = Number(process.env.VISUALIZER_PORT) || 3333, sdkOverride = sdk) {
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port,
-    async fetch(req) {
+/** The daemon and the compatibility visualizer server share the same routes. */
+export async function handleVisualizerRequest(req: Request, sdkOverride = sdk): Promise<Response> {
+  const rejected = rejectNonLocalRequest(req);
+  if (rejected) return rejected;
+  try {
       const url = new URL(req.url);
       const { pathname } = url;
-      if (!["127.0.0.1", "localhost"].includes(url.hostname))
-        return json({ error: "Only local hosts are allowed." }, 403);
-      const origin = req.headers.get("Origin");
-      if (origin && origin !== new URL(req.url).origin)
-        return json({ error: "Cross-origin requests are not allowed." }, 403);
       if (req.method === "OPTIONS") return new Response(null, { status: 204 });
       if (pathname === "/api/graph" && req.method === "GET") {
         const at=url.searchParams.has('at') ? Number(url.searchParams.get('at')) : undefined;
@@ -102,13 +98,25 @@ export function startVisualizerServer(port = Number(process.env.VISUALIZER_PORT)
         catch (error) {return json({error:error instanceof Error ? error.message : 'Search failed'},400);}
       }
       const searchMatch = pathname.match(/^\/api\/search\/(hybrid|vector|bm25)$/);
-      if (searchMatch && req.method === "POST") return search(req, searchMatch[1] as "hybrid" | "vector" | "bm25");
+      if (searchMatch && req.method === "POST") return search(req, searchMatch[1] as "hybrid" | "vector" | "bm25", sdkOverride);
       if (pathname === "/api/health") return json({ ok: true });
       return staticFile(pathname);
-    },
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : "Request failed." }, 400);
+  }
+}
+
+export function startVisualizerServer(port = 3333, sdkOverride = sdk) {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port,
+    fetch: req => handleVisualizerRequest(req, sdkOverride),
   });
   console.log(`[Visualizer] React notebook available at http://localhost:${server.port}`);
   return server;
 }
 
-if (import.meta.main) startVisualizerServer();
+if (import.meta.main) {
+  const { runWebHost } = await import("../scripts/start-web-host");
+  await runWebHost();
+}

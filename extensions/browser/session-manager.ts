@@ -12,6 +12,7 @@ import type {
 } from "./types";
 import type { BrowserExtensionSettings } from "./settings.types";
 import { normalizeUrl } from "./filter";
+import { buildSequentialEdges } from "./navigation";
 import { pageEntityName } from "./identity";
 
 const ACTIVE_SESSION_STATE_KEY = "active_session_state";
@@ -110,6 +111,7 @@ export async function recordSessionVisit(
           sdk.logger.error(
             `Failed to commit session ${active.sessionId}: ${err?.message || err}`,
           );
+          throw err;
         }
       }
       active = null;
@@ -126,34 +128,26 @@ export async function recordSessionVisit(
     };
   }
 
-  // Previous visit for sequential navigation linkage
-  let sequentialEdge: { source: string; target: string } | undefined;
-  if (active.visits.length > 0) {
-    const prev = active.visits[active.visits.length - 1];
-    const sameTab =
-      prev.tabId === undefined || visit.tabId === undefined
-        ? prev.windowId === undefined ||
-          visit.windowId === undefined ||
-          prev.windowId === visit.windowId
-        : prev.tabId === visit.tabId;
-    const openedFromPrevious =
-      visit.openerTabId !== undefined && visit.openerTabId === prev.tabId;
-    if (prev.url !== visit.url && (sameTab || openedFromPrevious)) {
-      sequentialEdge = {
-        source: pageEntityName(prev.url),
-        target: pageEntityName(visit.url),
-      };
-    }
-  }
-
-  // Repeated capture events for the same tab and URL update the visit instead
-  // of creating artificial self-navigation and bloated session narratives.
-  const duplicateIndex = active.visits.findIndex(
-    (existing) => existing.url === visit.url && existing.tabId === visit.tabId,
+  // Retry identity is the event ID, never the page URL.
+  if (
+    !visit.eventId ||
+    !active.visits.some((existing) => existing.eventId === visit.eventId)
+  )
+    active.visits.push(visit);
+  active.visits.sort(
+    (a, b) =>
+      a.visitedAt - b.visitedAt || (a.sequence ?? 0) - (b.sequence ?? 0),
   );
-  if (duplicateIndex >= 0) active.visits[duplicateIndex] = visit;
-  else active.visits.push(visit);
-  active.lastActivityTime = now;
+  const edges = buildSequentialEdges(active.visits);
+  const edge = edges.findLast((edge) =>
+    edge.metadata.eventId
+      ? edge.metadata.eventId === visit.eventId
+      : edge.target === pageEntityName(visit.url),
+  );
+  const sequentialEdge = edge
+    ? { source: edge.source, target: edge.target }
+    : undefined;
+  active.lastActivityTime = Math.max(active.lastActivityTime, now);
   setActiveSession(sdk, active);
 
   return {
@@ -210,6 +204,8 @@ export async function prepareSessionSnapshot(
       domain: normalized.domain,
       visitedAt: p.visitedAt,
       tabId: p.tabId,
+      windowId: p.windowId,
+      openerTabId: p.openerTabId,
       transitionType: p.transitionType,
     };
   });

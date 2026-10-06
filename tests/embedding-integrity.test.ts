@@ -2,12 +2,13 @@ import { describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
 import * as sqliteVec from "sqlite-vec";
 import { getEmbeddings } from "../lib/ai/embeddings";
-import { vectorBuffer } from "../lib/embedding-index";
+import { getIndexDimension, vectorBuffer } from "../lib/embedding-index";
 import { readEmbeddingProfile } from "../lib/embedding-profile";
 import { reindexEmbeddings } from "../lib/reindex-embeddings";
 import { UnifiedIngestor } from "../sdk/ingest";
 import { ChunkSearcher } from "../sdk/search";
 import { EmbedderClient } from "../sdk/embed";
+import { createTestDatabase } from "./fixtures/database";
 
 function database() {
   const db = new Database(":memory:");
@@ -172,6 +173,7 @@ describe("Embedding integrity", () => {
         db,
         {
           ...options(),
+          padToDimensions: 2,
           fetchFn: async (url: any, init: any) => {
             if (++calls === 2) throw new Error("offline");
             return options().fetchFn(url, init);
@@ -185,6 +187,7 @@ describe("Embedding integrity", () => {
         .query("SELECT rowid, embedding FROM vector_index ORDER BY rowid")
         .all(),
     ).toEqual(before);
+    expect(getIndexDimension(db)).toBe(4);
     expect(readEmbeddingProfile(db)).toBeNull();
     expect(await reindexEmbeddings(db, options(), 1)).toBe(2);
     expect(readEmbeddingProfile(db)?.model).toBe("test-model");
@@ -220,6 +223,73 @@ describe("Embedding integrity", () => {
         )
         .get()!.count,
     ).toBe(1);
+    db.close();
+  });
+
+  it("resizes a populated index atomically and preserves chunks and deletion triggers", async () => {
+    const db = createTestDatabase();
+    const ingest = new UnifiedIngestor("test", db);
+    ingest.sourceAndChunks(source("known", await getEmbeddings(["one", "two"], options())));
+    const before = db.query("SELECT * FROM chunks ORDER BY id").all();
+    expect(await reindexEmbeddings(db, { ...options("new-model"), padToDimensions: 2 })).toBe(2);
+    expect(getIndexDimension(db)).toBe(2);
+    expect(readEmbeddingProfile(db)).toMatchObject({ model: "new-model", storageDimensions: 2 });
+    expect(db.query("SELECT * FROM chunks ORDER BY id").all()).toEqual(before);
+    const vectors = db.query<{ rowid: number; embedding: Uint8Array }, []>(
+      "SELECT rowid, embedding FROM vector_index ORDER BY rowid",
+    ).all();
+    expect(vectors.map(v => v.embedding.byteLength)).toEqual([8, 8]);
+    expect((await new ChunkSearcher(db, new EmbedderClient({ ...options("new-model"), padToDimensions: 2 }))
+      .vector({ query: "one" })).length).toBe(2);
+    db.query("DELETE FROM chunks WHERE id = ?").run(vectors[0].rowid);
+    expect(db.query("SELECT rowid FROM vector_index").all()).toEqual([{ rowid: vectors[1].rowid }]);
+    db.close();
+  });
+
+  it("rolls back schema, vectors, and provenance if a resized index cannot commit", async () => {
+    const db = database();
+    new UnifiedIngestor("test", db).sourceAndChunks(source("known", await getEmbeddings(["one"], options())));
+    const before = db.query("SELECT rowid, embedding FROM vector_index").all();
+    const profile = readEmbeddingProfile(db);
+    db.run(`CREATE TRIGGER reject_profile BEFORE UPDATE ON embedding_profile BEGIN
+      SELECT RAISE(ABORT, 'profile commit rejected');
+    END`);
+    await expect(reindexEmbeddings(db, { ...options("new-model"), padToDimensions: 6 }))
+      .rejects.toThrow("profile commit rejected");
+    expect(getIndexDimension(db)).toBe(4);
+    expect(db.query("SELECT rowid, embedding FROM vector_index").all()).toEqual(before);
+    expect(readEmbeddingProfile(db)).toEqual(profile);
+    expect(db.query("SELECT 1 FROM sqlite_temp_master WHERE name = 'reindex_vectors'").get()).toBeNull();
+    db.close();
+  });
+
+  it("uses EMBEDDING_DIMENSIONS for reindexing rather than the old index size", async () => {
+    const original = process.env.EMBEDDING_DIMENSIONS;
+    const db = database();
+    try {
+      new UnifiedIngestor("test", db).sourceAndChunks(source("old", [[1, 2, 3, 4]]));
+      process.env.EMBEDDING_DIMENSIONS = "2560";
+      const { padToDimensions, ...configured } = options();
+      await reindexEmbeddings(db, configured);
+      expect(getIndexDimension(db)).toBe(2560);
+      expect(readEmbeddingProfile(db)?.storageDimensions).toBe(2560);
+    } finally {
+      if (original === undefined) delete process.env.EMBEDDING_DIMENSIONS;
+      else process.env.EMBEDDING_DIMENSIONS = original;
+      db.close();
+    }
+  });
+
+  it("supports native dimensions and resizing an index with no chunks", async () => {
+    const db = database();
+    const ingest = new UnifiedIngestor("test", db);
+    ingest.sourceAndChunks(source("old", [[1, 2, 3, 4]]));
+    await reindexEmbeddings(db, { ...options(), padToDimensions: null });
+    expect(getIndexDimension(db)).toBe(2);
+    db.run("DELETE FROM chunks");
+    expect(await reindexEmbeddings(db, { ...options(), padToDimensions: 6 })).toBe(0);
+    expect(getIndexDimension(db)).toBe(6);
+    expect(readEmbeddingProfile(db)).toBeNull();
     db.close();
   });
 });

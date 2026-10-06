@@ -1,6 +1,6 @@
-import { basename } from "node:path";
-import { statSync, existsSync } from "node:fs";
-import { getSDK, logger, type ShaleSDK } from "@shale/sdk";
+import { getSDK, type ShaleSDK } from "@shale/sdk";
+import { parsedImageResponse } from "./image-response";
+import type { ProcessFileResponse } from "../../lib/messages.types";
 import type { PreparedSourceClaim } from "../../sdk/graph/prepared";
 import type { ContextualChunk } from "./parse-file";
 import {
@@ -22,6 +22,7 @@ export interface ParsedImage {
 
 export interface ParseImageOptions {
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 /**
@@ -50,72 +51,24 @@ export async function parseImageFile(
 ): Promise<ParsedImage> {
   const sdk = sdkOverride ?? getSDK();
   const rawPath = filePath.startsWith("file://") ? filePath.slice(7) : filePath;
-  const imageTitle = basename(rawPath);
-  const imageUri = filePath.startsWith("file://") ? filePath : `file://${filePath}`;
-  let updatedAt = Date.now();
-  try {
-    if (existsSync(rawPath)) {
-      updatedAt = Math.floor(statSync(rawPath).mtimeMs);
-    }
-  } catch {}
-
-  // 1. First attempt via cross-extension messaging "file:process"
-  if (sdk?.messages?.hasHandler("file:process")) {
-    try {
-      const resp = await sdk.messages.request("file:process", {
-        filePath: rawPath,
-        fileType: "image",
-        options: {
-          timeoutMs: options?.timeoutMs,
-          deferEmbedding: true,
-        },
-      });
-
-      if (resp && resp.success) {
-        const contextualChunks: ContextualChunk[] =
-          resp.chunks && resp.chunks.length > 0
-            ? resp.chunks.map((c) => ({
-                chunk_index: c.chunk_index,
-                chunk_type:
-                  c.chunk_type ??
-                  "synthetic",
-                text_content: c.text_content,
-                metadata: c.metadata,
-              }))
-            : [
-                {
-                  chunk_index: 0,
-                  chunk_type: "synthetic",
-                  text_content: `# Image: ${resp.title}\n${resp.description ?? ""}`,
-                },
-              ];
-
-        return {
-          filePath: rawPath,
-          imageTitle: resp.title || imageTitle,
-          imageUri: resp.uri || imageUri,
-          updatedAt: resp.metadata?.updatedAt ?? updatedAt,
-          description: resp.description ?? "",
-          knowledge: resp.knowledge,
-          assetHash: resp.metadata?.assetHash,
-          contextualChunk: contextualChunks[0],
-          contextualChunks,
-        };
-      }
-    } catch (err: any) {
-      (sdk?.logger ?? logger).warn(
-        `Cross-extension "file:process" message call failed, falling back to local processor: ${err?.message || err}`,
-      );
-    }
+  if (sdk.messages.hasHandler("file:process")) {
+    // Model calls have their own deadlines. A fixed bus deadline also counts queue
+    // time and would abort a valid model request before its configured timeout.
+    const response = await sdk.messages.request("file:process", {
+      filePath: rawPath, fileType: "image",
+      options: { timeoutMs: options?.timeoutMs, deferEmbedding: true },
+    }, { timeoutMs: 0, signal: options?.signal });
+    return parsedImageResponse(response, rawPath);
   }
 
   // 2. Standalone fallback using the SDK implementation
-  const localResult = await sharedParseImageFile(rawPath, sdk, options);
+  const localResult = await sharedParseImageFile(rawPath, sdk, { ...options, requireDescription: true });
   const contextualChunks: ContextualChunk[] = localResult.contextualChunks.map(
     (c) => ({
       chunk_index: c.chunk_index,
       chunk_type: c.chunk_type,
       text_content: c.text_content,
+      metadata: c.metadata,
     }),
   );
 
@@ -135,7 +88,7 @@ export async function parseImageFile(
 /**
  * Parses a batch of image files adhering to Phase 1 of the two-phase system (Zero embeddings).
  * Uses the cross-extension message bus "files:process" or "file:process" bulk channels
- * with deferEmbedding: true, falling back to local batch execution.
+ * with deferEmbedding: true. Standalone execution is used when no handler exists.
  */
 export async function parseImageFilesBatch(
   filePaths: string[],
@@ -149,83 +102,35 @@ export async function parseImageFilesBatch(
     fp.startsWith("file://") ? fp.slice(7) : fp,
   );
 
-  // 1. First attempt via cross-extension messaging bulk channels
-  const bulkChannel = sdk?.messages?.hasHandler("files:process")
-    ? "files:process"
-    : sdk?.messages?.hasHandler("file:process")
-      ? "file:process"
-      : null;
-
+  const bulkChannel = sdk.messages.hasHandler("files:process")
+    ? "files:process" : sdk.messages.hasHandler("file:process") ? "file:process" : null;
   if (bulkChannel) {
-    try {
-      const resp = await sdk.messages.request<any, any>(bulkChannel, {
-        filePaths: rawPaths,
-        fileType: "image",
-        options: {
-          timeoutMs: options?.timeoutMs,
-          deferEmbedding: true,
-        },
-      });
-
-      const batchResults = resp?.results || (resp?.success ? [resp] : []);
-      if (Array.isArray(batchResults) && batchResults.length > 0) {
-        if (batchResults.some((item: any) => !item.success)) throw new Error("Image batch contains failed items");
-        return batchResults.map((item: any, idx: number) => {
-          const rawPath = rawPaths[idx] || item.filePath;
-          const imageTitle = item.title || basename(rawPath);
-          const imageUri = item.uri || (rawPath.startsWith("file://") ? rawPath : `file://${rawPath}`);
-          let updatedAt = Date.now();
-          try {
-            if (existsSync(rawPath)) {
-              updatedAt = Math.floor(statSync(rawPath).mtimeMs);
-            }
-          } catch {}
-
-          const contextualChunks: ContextualChunk[] =
-            item.chunks && item.chunks.length > 0
-              ? item.chunks.map((c: any) => ({
-                  chunk_index: c.chunk_index,
-                  chunk_type:
-                    c.chunk_type ??
-                    "synthetic",
-                  text_content: c.text_content,
-                metadata: c.metadata,
-                }))
-              : [
-                  {
-                    chunk_index: 0,
-                    chunk_type: "synthetic",
-                    text_content: `# Image: ${imageTitle}\n${item.description ?? ""}`,
-                  },
-                ];
-
-          return {
-            filePath: rawPath,
-            imageTitle,
-            imageUri,
-            updatedAt: item.metadata?.updatedAt ?? updatedAt,
-            description: item.description ?? "",
-            knowledge: item.knowledge,
-            assetHash: item.metadata?.assetHash,
-            contextualChunk: contextualChunks[0],
-            contextualChunks,
-          };
-        });
-      }
-    } catch (err: any) {
-      (sdk?.logger ?? logger).warn(
-        `Cross-extension bulk messaging failed, falling back to local parser: ${err?.message || err}`,
-      );
+    const response = await sdk.messages.request<{ results?: ProcessFileResponse[] } & Partial<ProcessFileResponse>, any>(bulkChannel, {
+      filePaths: rawPaths, fileType: "image",
+      options: { timeoutMs: options?.timeoutMs, deferEmbedding: true },
+    }, { timeoutMs: 0, signal: options?.signal });
+    const results = response.results ?? (rawPaths.length === 1 ? [response as ProcessFileResponse] : []);
+    const byPath = new Map(results.map(result => [result.filePath.replace(/^file:\/\//, ""), result]));
+    const parsed: ParsedImage[] = [];
+    for (const filePath of rawPaths) {
+      const result = byPath.get(filePath);
+      if (result?.success) parsed.push(parsedImageResponse(result, filePath));
+      else sdk.logger.warn(`Image remains pending for retry: ${filePath}: ${result?.error ?? "No image result returned"}`);
     }
+    return parsed;
   }
 
-  // 2. Local fallback
-  const results: ParsedImage[] = [];
-  for (const fp of rawPaths) {
-    const parsed = await parseImageFile(fp, sdk, options);
-    results.push(parsed);
-  }
-  return results;
+  // Standalone parsing only runs when no processor is registered. Keep successful
+  // items if another image fails; a subsequent scan will retry the missing items.
+  const results = await sdk.models.mapChat(rawPaths, async filePath => {
+    try { return await parseImageFile(filePath, sdk, options); }
+    catch (error) {
+      options?.signal?.throwIfAborted();
+      sdk.logger.warn(`Image remains pending for retry: ${filePath}: ${error}`);
+      return undefined;
+    }
+  });
+  return results.filter((result): result is ParsedImage => result !== undefined);
 }
 
 export default parseImageFile;

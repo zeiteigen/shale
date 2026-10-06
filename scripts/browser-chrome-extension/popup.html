@@ -63,11 +63,12 @@
             <option value="7d" selected>Last 7 Days</option>
             <option value="30d">Last 30 Days</option>
             <option value="90d">Last 90 Days</option>
-            <option value="all">All Time (Full History)</option>
+            <option value="all">All available aggregate history</option>
           </select>
         </div>
       </div>
 
+      <label class="checkbox-row"><input type="checkbox" id="chkHistoryVisits"><span>Backfill individual visits (up to 500 per URL)</span></label>
       <button id="btnStartFullImport" class="btn btn-primary btn-full mt-2">
         <span class="btn-icon">📥</span>
         <span>Import selected data</span>
@@ -99,22 +100,27 @@
       </div>
       <div class="session-info">
         <div class="info-row">
-          <span class="label">Session ID:</span>
+          <span class="label">Collector:</span>
           <span id="sessionId" class="val code">-</span>
         </div>
         <div class="stats-row">
           <div class="stat-box">
             <span id="sessionPageCount" class="stat-number">0</span>
-            <span class="stat-label">Pages this session</span>
+            <span class="stat-label">Waiting to send</span>
           </div>
           <div class="stat-box">
             <span id="totalIngestedCount" class="stat-number">0</span>
-            <span class="stat-label">Items sent</span>
+            <span class="stat-label">Received by server</span>
           </div>
         </div>
       </div>
     </section>
 
+    <section class="card"><div id="deliverySummary" aria-live="polite"></div><p id="deliveryError"></p>
+      <button id="btnRetryFailed" class="btn btn-secondary">Retry failed records</button>
+      <label for="goalInput">Researching</label><input id="goalInput" class="text-input" maxlength="300" placeholder="Optional goal for new activity">
+      <button id="btnSaveGoal" class="btn btn-sm">Save goal</button><div id="importJobs"></div>
+    </section>
     <!-- Quick Actions -->
     <section class="card">
       <div class="card-header">
@@ -150,7 +156,7 @@
       <div class="setting-item toggle-row">
         <label for="toggleAutoSync" class="toggle-label">
           <span class="setting-name">Live Active Page Sync</span>
-          <span class="setting-desc">Auto-ingest tabs upon page load</span>
+          <span class="setting-desc">Capture navigation and attention; private pages are excluded</span>
         </label>
         <input type="checkbox" id="toggleAutoSync" class="toggle-input">
       </div>
@@ -184,6 +190,6 @@
     </footer>
   </div>
 
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>

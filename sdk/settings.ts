@@ -37,6 +37,8 @@ export class SettingsManager<
       let cur = resolve(process.cwd());
       while (cur && cur !== dirname(cur)) {
         const candidate = join(cur, "settings.json");
+        // The host's root settings are a separate scope from extension settings.
+        if (existsSync(join(cur, "package.json")) && existsSync(join(cur, "extensions"))) break;
         if (existsSync(candidate)) {
           return candidate;
         }

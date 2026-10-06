@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { ClientOptions } from "openai";
 import type { AIClientOptions } from "./types";
+import { getRootSetting } from "../settings";
 import {
   resolveApiKey,
   resolveRetries,
@@ -27,7 +28,8 @@ export function createOpenAIClient(
   }
   return new OpenAI({
     apiKey: resolveApiKey(options, role),
-    baseURL: options?.baseUrl,
+    baseURL: options?.baseUrl ?? getRootSetting(role === "chat" ? "OPENAI_CHAT_BASE_URL" : "EMBEDDING_BASE_URL")
+      ?? getRootSetting("OPENAI_BASE_URL"),
     fetch: options?.fetchFn,
     timeout: resolveTimeout(options, role),
     maxRetries: resolveRetries(options, role),

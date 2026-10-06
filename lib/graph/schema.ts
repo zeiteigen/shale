@@ -1,10 +1,11 @@
+import { ensureRevisionUpsertSafety } from './revision-upsert-safety';
 import type { Database } from "bun:sqlite";
 import { installRevisionTracking } from "./source-revisions";
 
 /** Additive migration: legacy node IDs and edge consumers remain valid. */
 export function ensureGraphSchema(db: Database) {
   if (db.query("SELECT 1 FROM sqlite_master WHERE name='graph_migrations'").get() &&
-      db.query("SELECT 1 FROM graph_migrations WHERE name='knowledge-schema-v2'").get()) return;
+      db.query("SELECT 1 FROM graph_migrations WHERE name='knowledge-schema-v2'").get()) {ensureRevisionUpsertSafety(db);return;}
   db.transaction(() => {
     db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY,namespace TEXT NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL,UNIQUE(namespace,name)) STRICT;
       CREATE TABLE IF NOT EXISTS edges (source_entity_id INTEGER NOT NULL REFERENCES entities(id),target_entity_id INTEGER NOT NULL REFERENCES entities(id),
@@ -102,6 +103,7 @@ export function ensureGraphSchema(db: Database) {
       FROM graph_events g JOIN entities e ON e.id=g.entity_id WHERE g.claim_id IS NULL;
       UPDATE graph_events SET claim_id='legacy-event:'||entity_id WHERE claim_id IS NULL;`);
     installRevisionTracking(db);
+    ensureRevisionUpsertSafety(db);
     // Import existing topology once; do not invent confidence or evidence for old edges.
     if (!db.query("SELECT 1 FROM graph_migrations WHERE name = 'legacy-edges-v1'").get()) {
       const hasMetadata=db.query<{name:string}, []>('PRAGMA table_info(edges)').all().some(c=>c.name==='metadata');

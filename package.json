@@ -6,21 +6,36 @@
     "./sdk/*": "./sdk/*"
   },
   "scripts": {
+    "start": "bun run --cwd visualizer build && bun main/index.ts",
+    "web:build": "bun run --cwd visualizer build",
+    "test:web": "bun test tests/web-interface.test.ts tests/visualizer-server.test.ts tests/ingest-http.test.ts",
+    "test:web:browser": "bun run web:build && SHALE_WEB_E2E=1 bun test tests/web-interface-ui.test.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tests/tsconfig.json && tsc -p tests/types/tsconfig.json && tsc -p visualizer/tsconfig.json",
     "settings": "bun scripts/settings.ts",
     "queue:view": "bun run scripts/browser-queue-viewer.ts",
-    "visualizer": "cd visualizer && bun run dev && cd .."
+    "visualizer": "bun run start",
+    "browser:build": "bun scripts/build-browser-contract.ts && bun scripts/build-browser-content.ts",
+    "browser:check": "bun scripts/build-browser-contract.ts --check && bun scripts/build-browser-content.ts --check",
+    "test:browser": "bun test tests/browser-*.test.ts tests/ingest-http.test.ts tests/web-page-parser-extension.test.ts tests/connector-knowledge.test.ts",
+    "test:browser:chrome": "SHALE_BROWSER_E2E=1 bun test tests/browser-chrome.integration.test.ts"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.0",
+    "@mozilla/readability": "^0.6.0",
     "commander": "^15.0.0",
+    "linkedom": "^0.18.13",
+    "officeparser": "^8.1.0",
     "openai": "^7.12.1",
+    "pdfjs-dist": "6.2.108",
     "sqlite-vec": "^0.1.9",
     "stopword": "^3.1.5"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
     "@types/stopword": "^2.0.3",
+    "fake-indexeddb": "^6.2.5",
+    "fflate": "^0.8.3",
+    "playwright-core": "^1.63.0",
     "typescript": "7.0.2"
   }
 }

@@ -14,7 +14,8 @@ export {
   defaultMessageBus,
   createMessageBus,
 } from "../lib/messages";
-export { EmbedderClient, getEmbedding, getEmbeddings } from "./embed";
+export { EmbedderClient, getEmbedding, getEmbeddings, type EmbedderOptions } from "./embed";
+export { ModelBatches } from "./models";
 export {
   LLMClient,
   type LLMOptions,
@@ -30,6 +31,8 @@ export {
   eng,
 } from "./search";
 export { SettingsManager } from "./settings";
+export { readRootSettings, getRootSetting, getRootSettingsPath } from "../lib/settings";
+export type { RootSettings } from "../lib/settings.types";
 export {
   Logger,
   createLoggerProxy,

@@ -1,100 +1,96 @@
-# Shale Browser Ingestion Extension
+# Browser connector
 
-The **Shale Browser Ingestion Extension** ingests, embeds, enriches, and indexes a user's web browsing activity—including active web pages, browser history, bookmarks, and explicit session groupings—into the unified Shale SQLite knowledge layer.
+Durable browser ingestion for Shale's local SQLite, search, and evidence graph. The companion [Chrome extension](../../scripts/browser-chrome-extension/README.md) collects structured page captures and immutable activity observations. Catalog records, page content, activity, observed sessions, and inferred research threads have separate identities.
 
----
+## Admission and processing
 
-## Features
+`subscribe.ts` exports fast `accept`, status/policy inspection, and capabilities. The host validates the outer envelope, then awaits browser validation and the SQLite transaction before returning `202`. Browser work bypasses the volatile host queue. Legacy payloads remain supported; their missing identities cannot provide the replay guarantees of versioned records.
 
-- **Active Web Page Ingestion**: Ingests visited pages with title, clean body text, metadata, and full-text/vector index.
-  - Stores observed DOM author, links, image dimensions, and reference qualifiers as evidence-backed claims.
-  - Stores LLM summaries, categories, topics, contextualization, and image interpretations as proposals with their extraction method and model.
-- **Canonical Graph Identity**: Uses normalized URLs for `WebPage` nodes and session URIs for `WebSession` nodes, so duplicate titles never merge unrelated records.
-- **Privacy & Collision Avoidance Filters**:
-  - Excludes social media platforms (`x.com`, `reddit.com`, `instagram.com`, `facebook.com`, `tiktok.com`, `linkedin.com`, `youtube.com`) to leave room for specialized social media ingestion extensions.
-  - Excludes sensitive URLs (`*mail.google.com*`, `*accounts.google.com*`, `*bank*`, `*login*`).
-  - Automatically strips URL tracking parameters (`utm_*`, `fbclid`, `gclid`).
-- **Explicit Web Session Grouping**:
-  - Records sessions as events with ordered participants and each visit as a distinct occurrence, including repeated visits to the same URL.
-  - Keeps the observed visit log verbatim alongside the synthetic narrative, including timestamps, tab/window IDs, and transition types.
-  - Clusters true navigation events within a single browsing session; snapshots and manual captures stay page-local.
-  - Creates `WebSession` knowledge graph entities.
-  - Links sequential navigation transitions (`Page A -> NAVIGATED_TO -> Page B`).
-  - Links sessions to visited pages (`WebSession -> CONTAINS_PAGE -> WebPage`).
-- **LLM Enrichment**:
-  - Summarizes web pages and extracts 3-5 core conceptual topic nodes.
-  - Synthesizes entire browsing sessions into descriptive narrative summaries with dominant topics.
-- **Bookmarks & History**:
-  - Keeps individual bookmark records, folder ancestry, creation events, visit counts, typed counts, and last-visit observations. Aggregate counts do not fabricate individual visits.
-  - Ingests bookmark trees with folder hierarchies (`WebPage -> BOOKMARKED_IN -> BookmarkFolder`).
-  - Ingests browser history batches with domain relationships.
-  - Keeps bookmark/history sources separate from rich page captures while connecting them to the same canonical page node.
-- **Crash Recovery**:
-  - Commits each page/session source, graph assertions, and checkpoint completion atomically; replay preserves reviewed statuses and does not duplicate assertions.
-  - Uses the two-phase local GPU optimization pattern with checkpoints to guarantee zero lost LLM tokens during unexpected exits.
-  - The host runs the browser cron once during startup, recovering checkpoints first and then draining every durable ingest item already queued.
+A versioned request contains an `IngestMaterial` envelope:
 
----
+```json
+{
+  "target_processor": "browser",
+  "content": "{\"type\":\"browser_batch\",\"protocolVersion\":1,\"collectorId\":\"profile-1\",\"batchId\":\"batch-1\",\"records\":[{\"type\":\"page_visit\",\"recordId\":\"capture-1\",\"url\":\"https://example.com/docs\",\"title\":\"Documentation\",\"textContent\":\"Readable captured evidence.\",\"recordInSession\":false}]}",
+  "metadata": {
+    "connector": "chrome-extension",
+    "data_origin": "chrome",
+    "time": 1790812800000
+  }
+}
+```
 
-## Configuration & Settings
+The receipt contains `protocolVersion`, `collectorId`, `batchId`, and `records` with `recordId`, `jobId`, `status` (`received`, `duplicate`, or `skipped`), and optional reason. An identical record replay returns the original job. Reusing an ID with changed content returns `409`; the entire request rolls back. Invalid nested payloads return `400`, oversized requests `413`, unknown subscribers `404`, capacity exhaustion `429`, and failed durable storage `503`. Overload/transient responses include `Retry-After`.
 
-These graph records are emitted on ingestion. Existing history/bookmarks can be refreshed through browser sync, and pages through capture. Prior URL-based page/session entity IDs are retained; other entities with equal labels keep separate identities. Page preparation/commit, catalog ingestion, session ingestion, and graph writers live in separate modules.
+`storage-schema.ts` creates browser-owned tables additively. The legacy `pending-ingest` and `active_session_state` are migrated transactionally and removed only after durable rows exist. Queue capacity uses an indexed byte counter, avoiding scans of retained page bodies. Previously coalesced visits cannot be reconstructed.
 
-Settings can be managed via the Shale Settings CLI:
+Admission wakes a coalescing background worker, with a one-minute cron and startup run as recovery fallbacks. Bounded jobs run inside `sdk.models.batch`: all chat/vision preparation and checkpoints finish before embeddings begin. Compatible text arrays are embedded with explicit request limits. A renewable SQLite lease prevents concurrent owners, and ownership is checked around long calls and before commits. Sources, chunks, graph claims, job outcomes, and checkpoint completion commit transactionally. Failures retain prepared output and use backoff; exhausted jobs require explicit retry. A session preparation checkpoint preserves generated synthesis even before context preparation has finished.
+
+## Content, activity, and context
+
+The shared Readability/semantic-root extractor produces typed blocks and section locators. The parser owns chunking; browser finalization consumes those chunks directly. A useful HTML candidate can repair weak supplied text. The Chrome collector bounds the complete encoded capture, including escaped HTML and references, and marks reductions as partial/truncated. Extraction quality and provenance distinguish live DOM, tab metadata, and explicitly fetched public pages.
+
+Each managed capture links its requesting activity to an immutable, indexed content version. Session/date/goal queries use that version; generic queries use the newest capture, so a late older upload cannot overwrite current content. Returning unchanged content restores existing vectors without another model request. Completed receipts retain input hashes and compact diagnostics while releasing duplicate raw payloads.
+
+Unchanged content reuses cached parsing and analysis. Reuse verifies the indexed source hash; observations retain their own event IDs. Images are opt-in. Browser parsing suppresses the parser's extra text contextualization so the browser's structured page analysis supplies the summary/topics/category.
+
+Activity records become searchable independently of session closure. Navigation reconstruction follows each collector/browser-instance/tab trail, including interleaved tabs, opener relationships, and repeated visits. Attention intervals refer to the navigation that started them, including SPA routes sharing a document ID. Historical backfill remains labelled separately and cannot fabricate tab navigation.
+
+Sessions are deterministic reductions of ordered raw events, bounded by inactivity, browser-instance changes, explicit boundaries, and event count. Late observations recompute derived sessions while preserving immutable activity. Session documents separate observed logs from generated narratives. Threads use explicit goals/corrections first, then tab groups, cached page meaning, and observed trails; optional LLM refinement remains a proposal with confidence and evidence.
+
+## APIs
+
+The host binds to loopback. Registered extension inspection is available at:
+
+| Route                                           | Purpose                                                                                   |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `GET /health`, `GET /connectors`                | Loaded processors and durable protocol capabilities                                       |
+| `GET /connectors/browser/policy`                | Current exclusion and session policy                                                      |
+| `GET /connectors/browser/status?ids=JOB_ID,...` | Bounded receipt states, attempts, reasons, outcomes, queue age, session retry diagnostics |
+| `POST /connectors/browser/retry`                | Retry failed jobs: `{"ids":["JOB_ID"]}`; session IDs use `browser_session:SESSION_ID`     |
+| `GET /connectors/browser/library`               | Captured passages, sessions and research threads                                          |
+| `POST /connectors/browser/context`              | Correct event context without modifying observations                                      |
+
+Library filters: `query`, `collectorId`, `sessionId`, `threadId`, `goal`, `topic`, `from`, `to`, `domain`, `quality`, `limit` (1–100). Timestamps use milliseconds. Results include URL, passage, heading path, locator, extraction quality and capture origin. Substantive live captures rank above separately fetched evidence. Session/thread filters run before result limits.
+
+Context corrections take `collectorId`, `eventIds` (up to 500), `label`, optional `goal`, and optional `threadId`. Reuse a thread ID to merge assignments; omit it to create a split. Corrections invalidate affected derived preparation and retain raw events.
+
+Other extensions use the typed message bus:
+
+```typescript
+const results = await sdk.messages.request(
+  "browser:query",
+  {
+    goal: "Learn SQLite",
+    from: Date.now() - 7 * 86400000,
+    limit: 20,
+  },
+  { target: "browser" },
+);
+```
+
+## Settings and explicit enrichment
+
+Settings are read fresh from disk at admission/job boundaries. Prepared output records the analysis settings used so recovery remains reproducible.
 
 ```bash
-# View all settings
 bun run settings list browser
-
-# Inspect a specific setting
-bun run settings get browser excludeDomains
-bun run settings describe browser sessionInactivityMinutes
-
-# Update settings
-bun run settings set browser excludeDomains '["x.com", "reddit.com", "facebook.com"]'
-bun run settings set browser sessionInactivityMinutes 45
-
-# Interactive TUI
-bun run settings tui browser
+bun run settings describe browser maxJobsPerRun
+bun run settings set browser enableLlmAnalysis true
+bun run settings set browser enableImageAnalysis false
+bun run settings set browser refineResearchContexts false
 ```
 
-### Key Settings
+New limits: `maxPendingJobs`, `maxPendingBytes`, `maxJobsPerRun`, `maxBatchBytes`, `maxJobAttempts`, `maxSessionsPerRun`, `maxSessionEvents`, `collectionWindowMs`, `maxEmbeddingTexts`, and `maxPublicPagesPerRun`. Their defaults/ranges are defined in `settings.help.json`. Existing privacy, session, namespace, and analysis settings remain available. The current repository keeps text analysis disabled and image/context refinement opt-in.
 
-| Setting | Type | Default | Description |
-|---|---|---|---|
-| `excludeDomains` | `string[]` | Social media platforms | Domains to exclude from ingestion |
-| `excludePatterns` | `string[]` | Sensitive/auth patterns | Wildcard URL patterns to exclude |
-| `excludePrivateBrowsing` | `boolean` | `true` | Ignore private/incognito windows |
-| `sessionInactivityMinutes`| `number` | `30` | Inactivity threshold before starting a new session |
-| `enableLlmAnalysis` | `boolean` | `false` | Generate page/session summaries and topics |
-| `generateSessionSummaries`| `boolean` | `true` | Synthesize browsing sessions into narrative summaries |
-| `extractTopics` | `boolean` | `true` | Extract topic entities for the graph |
-| `chunkSize` | `number` | `1000` | Target character chunk size for vectors |
-| `namespace` | `string` | `"browser"` | Graph namespace |
+To request public catalog enrichment, enable **both** `browser.allowPublicPageEnrichment` and `web-page-parser.allowFetch`, then submit a record `{ "type":"public_page_capture", "recordId":"enrich-1", "url":"https://example.com/docs" }` in a versioned batch. These jobs have count/time/response/redirect limits, fetch no browser credentials, carry `public-fetch` provenance, never create visits, and use a separate source URI so catalog enrichment cannot overwrite captured DOM. They do not provide authenticated fetching, archive lookup, or PDF/site adapters.
 
----
+Bookmarks use collector-scoped IDs and real folder ancestry. Newer sequences win over late snapshots; removal updates current membership and retracts current folder claims. Historical evidence is retained unless `retainRemovedCatalogEvidence=false`. History catalog metadata stays separate from rich captures; optional Chrome visit backfill is documented in the extension README.
 
-## Knowledge Graph Schema
+## Verification
 
-```mermaid
-graph TD
-    WS["WebSession: browser-session://stable-id"]
-    WP1["WebPage: https://github.com/.../sqlite-vec"]
-    WP2["WebPage: https://sqlite.org/fts5.html"]
-    D1["Domain: github.com"]
-    D2["Domain: sqlite.org"]
-    T1["Topic: SQLite"]
-    T2["Topic: Vector Search"]
-    BF["BookmarkFolder: 'Dev Tools'"]
+`bun run test:browser` covers durable admission, atomic overload/migration, immutable replay conflicts, phases, bounded embeddings, lease exclusion, preparation/recovery, graph rollback, late sessions, SPA attention, contexts/corrections, catalog lifecycle, extraction, and outbox/import recovery. `browser-relevance.test.ts` establishes a small deterministic baseline with two interleaved goals and a returning goal across sessions.
 
-    WS -->|CONTAINS_PAGE| WP1
-    WS -->|CONTAINS_PAGE| WP2
-    WP1 -->|NAVIGATED_TO| WP2
-    WP1 -->|BELONGS_TO_DOMAIN| D1
-    WP2 -->|BELONGS_TO_DOMAIN| D2
-    WP1 -->|HAS_TOPIC| T2
-    WP2 -->|HAS_TOPIC| T1
-    WS -->|COVERS_TOPIC| T1
-    WS -->|COVERS_TOPIC| T2
-    WP1 -->|BOOKMARKED_IN| BF
-```
+`bun run test:browser:chrome` runs actual unpacked Chromium against temporary fixtures/database/profile, including service-worker termination and offline/profile recovery. Model endpoints are mocked. `bun run browser:check` verifies generated protocol and content artifacts; `bun run typecheck` checks the repository.
+
+For a local read-only queue view, run `bun run queue:view` and open `http://127.0.0.1:7426`. It reads browser job rows, including failures, without migrating or changing queue state.

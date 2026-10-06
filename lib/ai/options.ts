@@ -13,11 +13,14 @@ export function mergeOptions<T extends AIClientOptions>(
       ),
     ),
   } as T;
-  if (overrides?.baseUrl !== undefined && overrides.endpoint === undefined)
-    delete merged.endpoint;
+  if (overrides?.baseUrl !== undefined) {
+    if (overrides.endpoint === undefined) delete merged.endpoint;
+    if (overrides.batchEndpoint === undefined) delete merged.batchEndpoint;
+  }
   if (overrides?.client !== undefined) {
     for (const key of [
       "endpoint",
+      "batchEndpoint",
       "baseUrl",
       "apiKey",
       "fetchFn",

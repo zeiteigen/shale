@@ -1,0 +1,166 @@
+import type { ActivityEventPayload } from "../../lib/browser-contract";
+import type { BrowserExtensionSettings } from "./settings.types";
+import { embedBounded } from "./embed-bounded";
+import { normalizeUrl } from "./filter";
+import { SourceGraph, type ShaleSDK } from "@shale/sdk";
+import type { PreparedSessionData, SessionVisitRecord } from "./types";
+import { fingerprint } from "./inbox-store";
+
+export function visitSource(visit: SessionVisitRecord) {
+  const collector = visit.collectorId ?? "legacy",
+    id = visit.eventId ?? fingerprint(visit);
+  return {
+    id: `activity:${fingerprint([collector, id])}`,
+    uri: `browser-event://${encodeURIComponent(collector)}/${encodeURIComponent(id)}`,
+  };
+}
+/** Immutable visit evidence is independent of mutable page/session summaries. */
+export function commitActivityGraph(
+  sdk: ShaleSDK,
+  visit: SessionVisitRecord,
+  prepared: PreparedSessionData,
+  embedding: number[],
+) {
+  const identity = visitSource(visit);
+  if (sdk.database.query("SELECT 1 FROM sources WHERE id=?").get(identity.id))
+    return;
+  const observation = visitObservation(sdk, visit);
+  sdk.ingest.sourceAndChunks({
+    source: {
+      ...identity,
+      type: "browser_activity",
+      origin: "browser",
+      title: visit.title,
+      created_at: visit.visitedAt,
+      updated_at: visit.visitedAt,
+    },
+    namespace: prepared.namespace,
+    chunks: [
+      {
+        chunk_index: 0,
+        chunk_type: "verbatim",
+        text_content: observation,
+        embedding,
+      },
+    ],
+  });
+  const graph = new SourceGraph(
+    sdk.database,
+    sdk.graph,
+    identity.id,
+    prepared.namespace,
+    visit.visitedAt,
+  );
+  const page = graph.entity(visit.url, visit.title, "WebPage", visit.url);
+  const event = graph.event("visit", {
+    name: `Visit: ${visit.title}`,
+    kind: "page_visit",
+    occurredFrom: visit.visitedAt,
+    participants: [{ entity: page, role: "page" }],
+  });
+  for (const key of [
+    "tabId",
+    "windowId",
+    "openerTabId",
+    "transitionType",
+  ] as const)
+    if (visit[key] !== undefined)
+      graph.claim(event, key.toUpperCase(), { value: visit[key]! });
+}
+
+export function visitObservation(sdk: ShaleSDK, visit: SessionVisitRecord) {
+  const original = sdk.database
+    .query<{ payload: string }, [string, string, string]>(
+      "SELECT payload FROM browser_activity WHERE extension_id=? AND collector_id=? AND event_id=?",
+    )
+    .get(sdk.extensionId, visit.collectorId ?? "legacy", visit.eventId ?? "");
+  return (
+    original?.payload ??
+    JSON.stringify({
+      eventId: visit.eventId,
+      collectorId: visit.collectorId,
+      url: visit.url,
+      title: visit.title,
+      visitedAt: visit.visitedAt,
+      tabId: visit.tabId,
+      windowId: visit.windowId,
+      openerTabId: visit.openerTabId,
+      transitionType: visit.transitionType,
+      sequence: visit.sequence,
+    })
+  );
+}
+
+/** Activity receipts become indexed independently of idle-session synthesis. */
+export async function finalizeActivity(
+  sdk: ShaleSDK,
+  event: ActivityEventPayload,
+  settings: Partial<BrowserExtensionSettings>,
+  assertOwned: () => void,
+  afterCommit: () => void,
+) {
+  const visit = { ...event, domain: normalizeUrl(event.url).domain };
+  const identity = visitSource(visit);
+  if (sdk.database.query("SELECT 1 FROM sources WHERE id=?").get(identity.id)) {
+    assertOwned();
+    sdk.database.transaction(afterCommit)();
+    return;
+  }
+  const text = visitObservation(sdk, visit),
+    embeddings = await embedBounded(sdk, [text], settings, assertOwned);
+  assertOwned();
+  sdk.database.transaction(() => {
+    const namespace = settings.namespace || sdk.namespace || "browser";
+    sdk.ingest.sourceAndChunks({
+      namespace,
+      source: {
+        ...identity,
+        type: "browser_activity",
+        origin: "browser",
+        title: event.title || event.url,
+        created_at: event.visitedAt,
+        updated_at: event.visitedAt,
+      },
+      chunks: [
+        {
+          chunk_index: 0,
+          chunk_type: "verbatim",
+          text_content: text,
+          embedding: embeddings[0],
+        },
+      ],
+    });
+    const graph = new SourceGraph(
+      sdk.database,
+      sdk.graph,
+      identity.id,
+      namespace,
+      event.visitedAt,
+    );
+    const page = graph.entity(
+      event.url,
+      event.title || event.url,
+      "WebPage",
+      event.url,
+    );
+    const occurrence = graph.event("visit", {
+      name: `${event.kind}: ${event.title || event.url}`,
+      kind:
+        event.kind === "navigation" ? "page_visit" : `browser_${event.kind}`,
+      occurredFrom: event.visitedAt,
+      participants: [{ entity: page, role: "page" }],
+    });
+    for (const key of [
+      "tabId",
+      "windowId",
+      "openerTabId",
+      "documentId",
+      "transitionType",
+      "durationMs",
+      "attended",
+    ] as const)
+      if (event[key] !== undefined)
+        graph.claim(occurrence, key.toUpperCase(), { value: event[key]! });
+    afterCommit();
+  })();
+}

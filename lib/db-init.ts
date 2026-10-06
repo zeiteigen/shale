@@ -1,11 +1,16 @@
 import { Database } from "bun:sqlite";
 import * as sqliteVec from "sqlite-vec";
 
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { ensureCosineIndex } from "./cosine-index";
 import { ensureGraphSchema } from "./graph/schema";
+import { ensureVectorIndex } from "./embedding-storage";
+import { getRootSetting } from "./settings";
 
-const db = new Database(process.env.SHALE_DB_PATH || join(import.meta.dir, "../production.db"));
+const configuredPath = getRootSetting("SHALE_DB_PATH");
+const db = new Database(process.env.SHALE_DB_PATH || (configuredPath
+  ? resolve(import.meta.dir, "..", configuredPath)
+  : join(import.meta.dir, "../production.db")));
 
 db.run("PRAGMA journal_mode = WAL;");
 db.run("PRAGMA foreign_keys = ON;");
@@ -52,11 +57,7 @@ try {
 
 // Initialize the Vector Embeddings virtual table
 // Note: Virtual tables do not use 'STRICT' mode
-db.run(`
-  CREATE VIRTUAL TABLE IF NOT EXISTS vector_index USING vec0(
-    embedding float[4096] distance_metric=cosine
-  );
-`);
+ensureVectorIndex(db);
 
 ensureCosineIndex(db);
 

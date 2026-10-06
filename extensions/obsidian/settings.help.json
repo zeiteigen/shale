@@ -18,7 +18,7 @@
     },
     "ignoredDirectories": {
       "type": "string[]",
-      "description": "Additional folder names to ignore during note/image scanning (e.g. templates, archive). Hidden folders (.obsidian, .git, .trash) are always ignored.",
+      "description": "Additional folder names to ignore during note/image/document scanning (e.g. templates, archive). Hidden folders (.obsidian, .git, .trash) are always ignored.",
       "default": [],
       "examples": [["templates", "archive", "daily"]]
     },
@@ -39,6 +39,23 @@
       "description": "Recognized image file extensions for image discovery.",
       "default": ["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "tiff"],
       "examples": [["png", "jpg", "jpeg", "webp"]]
+    },
+    "includeDocuments": {
+      "type": "boolean",
+      "description": "Discover and process document attachments in every configured vault through process-document.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "documentExtensions": {
+      "type": "string[]",
+      "description": "Document attachment extensions to discover. Markdown always uses the note pipeline. Formats must also be enabled in process-document.",
+      "default": ["pdf", "docx", "pptx", "xlsx", "odt", "odp", "ods", "rtf", "txt", "csv", "html", "epub"]
+    },
+    "documentRequestTimeoutMs": {
+      "type": "number",
+      "description": "Whole message deadline per document, including worker parsing and optional chat summaries, in milliseconds.",
+      "default": 180000,
+      "range": { "min": 1000, "max": 900000 }
     },
     "atomicNoteCharLimit": {
       "type": "number",

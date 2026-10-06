@@ -278,8 +278,12 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
     it("processes vault notes, graph edges, and watermarks", async () => {
       const db = createTestDb();
       const mockFetch: import("../lib/ai").FetchFn = async (_url, init) => {
-        if (!JSON.parse(String(init?.body)).input)
-          return Response.json({ choices: [{ message: { content: "" } }] });
+        const body = JSON.parse(String(init?.body));
+        if (!body.input) {
+          const vision = body.messages.some((message: any) => Array.isArray(message.content)
+            && message.content.some((part: any) => part.type === "image_url"));
+          return Response.json({ choices: [{ message: { content: vision ? "A diagram of connected components." : "" } }] });
+        }
         return new Response(
           JSON.stringify({
             object: "list",

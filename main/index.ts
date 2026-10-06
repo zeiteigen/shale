@@ -1,6 +1,8 @@
+import { getRootSetting } from "../lib/settings";
 import { dirname, join } from "node:path";
 import ingestQueue from "./ingest-queue";
 import "./ingest-router";
+import { connectorCapabilities, handleConnectorRequest } from "./ingest-status";
 import { handleIngestRequest } from "./ingest-http";
 import {
   crons,
@@ -12,7 +14,10 @@ import {
 import { createExtensionSDK, sdkStorage, findNearestManifest, type ShaleSDK } from "../sdk";
 import { hasQueuedCheckpoints } from "../lib/db";
 import type { CronExtension } from "../lib/extension";
-import { startCli } from "./cli";
+import { startCli, handleCliCommand } from "./cli";
+import { startWebServer } from "./web-server";
+import { WebLogs } from "./web-logs";
+import { trackCronRun } from "./cron-runs";
 
 export {
   startCli,
@@ -127,7 +132,11 @@ export async function wait_for_checkpoint_script(
   await recoveryPromise;
 }
 
-export async function runCron(cron: CronExtension, sdkOverride?: ShaleSDK) {
+export function runCron(cron: CronExtension, sdkOverride?: ShaleSDK) {
+  return trackCronRun(cron, () => executeCron(cron, sdkOverride));
+}
+
+async function executeCron(cron: CronExtension, sdkOverride?: ShaleSDK) {
   const extensionId = cron.extensionId || "default";
   await wait_for_checkpoint_script(extensionId, cron, sdkOverride);
 
@@ -205,23 +214,33 @@ for (const cron of crons) {
 }
 
 if (import.meta.main) {
+  const logs = new WebLogs();
+  const restoreLogs = logs.captureConsole();
+  let hostServer: ReturnType<typeof Bun.serve>;
+  const shutdown = () => {
+    console.log("[host] Shutting down Shale.");
+    restoreLogs();
+    hostServer?.stop(true);
+    process.exit(0);
+  };
+  const webContext = {
+    rootDir: join(import.meta.dir, ".."), crons, extensions: extensionNamespaces,
+    runCron, runAllCrons, logs, shutdown,
+    port: () => hostServer?.port ?? (Number(getRootSetting("PORT")) || 7425),
+    command: (line: string) => handleCliCommand(line, { isTTY: false }),
+  };
   try {
-    Bun.serve({
-      hostname: "127.0.0.1",
-      port: Number(process.env.PORT) || 7425,
-      routes: {
-        "/health": () => Response.json({ status: "ok", service: "shale" }),
-        "/ingest": (req) => handleIngestRequest(
-          req,
-          subscribe_ingest.map((hook) => hook.reciever_name),
-          (item) => ingestQueue.push(item),
-        ),
-      },
-    });
+    hostServer = startWebServer(webContext, {
+      health: () => Response.json({ status: "ok", ...connectorCapabilities(subscribe_ingest) }),
+      connectors: () => Response.json(connectorCapabilities(subscribe_ingest)),
+      connector: req => handleConnectorRequest(req, subscribe_ingest),
+      ingest: req => handleIngestRequest(req, subscribe_ingest, item => ingestQueue.push(item)),
+    }, Number(getRootSetting("PORT")) || 7425);
+    console.log(`[host] Shale web interface: http://localhost:${hostServer.port}`);
   } catch (err: any) {
     if (err.code === "EADDRINUSE") {
       console.warn(
-        `[server] Port ${process.env.PORT || 7425} already in use; skipping HTTP server initialization.`,
+        `[server] Port ${getRootSetting("PORT") || 7425} already in use; skipping HTTP server initialization.`,
       );
     } else {
       throw err;
@@ -254,12 +273,12 @@ if (import.meta.main) {
     process.exit(0);
   }
 
-  // Start the interactive CLI unless --no-cli is provided
-  if (!noCli) {
+  // The browser replaces terminal interaction by default; --cli is a compatibility opt-in.
+  if (argv.includes("--cli") && !noCli) {
     startCli();
   }
 
-  // Run startup crons in background without blocking CLI prompt
+  // Run startup crons without blocking the web interface
   runStartupCrons().catch((err) => {
     console.error("[cron] Error running startup crons:", err);
   });

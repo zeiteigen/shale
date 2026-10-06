@@ -25,5 +25,19 @@
   "maxContentChars": 3000,
   "chunkSize": 1000,
   "llmModel": null,
-  "namespace": "browser"
+  "namespace": "browser",
+  "enableImageAnalysis": false,
+  "refineResearchContexts": false,
+  "retainRemovedCatalogEvidence": true,
+  "maxPendingJobs": 5000,
+  "maxPendingBytes": 50000000,
+  "maxJobsPerRun": 20,
+  "maxBatchBytes": 1000000,
+  "maxJobAttempts": 5,
+  "maxSessionsPerRun": 3,
+  "maxSessionEvents": 200,
+  "collectionWindowMs": 3000,
+  "maxEmbeddingTexts": 64,
+  "allowPublicPageEnrichment": false,
+  "maxPublicPagesPerRun": 2
 }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shale Browser Ingestor",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Ingests active tabs, browsing history, and bookmarks into your local Shale knowledge graph.",
   "permissions": [
     "tabs",
@@ -10,7 +10,10 @@
     "bookmarks",
     "storage",
     "alarms",
-    "scripting"
+    "scripting",
+    "webNavigation",
+    "tabGroups",
+    "idle"
   ],
   "host_permissions": [
     "http://*/*",
@@ -33,5 +36,6 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "minimum_chrome_version": "106"
 }

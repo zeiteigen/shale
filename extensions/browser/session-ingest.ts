@@ -1,5 +1,18 @@
+import { fingerprint } from "./inbox-store";
+import { embedBounded } from "./embed-bounded";
+import { ensureBrowserSchema } from "./storage-schema";
+import { commitContextGraph } from "./context-graph";
+import {
+  commitActivityGraph,
+  visitSource,
+  visitObservation,
+} from "./activity-graph";
 import type { ShaleSDK } from "@shale/sdk";
-import type { PreparedSessionData, SessionVisitRecord, IngestedSessionResult } from "./types";
+import type {
+  PreparedSessionData,
+  SessionVisitRecord,
+  IngestedSessionResult,
+} from "./types";
 import type { BrowserExtensionSettings } from "./settings.types";
 import { synthesizeSessionWithLLM } from "./llm-enricher";
 import { sanitizeTopics, sessionEntityName } from "./identity";
@@ -16,7 +29,12 @@ export async function prepareSession(
   endTime: number,
   visits: SessionVisitRecord[],
   settings: Partial<BrowserExtensionSettings>,
+  observed?: Pick<
+    PreparedSessionData,
+    "collectorId" | "activityHash" | "boundaryReason"
+  >,
 ): Promise<PreparedSessionData> {
+  ensureBrowserSchema(sdk.database);
   const namespace = settings.namespace || sdk.namespace || "browser";
   const checkpointId = `browser_session:${sessionId}`;
 
@@ -28,6 +46,8 @@ export async function prepareSession(
   sdk.checkpoint.save(
     {
       type: "browser_session_analysis",
+      ...observed,
+      settings,
       sessionId,
       startTime,
       endTime,
@@ -35,10 +55,16 @@ export async function prepareSession(
       synthesis,
       namespace,
     },
-    { id: checkpointId, key: checkpointId },
+    {
+      id: checkpointId,
+      key: checkpointId,
+      status: observed ? "preparing" : "queued",
+    },
   );
 
   return {
+    ...observed,
+    settings,
     sessionId,
     startTime,
     endTime,
@@ -57,6 +83,7 @@ export async function finalizeSession(
   sdk: ShaleSDK,
   prepared: PreparedSessionData,
   settings: Partial<BrowserExtensionSettings>,
+  assertOwned: () => void = () => {},
 ): Promise<IngestedSessionResult> {
   const {
     sessionId,
@@ -90,22 +117,128 @@ export async function finalizeSession(
     `Summary: ${synthesis.summary}`,
     `Topics: ${topics.join(", ")}`,
     `Dominant Domains: ${dominantDomains.join(", ")}`,
+    ...(prepared.threads ?? []).map(
+      (thread) =>
+        `Thread: ${thread.label}${thread.goal ? `\nGoal: ${thread.goal}` : ""}\nTopics: ${thread.topics.join(", ")}`,
+    ),
     `Pages Visited (${visits.length}):`,
     ...visits.map((v, i) => `${i + 1}. [${v.domain}] ${v.title} (${v.url})`),
   ].join("\n");
 
   const observationText = sessionObservationText(prepared);
-  const embeddings = await sdk.embed([sessionText,observationText]);
-  const {sourceRes,edgesCount} = sdk.database.transaction(() => {
-    const sourceRes = sdk.ingest.sourceAndChunks({namespace,
-      source:{id:`session:${sessionId}`,type:"web_session",uri:sessionEntity,origin:"browser",
-        title:synthesis.sessionTitle,created_at:startTime,updated_at:endTime},
-      chunks:[{chunk_index:0,chunk_type:"synthetic",text_content:sessionText,embedding:embeddings[0]},
-        {chunk_index:1,chunk_type:"verbatim",text_content:observationText,embedding:embeddings[1]}],
+  const unseen = prepared.collectorId
+    ? visits.filter(
+        (v) =>
+          !sdk.database
+            .query("SELECT 1 FROM sources WHERE id=?")
+            .get(visitSource(v).id),
+      )
+    : [];
+  const embeddings = await embedBounded(
+    sdk,
+    [
+      sessionText,
+      observationText,
+      ...unseen.map((v) => visitObservation(sdk, v)),
+    ],
+    settings,
+    assertOwned,
+  );
+  assertOwned();
+  const { sourceRes, edgesCount } = sdk.database.transaction(() => {
+    if (prepared.collectorId) {
+      const current = sdk.database
+        .query<{ prepared: string | null }, [string, string]>(
+          "SELECT prepared FROM browser_sessions WHERE extension_id=? AND session_id=?",
+        )
+        .get(sdk.extensionId, sessionId);
+      if (
+        !current?.prepared ||
+        fingerprint({ ...JSON.parse(current.prepared), type: undefined }) !==
+          fingerprint({ ...prepared, type: undefined })
+      )
+        throw new Error(
+          "Session preparation was superseded; recompute context",
+        );
+    }
+
+    const sourceRes = sdk.ingest.sourceAndChunks({
+      namespace,
+      source: {
+        id: `session:${sessionId}`,
+        type: "web_session",
+        uri: sessionEntity,
+        origin: "browser",
+        title: synthesis.sessionTitle,
+        created_at: startTime,
+        updated_at: endTime,
+      },
+      chunks: [
+        {
+          chunk_index: 0,
+          chunk_type: "synthetic",
+          text_content: sessionText,
+          embedding: embeddings[0],
+        },
+        {
+          chunk_index: 1,
+          chunk_type: "verbatim",
+          text_content: observationText,
+          embedding: embeddings[1],
+        },
+      ],
     });
-    const graph = commitSessionGraph(sdk,sourceRes.sourceId,prepared,topics,dominantDomains);
+    const graph = commitSessionGraph(
+      sdk,
+      sourceRes.sourceId,
+      prepared,
+      topics,
+      dominantDomains,
+    );
+    if (prepared.collectorId) {
+      for (const [index, visit] of unseen.entries())
+        commitActivityGraph(sdk, visit, prepared, embeddings[index + 2]!);
+      // Late observations can change a session's first event and therefore its identity.
+      // Replace overlapping derived sessions; immutable event sources remain untouched.
+      const eventIds = visits.map((v) => v.eventId).filter(Boolean);
+      if (eventIds.length) {
+        const obsolete = sdk.database
+          .query<{ session_id: string }, any[]>(
+            `SELECT DISTINCT session_id FROM browser_context_members
+        WHERE extension_id=? AND collector_id=? AND session_id!=? AND event_id IN (${eventIds.map(() => "?").join(",")})`,
+          )
+          .all(sdk.extensionId, prepared.collectorId, sessionId, ...eventIds);
+        for (const row of obsolete) {
+          sdk.database
+            .query("DELETE FROM sources WHERE id=?")
+            .run(`session:${row.session_id}`);
+          sdk.database
+            .query(
+              "DELETE FROM browser_context_members WHERE extension_id=? AND session_id=?",
+            )
+            .run(sdk.extensionId, row.session_id);
+          sdk.database
+            .query(
+              "DELETE FROM browser_sessions WHERE extension_id=? AND session_id=?",
+            )
+            .run(sdk.extensionId, row.session_id);
+          sdk.checkpoint.delete(`browser_session:${row.session_id}`);
+        }
+      }
+      commitContextGraph(sdk, sourceRes.sourceId, prepared);
+      sdk.database
+        .query(
+          "UPDATE browser_sessions SET indexed_hash=?,prepared=NULL,error=NULL,attempts=0,next_attempt_at=0 WHERE extension_id=? AND session_id=? AND activity_hash=?",
+        )
+        .run(
+          prepared.activityHash!,
+          sdk.extensionId,
+          sessionId,
+          prepared.activityHash!,
+        );
+    }
     sdk.checkpoint.delete(checkpointId);
-    return {sourceRes,edgesCount:graph.edgesCount};
+    return { sourceRes, edgesCount: graph.edgesCount };
   })();
 
   return {
@@ -118,4 +251,3 @@ export async function finalizeSession(
     edgesCount,
   };
 }
-

@@ -10,6 +10,15 @@ export async function run(sdkOverride?: ShaleSDK) {
   if (!(sdk.settings.get<boolean>('enabled') ?? true)) return {committed:0};
   const lease=acquireTaskLease(sdk.database,sdk.extensionId,'knowledge-extractor-lease');
   if (!lease) return {committed:0,busy:true};
+  let leaseError: unknown;
+  const renew = () => {
+    if (leaseError) throw leaseError;
+    lease.renew();
+  };
+  // Dedicated Batch API jobs can outlive the lease's TTL while awaiting results.
+  const heartbeat = setInterval(() => {
+    try { lease.renew(); } catch (error) { leaseError = error; }
+  }, 30_000);
   try {
     const maxSources=sdk.settings.get<number>('maxSourcesPerRun') ?? 5;
     const maxChars=sdk.settings.get<number>('maxContentChars') ?? 12000;
@@ -22,10 +31,10 @@ export async function run(sdkOverride?: ShaleSDK) {
       WHERE NOT EXISTS(SELECT 1 FROM extension_state p WHERE p.extension_id=? AND p.state_key='extracted:'||r.id)
       ORDER BY s.updated_at,s.id LIMIT ?`).all(sdk.extensionId,maxSources);
     // Phase 1: complete every chat request and persist outputs. No embeddings are requested.
-    for (const source of sources) {
-      lease.renew();
+    await sdk.models.mapChat(sources, async (source) => {
+      renew();
       const id=`knowledge-extraction:${source.id}`;
-      if (sdk.checkpoint.getQueue().some(cp=>cp.id===id)) continue;
+      if (sdk.checkpoint.getQueue().some(cp=>cp.id===id)) return;
       const stored=sdk.database.query<{chunk_index:number;text_content:string}, [number,number,string]>(
         "SELECT chunk_index,substr(text_content,1,?) AS text_content FROM graph_revision_chunks WHERE revision_id=? AND chunk_type='verbatim' AND ? != 'image' ORDER BY chunk_index").iterate(maxChars,source.id,source.type);
       let remaining=maxChars;
@@ -38,17 +47,17 @@ export async function run(sdkOverride?: ShaleSDK) {
       const raw=chunks.length ? await sdk.queryLLM(buildPrompt(source.title,chunks),{
         model,responseFormat:{type:'json_object'},temperature:0.1,timeoutMs:120000,
       }) : '{"entities":[],"claims":[],"events":[]}';
-      lease.renew();
+      renew();
       const extraction=parseExtraction(raw);
       const data:ExtractionCheckpoint={type:'knowledge-extraction',revisionId:source.id,sourceId:source.source_id,namespace,model,extraction,chunks};
       for (const claim of extraction.claims) groundEvidence(data,claim.evidence);
       for (const event of extraction.events) groundEvidence(data,event.evidence);
       sdk.saveCheckpoint(data,{id,key:id});
-    }
+    });
     // Phase 2: graph ingestion and progress are transactional; existing chunk embeddings are reused.
-    lease.renew();
+    renew();
     return {committed:commitExtractions(sdk)};
-  } finally {lease.release();}
+  } finally {clearInterval(heartbeat);lease.release();}
 }
 
 export function buildPrompt(title:string,chunks:Array<{chunk_index:number;text_content:string}>) {
