@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
 import type { LLMOptions, LLMQueryInput, LLMResponse } from "./types";
 import { createOpenAIClient } from "./client";
-import { resolveChatEndpoint, resolveTimeout } from "./config";
+import { resolveChatEndpoint, resolveTimeout, resolveModelId } from "./config";
 import { normalizeImageContentPart } from "./images";
 import { modelRequest } from "./request";
 import { normalizeChatOptions } from "./options";
@@ -9,6 +9,7 @@ import { resolveBatchMode, resolveBatchEndpoint, resolveConcurrency } from "./ba
 import { limitModelRequest } from "./request-limit";
 import { dispatchBatchRequest } from "./batch-dispatch";
 import { getRootSetting } from "../settings";
+import { TruncatedChatCompletionError } from "./chat-errors";
 
 /**
  * Queries an OpenAI-compatible chat completion model with support for text and images.
@@ -22,10 +23,7 @@ export async function fetchOpenAIChatCompletion(
   const endpoint = batchAPI ? resolveBatchEndpoint("chat", options) : resolveChatEndpoint(options);
   const transportOptions = { ...options, endpoint };
   const client = createOpenAIClient(transportOptions, "chat");
-  const model =
-    options?.model ??
-    getRootSetting("OPENAI_CHAT_MODEL") ??
-    "gpt-4o-mini";
+  const model = resolveModelId("chat", options);
 
   const prompt = typeof input === "string" ? input : input.prompt;
   const inputImages =
@@ -147,6 +145,8 @@ export async function fetchOpenAIChatCompletion(
   const rawContent = message?.content || "";
   const reasoningContent =
     message?.reasoning_content || (message as any)?.reasoning || undefined;
+  if (choice?.finish_reason === "length")
+    throw new TruncatedChatCompletionError(endpoint, rawContent);
   const content = rawContent || reasoningContent || "";
 
   return {

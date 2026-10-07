@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { mergeOptions, normalizeChatOptions } from "../lib/ai/options";
+import { resolveModelId } from "../lib/ai/config";
 import {
   createOpenAIClient,
   queryLLM as coreQueryLLM,
@@ -32,7 +33,8 @@ export class LLMClient {
   }
 
   options(overrides?: LLMOptions): LLMOptions {
-    return mergeOptions(this.defaultOptions, normalizeChatOptions(overrides));
+    const options = mergeOptions(this.defaultOptions, normalizeChatOptions(overrides));
+    return { ...options, model: resolveModelId("chat", options) };
   }
 
   async query(

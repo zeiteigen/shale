@@ -1,6 +1,9 @@
 import type { ShaleSDK } from "../sdk";
 import { sourceIdFromEntity, graphIdentityFromSourceUri } from "../lib/source-identity";
 import type { ClaimFilter, ClaimStatus } from "../sdk/graph/types";
+import { sourceMap } from "./source-map";
+import { graphEdges } from "./graph-edges";
+import { recentChunksBySource } from './recent-chunks';
 
 export interface GraphData {
   nodes: Array<{
@@ -22,17 +25,26 @@ export interface GraphData {
 }
 
 export function getGraphData(sdk: ShaleSDK, filter: ClaimFilter = {}): GraphData {
+  return sdk.database.transaction(() => graphSnapshot(sdk, filter))();
+}
+
+function graphSnapshot(sdk: ShaleSDK, filter: ClaimFilter): GraphData {
   const db = sdk.database;
-  const entities = db.query<{ id: number; namespace: string; name: string; type: string; stableId:string;canonicalId:number|null }, []>(
-    "SELECT id,namespace,coalesce(display_name,name) AS name,type,stable_id AS stableId,canonical_id AS canonicalId FROM entities ORDER BY id ASC",
+  const entities = db.query<{ id: number; namespace: string; name: string; identityName: string; type: string; stableId:string;canonicalId:number|null }, []>(
+    "SELECT id,namespace,name AS identityName,coalesce(display_name,name) AS name,type,stable_id AS stableId,canonical_id AS canonicalId FROM entities ORDER BY id ASC",
   ).all();
-  const claims=sdk.graph.claims.list({...filter,statuses:filter.statuses ?? ['accepted','proposed','disputed'],polarity:1,limit:1000});
+  const { claims, truncated } = graphEdges(sdk, filter);
   const edges=claims.filter(c=>c.object!==undefined).map(c=>({id:c.id,source_entity_id:c.subject,
     target_entity_id:c.object!,relation:c.predicate,weight:c.strength ?? 1,status:c.status,context:c.context}));
   const sources = db.query<{ id: string; uri: string; title: string }, []>(
     "SELECT id, uri, title FROM sources",
   ).all();
   const sourceById = new Map(sources.map((source) => [source.id, source]));
+  const sourceByEntity = sourceMap(db, sources);
+  const recentChunks=recentChunksBySource(db);
+  const chunkCounts = new Map(db.query<{source_id: string; count: number}, []>(
+    "SELECT source_id,count(*) AS count FROM chunks GROUP BY source_id",
+  ).all().map(row => [row.source_id, row.count]));
   const sourceByTitle = new Map<string, (typeof sources)[number]>();
   const ambiguousTitles = new Set<string>();
   for (const source of sources) {
@@ -59,17 +71,19 @@ export function getGraphData(sdk: ShaleSDK, filter: ClaimFilter = {}): GraphData
 
   return {
     nodes: entities.map((entity) => {
-      const sourceId = sourceIdFromEntity(entity.name);
-      const source = sourceId ? sourceById.get(sourceId)
-        : sourceByUri.get(entity.name) ?? sourceByTitle.get(entity.name.toLowerCase());
-      const chunks = source ? sdk.context.getRecentChunks(source.id, 5) : [];
+      const { identityName, ...display } = entity;
+      const sourceId = sourceIdFromEntity(identityName);
+      const source = sourceByEntity.get(entity.id) ?? (sourceId ? sourceById.get(sourceId)
+        : sourceByUri.get(identityName) ?? (!identityName.startsWith("entity:")
+          ? sourceByTitle.get(entity.name.toLowerCase()) : undefined));
+      const chunks = source ? recentChunks.get(source.id) ?? [] : [];
       return {
-        ...entity,
+        ...display,
         name: sourceId && source ? source.title : entity.name,
         degree: degree.get(entity.id) || 0,
         sourceUri: source?.uri,
         sourceTitle: source?.title,
-        chunksCount: chunks.length,
+        chunksCount: source ? chunkCounts.get(source.id) ?? 0 : 0,
         chunks,
       };
     }),
@@ -87,6 +101,6 @@ export function getGraphData(sdk: ShaleSDK, filter: ClaimFilter = {}): GraphData
       totalSources: db.query<{ count: number }, []>("SELECT count(*) AS count FROM sources").get()?.count || 0,
       totalChunks: db.query<{ count: number }, []>("SELECT count(*) AS count FROM chunks").get()?.count || 0,
     },
-    truncated:claims.length===1000,
+    truncated,
   };
 }

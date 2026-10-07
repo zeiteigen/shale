@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
-import { createExtensionSDK, type ChunkSearchResult } from "../sdk";
+import { createExtensionSDK } from "../sdk";
 import { getGraphData as buildGraphData } from "./graph-data";
-import { sourceEntityName, graphIdentityFromSourceUri } from "../lib/source-identity";
+import { enrichResults } from "./search-results";
 import { knowledgeApi } from "./knowledge-api";
 import { rejectNonLocalRequest } from "../main/local-request";
 import type { ClaimFilter } from "../sdk/graph/types";
@@ -19,25 +19,6 @@ function json(data: unknown, status = 200) {
   return Response.json(data, {
     status,
   });
-}
-
-function enrichResults(results: ChunkSearchResult[], db = sdk.database) {
-  const entityBySource = db.query<{ id: number }, { $uri: string; $title: string; $identity: string }>(
-    `SELECT id FROM entities WHERE name = $identity OR name = $uri
-      OR (lower(name) = lower($title) AND (SELECT count(*) FROM sources WHERE lower(title) = lower($title)) = 1)
-      ORDER BY name = $identity DESC, name = $uri DESC LIMIT 1`,
-  );
-  return results.map((result) => ({
-    ...result,
-    entity_id: result.source_title
-      ? entityBySource.get({
-          $identity: sourceEntityName(result.source_id),
-          $uri: graphIdentityFromSourceUri(result.source_uri ?? ""),
-          $title: result.source_title,
-        })?.id
-      : undefined,
-    preview: result.preview || result.text_content.slice(0, 280),
-  }));
 }
 
 async function search(req: Request, mode: "hybrid" | "vector" | "bm25", sdk = createExtensionSDK("visualizer")) {

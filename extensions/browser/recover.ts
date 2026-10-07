@@ -11,6 +11,7 @@ import type { PreparedPageData } from "./types";
 export interface RecoverResult {
   recoveredPages: number;
   recoveredSessions: number;
+  busy?: boolean;
 }
 
 /**
@@ -172,7 +173,10 @@ export async function run(
     "browser-worker-lease",
     120000,
   );
-  if (!lease) throw new Error("Browser worker already owns recovery");
+  if (!lease) {
+    sdk.logger.info("[Recovery] Browser worker already owns the lease; retaining checkpoints for its completion.");
+    return { recoveredPages: 0, recoveredSessions: 0, busy: true };
+  }
   let lost: unknown;
   const renewal = setInterval(() => {
     try {

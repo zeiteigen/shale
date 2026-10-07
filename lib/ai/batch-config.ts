@@ -45,8 +45,10 @@ export function resolveBatchEndpoint(role: ModelRole, options?: AIClientOptions)
     ? getRootSetting("OPENAI_CHAT_BATCH_ENDPOINT") : getRootSetting("EMBEDDING_BATCH_ENDPOINT")) : undefined);
   const url = new URL(configured ?? (role === "chat" ? resolveChatEndpoint(options) : resolveEmbeddingEndpoint(options)));
   if (!configured) url.pathname = url.pathname.replace(/\/(chat\/completions|embeddings)\/?$/, "/batches");
-  if (!["http:", "https:"].includes(url.protocol) || !url.pathname.replace(/\/$/, "").endsWith("/batches"))
-    throw new Error("Batch endpoints must be HTTP(S) URLs ending in /batches");
+  const path = url.pathname.replace(/\/$/, "");
+  if (!["http:", "https:"].includes(url.protocol) ||
+      !(path.endsWith("/batches") || (role === "chat" && path.endsWith("/chat/completions/batch"))))
+    throw new Error("Batch endpoints must be HTTP(S) URLs ending in /batches or, for chat, /chat/completions/batch");
   url.pathname = url.pathname.replace(/\/$/, "");
   return url.toString();
 }

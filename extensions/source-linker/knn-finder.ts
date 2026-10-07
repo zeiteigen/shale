@@ -56,6 +56,7 @@ export async function findKnnCandidatePairs(
     }
   >();
 
+  let searches = 0, sourcesScanned = 0;
   for (const source of targetSources) {
     // Retrieve chunks for the target source
     const chunks = sdk.context.getRecentChunks(source.id, 50);
@@ -64,6 +65,8 @@ export async function findKnnCandidatePairs(
     }
 
     for (const chunk of chunks) {
+      // SQLite vector searches resolve synchronously; yield so host I/O and leases remain responsive.
+      if (++searches % 8 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0));
       try {
         const neighbors = await sdk.search.vector({
           chunkId: chunk.id,
@@ -121,6 +124,8 @@ export async function findKnnCandidatePairs(
         );
       }
     }
+    if (++sourcesScanned % 50 === 0)
+      sdk.logger.log(`[KNN] Scanned ${sourcesScanned}/${targetSources.length} sources (${searches} vector searches).`);
   }
 
   // Convert map to array, sort descending by similarity score, and limit

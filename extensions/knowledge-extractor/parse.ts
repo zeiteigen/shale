@@ -16,9 +16,15 @@ export function parseExtraction(raw: string): Extraction {
     if (!Array.isArray(items) || !items.length || items.length>30 || items.some(item=>!Number.isInteger(item.chunkIndex) || typeof item.quote!=='string' || !item.quote))
       throw new Error('Invalid extracted evidence');
   };
-  for (const claim of parsed.claims) {
+  for (const [index,claim] of parsed.claims.entries()) {
+    if (!keys.has(claim.subject)) throw new Error(`Invalid extracted claim ${index}: subject ${JSON.stringify(claim.subject)} is not a declared entity key`);
+    if (claim.object!==undefined && claim.value!==undefined)
+      throw new Error(`Invalid extracted claim ${index}: both object and value are present; remove the unused field`);
+    if (claim.object!==undefined && !keys.has(claim.object))
+      throw new Error(`Invalid extracted claim ${index}: object ${JSON.stringify(claim.object)} is not a declared entity key; text literals belong in value`);
     if (!keys.has(claim.subject) || typeof claim.predicate!=='string' || !claim.predicate.trim() ||
-      ((claim.object!==undefined)===(claim.value!==undefined)) || (claim.object!==undefined && !keys.has(claim.object))) throw new Error('Invalid extracted claim');
+      ((claim.object!==undefined)===(claim.value!==undefined)) || (claim.object!==undefined && !keys.has(claim.object)))
+      throw new Error(`Invalid extracted claim ${index}: use declared entity keys, a nonempty predicate, and exactly one object or value (omit the unused field)`);
     evidence(claim.evidence);
     if (claim.value!==undefined) validateValue(claim.value);
     validateValue(claim.qualifiers ?? {});

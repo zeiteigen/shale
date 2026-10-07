@@ -3,6 +3,9 @@ import type { ProcessFileOptions, ProcessFileResponse, ProcessFilesBatchItem } f
 import { documentFormat, documentIdentity, documentPath, canProcessDocument } from "./document-format";
 import { extractDocument } from "./extract-document";
 import { positiveInteger, type ProcessDocumentSettings } from "./settings.types";
+import type { OcrPage } from "./extraction.types";
+import { refinePdfPages } from "./pdf-vision";
+import { documentKnowledge } from "./document-knowledge";
 
 export async function parseDocumentFile(
   filePath: string,
@@ -14,6 +17,11 @@ export async function parseDocumentFile(
   options.signal?.throwIfAborted();
   const path = documentPath(filePath);
   const format = documentFormat(filePath, options);
+  const ocrLanguage = settings.ocrLanguage ?? "eng";
+  if (!/^[a-z]{3}(\+[a-z]{3})*$/.test(ocrLanguage)) throw new Error("OCR language must use Tesseract language codes, such as eng or eng+fra");
+  const visionConfidence = settings.pdfVisionMinConfidence ?? 60;
+  if (!Number.isFinite(visionConfidence) || visionConfidence < 0 || visionConfidence > 100)
+    throw new Error("PDF vision confidence threshold must be between 0 and 100");
   if (!format || !canProcessDocument(filePath, settings.supportedExtensions, options)) {
     throw new Error("Unsupported or disabled document format. Legacy .doc, .ppt, and .xls files must be converted to .docx, .pptx, and .xlsx.");
   }
@@ -22,8 +30,25 @@ export async function parseDocumentFile(
     maxFileBytes: positiveInteger(settings.maxFileSizeMB, 50) * 1024 * 1024,
     chunkSize: positiveInteger(settings.chunkSize, 1800),
     includeNotes: settings.includeNotes !== false,
-  }, positiveInteger(options.timeoutMs, positiveInteger(settings.parserTimeoutMs, 60000)), options.signal);
+    enablePdfOcr: settings.enablePdfOcr === true, ocrLanguage,
+  }, positiveInteger(options.timeoutMs, positiveInteger(settings.parserTimeoutMs, 60000)), options.signal, {
+    load(key, pages) {
+      const cached: Record<number, OcrPage> = {};
+      for (let page = 1; page <= pages; page++) {
+        const text = sdk.state.get(`${key}:${page}`);
+        if (text !== null) cached[page] = JSON.parse(text);
+      }
+      return cached;
+    },
+    save(key, page, result) {
+      sdk.state.set(`${key}:${page}`, JSON.stringify(result));
+      if (page === 1 || page % 10 === 0) sdk.logger.info(`[OCR] ${filePath}: transcribed page ${page}`);
+    },
+  });
   options.signal?.throwIfAborted();
+  if (format === "pdf" && settings.enablePdfVision)
+    await refinePdfPages(extracted, path, sdk, positiveInteger(settings.chunkSize, 1800),
+      visionConfidence, options.signal);
   if (!extracted.text || !extracted.chunks.length) {
     throw new Error("No extractable text found. Scanned PDFs and image-only documents require OCR before processing.");
   }
@@ -34,14 +59,16 @@ export async function parseDocumentFile(
     success: true, filePath, fileType: "document", title, uri: identity.uri,
     description: typeof extracted.metadata.subject === "string" ? extracted.metadata.subject : undefined,
     chunks: extracted.chunks.map((chunk, chunk_index) => ({
-      chunk_index, chunk_type: "verbatim", text_content: chunk.text,
-      metadata: { ...chunk.metadata, sourceType: format, format, origin: "document-parser" },
+      chunk_index, chunk_type: chunk.metadata.extractionMethod === "vision-transcription" ? "synthetic" : "verbatim", text_content: chunk.text,
+      metadata: { ...chunk.metadata, sourceType: format, format,
+        origin: chunk.metadata.extractionMethod === "vision-transcription" ? "vision-transcription" : "document-parser" },
       embedding: chunk_index === 0 ? options.precomputedEmbedding : undefined,
     })),
     entities: [{ name: title, type: settings.defaultEntityType ?? "Document", namespace: options.namespace ?? sdk.namespace, identityKey: identity.uri }],
     edges: [],
     metadata: { ...extracted.metadata, format, updatedAt: extracted.updatedAt, assetHash: extracted.assetHash, warnings: extracted.warnings },
   };
+  result.knowledge = documentKnowledge(result.chunks);
   if (settings.summarizeDocuments) {
     const maxChars = positiveInteger(settings.summaryMaxChars, 16000);
     try {
@@ -55,7 +82,7 @@ export async function parseDocumentFile(
         result.description = summary;
         result.chunks.push({ chunk_index: chunkIndex, chunk_type: "synthetic", text_content: summary,
           metadata: { format, origin: "document-summary", model: sdk.llm.options().model, inputTruncated: extracted.text.length > maxChars } });
-        result.knowledge = [{ predicate: "DOCUMENT_SUMMARY", value: summary, chunkIndex, status: "proposed", method: "document-summary", model: sdk.llm.options().model }];
+        result.knowledge.push({ predicate: "DOCUMENT_SUMMARY", value: summary, chunkIndex, status: "proposed", method: "document-summary", model: sdk.llm.options().model });
       }
     } catch (error) {
       options.signal?.throwIfAborted();

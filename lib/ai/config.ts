@@ -4,6 +4,12 @@ import { modelEndpointUrl } from "./endpoint-url";
 
 export type ModelRole = "chat" | "embedding";
 
+/** Expose the same fresh model selection to transport and provenance writers. */
+export function resolveModelId(role: ModelRole, options?: AIClientOptions & { model?: string }): string {
+  return options?.model ?? getRootSetting(role === "chat" ? "OPENAI_CHAT_MODEL" : "OPENAI_EMBEDDING_MODEL")
+    ?? (role === "chat" ? "gpt-4o-mini" : "text-embedding-3-small");
+}
+
 function endpointFor(role: ModelRole, options?: AIClientOptions): string {
   const specificEndpoint =
     role === "chat"

@@ -17,6 +17,7 @@ import type { BrowserExtensionSettings } from "./settings.types";
 import { synthesizeSessionWithLLM } from "./llm-enricher";
 import { sanitizeTopics, sessionEntityName } from "./identity";
 import { commitSessionGraph, sessionObservationText } from "./session-graph";
+import { sessionChunks } from "./session-chunks";
 
 /**
  * Phase 1: Synthesizes browsing session with Chat model and saves checkpoint.
@@ -126,6 +127,7 @@ export async function finalizeSession(
   ].join("\n");
 
   const observationText = sessionObservationText(prepared);
+  const chunks = sessionChunks(sessionText, observationText, settings.chunkSize ?? 1000);
   const unseen = prepared.collectorId
     ? visits.filter(
         (v) =>
@@ -137,8 +139,7 @@ export async function finalizeSession(
   const embeddings = await embedBounded(
     sdk,
     [
-      sessionText,
-      observationText,
+      ...chunks.map(chunk => chunk.text_content),
       ...unseen.map((v) => visitObservation(sdk, v)),
     ],
     settings,
@@ -173,20 +174,7 @@ export async function finalizeSession(
         created_at: startTime,
         updated_at: endTime,
       },
-      chunks: [
-        {
-          chunk_index: 0,
-          chunk_type: "synthetic",
-          text_content: sessionText,
-          embedding: embeddings[0],
-        },
-        {
-          chunk_index: 1,
-          chunk_type: "verbatim",
-          text_content: observationText,
-          embedding: embeddings[1],
-        },
-      ],
+      chunks: chunks.map((chunk, index) => ({ ...chunk, embedding: embeddings[index] })),
     });
     const graph = commitSessionGraph(
       sdk,
@@ -197,7 +185,7 @@ export async function finalizeSession(
     );
     if (prepared.collectorId) {
       for (const [index, visit] of unseen.entries())
-        commitActivityGraph(sdk, visit, prepared, embeddings[index + 2]!);
+        commitActivityGraph(sdk, visit, prepared, embeddings[index + chunks.length]!);
       // Late observations can change a session's first event and therefore its identity.
       // Replace overlapping derived sessions; immutable event sources remain untouched.
       const eventIds = visits.map((v) => v.eventId).filter(Boolean);

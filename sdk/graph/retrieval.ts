@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { sourceEntityName } from "../../lib/source-identity";
+import { retrievalSeeds } from "./retrieval-seeds";
 import type { ChunkSearchResult, HybridSearchOptions } from "../types";
 import type { GraphIngestor } from "../graph";
 import type { Evidence, GraphTraversal, TraversalOptions } from "./types";
@@ -17,12 +17,7 @@ export interface GraphSearchResult {
 export function expandGraphResults(db: Database, graph: GraphIngestor, results: ChunkSearchResult[], options: GraphSearchOptions): GraphSearchResult {
   const maxSeeds = options.maxSeeds ?? 5;
   if (!Number.isInteger(maxSeeds) || maxSeeds < 1 || maxSeeds > 20) throw new Error('maxSeeds must be between 1 and 20');
-  const seeds = new Set<number>();
-  for (const result of results) {
-    const matches = db.query<{id:number}, [number,string]>(`SELECT e.id FROM entities e
-      WHERE e.id IN (SELECT entity_id FROM chunk_entities WHERE chunk_id=?) OR e.name=? LIMIT 21`).all(result.id,sourceEntityName(result.source_id));
-    for (const row of matches) seeds.add(graph.entities.canonical(row.id).id);
-  }
+  const seeds = retrievalSeeds(db, graph, results);
   const selected = [...seeds].slice(0,maxSeeds);
   const neighborhoods = selected.map(start=>graph.query.traverse({...options.graph,start,
     maxNodes:options.graph?.maxNodes ?? 50,maxClaims:options.graph?.maxClaims ?? 100,direction:options.graph?.direction ?? 'both'}));

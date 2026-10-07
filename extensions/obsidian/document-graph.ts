@@ -17,7 +17,7 @@ export function commitDocumentGraph(
     value: JSON.parse(JSON.stringify(document.metadata)) as GraphValue,
   }, { method: "document-parser" });
   for (const chunk of document.contextualChunks) {
-    if (chunk.chunk_type === "synthetic" || !chunk.metadata) continue;
+    if (!chunk.metadata) continue;
     const location = Object.fromEntries(
       ["pageNumber", "slideNumber", "sheetName", "closestHeading"]
         .filter(key => chunk.metadata![key] !== undefined).map(key => [key, chunk.metadata![key]]),

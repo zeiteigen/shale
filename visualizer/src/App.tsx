@@ -7,6 +7,7 @@ import { usePoll } from "./use-poll";
 import { post } from "./control-api";
 import type { Host } from "./control-types";
 import "./controls.css";
+import {getGraph} from './api';
 
 const pages = [
   { id: "overview", title: "Overview", icon: Activity },
@@ -24,6 +25,12 @@ export default function App() {
   const [stopped, setStopped] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
+  const connected=Boolean(host);
+  useEffect(()=>{
+    if(!connected)return;
+    const timer=setTimeout(()=>{void getGraph().catch(()=>{});},1000);
+    return()=>clearTimeout(timer);
+  },[connected]);
   useEffect(() => {
     const update = () => setPage(currentPage());
     window.addEventListener("hashchange", update);

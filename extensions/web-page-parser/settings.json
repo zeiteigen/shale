@@ -4,5 +4,5 @@
   "maxImages": 8,
   "enableLlmContext": true,
   "llmModel": null,
-  "allowFetch": false
+  "allowFetch": true
 }

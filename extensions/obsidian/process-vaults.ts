@@ -2,6 +2,7 @@ import { commitNote, commitImage } from "./commit";
 import { createNoteIndex } from "./link-targets";
 import { findDocumentFiles } from "./document-files";
 import { documentWatermarkKey, finalizeDocument, prepareVaultDocuments } from "./document-vault";
+import { unfinishedFiles } from "./file-progress";
 import type { ParsedDocument } from "./parse-document";
 import { join } from "node:path";
 import { readdirSync, statSync } from "node:fs";
@@ -274,22 +275,26 @@ export async function prepareVault(
     ? findDocumentFiles(vault.path, ignoredDirectories, sdk.settings.get<string[]>("documentExtensions"))
     : [];
 
-  const { modifiedFiles: modifiedNotes, maxMtime: maxNoteMtime } =
+  const namespace = sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian";
+  const { modifiedFiles: discoveredNotes, maxMtime: maxNoteMtime } =
     filterModifiedFiles(allMdFiles, lastWatermark);
-  const { modifiedFiles: modifiedImages, maxMtime: maxImageMtime } =
+  const { modifiedFiles: discoveredImages, maxMtime: maxImageMtime } =
     filterModifiedFiles(allImageFiles, lastWatermark);
   // Documents have their own cursor so existing note/image cursors cannot skip
   // older attachments when this connector gains document support.
   const lastDocumentWatermark = force ? 0 : Number(sdk.state.getWatermark(documentWatermarkKey(vault.path)) ?? "0");
-  const { modifiedFiles: modifiedDocuments, maxMtime: maxDocumentMtime } =
+  const { modifiedFiles: discoveredDocuments, maxMtime: maxDocumentMtime } =
     filterModifiedFiles(allDocumentFiles, lastDocumentWatermark);
+  const modifiedNotes = unfinishedFiles(discoveredNotes, sdk, namespace, !!force);
+  const modifiedImages = unfinishedFiles(discoveredImages, sdk, namespace, !!force);
+  const modifiedDocuments = unfinishedFiles(discoveredDocuments, sdk, namespace, !!force);
 
   const maxMtime = Math.max(maxNoteMtime, maxImageMtime);
   const vaultEntityName = `Vault: ${vault.name}`;
 
   const prepared: PreparedVault = {
     vault,
-    namespace:sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian",
+    namespace,
     maxMtime,
     maxDocumentMtime: includeDocuments ? maxDocumentMtime : undefined,
     vaultEntityName,

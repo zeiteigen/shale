@@ -10,7 +10,10 @@ export interface ExtractedEvent {
   evidence:Array<{chunkIndex:number;quote:string}>;
 }
 export interface Extraction {entities:ExtractedEntity[];claims:ExtractedClaim[];events:ExtractedEvent[]}
+export interface ExtractionCursor { chunkIndex: number; offset: number; codePointOffset?: number }
+export interface ExtractionChunk { chunk_index: number; text_content: string; start?: number }
 export interface ExtractionCheckpoint {
   type:'knowledge-extraction';revisionId:number;sourceId:string;namespace:string;model?:string;
-  extraction:Extraction;chunks:Array<{chunk_index:number;text_content:string}>;
+  extraction:Extraction;chunks:ExtractionChunk[];
+  nextCursor?: ExtractionCursor | null;
 }

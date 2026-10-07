@@ -1,15 +1,15 @@
 import type OpenAI from "openai";
 import type { EmbedderOptions } from "./types";
 import { createOpenAIClient } from "./client";
-import { resolveEmbeddingEndpoint, resolveTimeout, resolveModelResource } from "./config";
+import { resolveEmbeddingEndpoint, resolveTimeout, resolveModelResource, resolveModelId } from "./config";
 import { resolveConcurrency, resolveEmbeddingBatchSize, resolveEmbeddingBatchChars, resolveBatchMode, resolveBatchEndpoint } from "./batch-config";
 import { embeddingGroups } from "./embedding-groups";
 import { collectBatchRequests, dispatchBatchRequest } from "./batch-dispatch";
 import { boundedMap } from "./bounded-map";
+import { mapWithBatchProgress } from "./batch-progress";
 import { modelCoordinator } from "./scheduler";
 import { embeddingProfile } from "../embedding-profile";
 import { limitModelRequest } from "./request-limit";
-import { getRootSetting } from "../settings";
 import { modelRequest } from "./request";
 import { validateEmbeddings } from "./embedding-response";
 import { tagEmbedding } from "../embedding-profile";
@@ -37,10 +37,14 @@ export async function fetchOpenAIEmbeddings(
     batchAPI ? Infinity : resolveEmbeddingBatchChars(options?.batchMaxChars), options?.instruction);
   return modelCoordinator.exclusive(resolveModelResource(endpoint, options?.resource), () =>
     modelCoordinator.phase("embedding", async () => {
-      const vectors = (await collectBatchRequests(() => boundedMap(groups, concurrency, group => {
-        options?.signal?.throwIfAborted();
-        return fetchEmbeddingRequest(group, resolved);
-      }))).flat();
+      const vectors = (await collectBatchRequests(() => {
+        const work = (group: string[]) => {
+          options?.signal?.throwIfAborted();
+          return fetchEmbeddingRequest(group, resolved);
+        };
+        return batchAPI ? boundedMap(groups, concurrency, work)
+          : mapWithBatchProgress("embedding", groups, concurrency, work);
+      })).flat();
       const dimensions = embeddingProfile(vectors[0])!.dimensions;
       if (vectors.some(vector => embeddingProfile(vector)!.dimensions !== dimensions))
         throw new Error("Embedding batches returned inconsistent native dimensions");
@@ -62,10 +66,7 @@ async function fetchEmbeddingRequest(
   const endpoint = batchAPI ? resolveBatchEndpoint("embedding", options) : resolveEmbeddingEndpoint(options);
   const transportOptions = { ...options, endpoint };
   const client = createOpenAIClient(transportOptions, "embedding");
-  const model =
-    options?.model ??
-    getRootSetting("OPENAI_EMBEDDING_MODEL") ??
-    "text-embedding-3-small";
+  const model = resolveModelId("embedding", options);
 
   const padTarget =
     options?.padToDimensions !== undefined

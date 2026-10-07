@@ -67,6 +67,27 @@ arrays are split into bounded requests. `api` uses the OpenAI-style asynchronous
 job submission, polling, and output download. Shale restores input order using
 `custom_id` and rejects incomplete, duplicate, failed, or invalid results.
 
+For vLLM's direct chat batch API, set `OPENAI_CHAT_BATCH_MODE` to `api` and
+`OPENAI_CHAT_BATCH_ENDPOINT` to the full `/chat/completions/batch` URL, for example
+`http://127.0.0.1:8080/upstream/gemma4-26b/v1/chat/completions/batch`.
+Shale posts an array of conversations in `messages`, groups requests sharing
+generation settings, and restores input order using each choice's `index`.
+Images and JSON response formats are preserved. Direct batches complete in one
+HTTP request and use `CHAT_TIMEOUT_MS`; they require no Files API or polling.
+Their aggregate token usage is omitted from individual results because the
+server does not report usage per conversation.
+Completions ending with `finish_reason: "length"` are rejected before ingestion.
+For thinking models, `maxTokens` must cover reasoning as well as the final answer;
+increase it when the server cannot finish within the configured budget.
+
+Batch progress is printed to the daemon terminal. API jobs report upload,
+submission (or recovery), provider status, completed and failed request counts,
+percentage processed, output download, and elapsed time. Unchanged polls are
+silent. Concurrent chat batches and embedding batches with multiple requests
+report completed and failed counts as requests settle. Count updates are limited
+to once per second; status changes and final results are always printed.
+Embedding counts refer to requests, each of which may contain multiple texts.
+
 | Setting | Chat | Embedding | Default |
 |---|---|---|---|
 | Mode | `OPENAI_CHAT_BATCH_MODE` | `EMBEDDING_BATCH_MODE` | `concurrent` |
@@ -84,11 +105,11 @@ budget does not apply to asynchronous Batch API submissions. SDK clients can
 override it with `batchMaxChars`.
 
 Role API keys apply to both transports. The Batch API's Files API is resolved as
-`/files` beside its `/batches` endpoint. A batch endpoint must end in `/batches`;
+`/files` beside its `/batches` endpoint. Asynchronous endpoints end in `/batches`;
 query parameters are preserved. `MODEL_BATCH_TIMEOUT_MS` controls the overall
 job deadline (default 86,460,000 ms), and `MODEL_BATCH_POLL_INTERVAL_MS` controls
 polling (default 1,000 ms). HTTP timeouts and retries remain separate. A provider
-must implement both Batch and Files APIs to use `api` mode. There is no automatic
+must implement both Batch and Files APIs to use asynchronous jobs. There is no automatic
 fallback after submission, which would risk duplicate processing.
 
 ```typescript

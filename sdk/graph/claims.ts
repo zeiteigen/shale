@@ -66,6 +66,7 @@ export class GraphClaims {
     for (const [key,column] of [['subject','subject_id'],['predicate','predicate'],['namespace','namespace'],['context','context'],['polarity','polarity']] as const)
       if (filter[key] !== undefined) { where.push(`${column}=?`); params.push(filter[key]!); }
     if (filter.entityId !== undefined) { where.push('(subject_id=? OR object_id=?)'); params.push(filter.entityId,filter.entityId); }
+    if (filter.objectOnly) where.push('object_id IS NOT NULL');
     if (filter.predicates) {
       if (!filter.predicates.length) return [];
       where.push(`predicate IN (${filter.predicates.map(()=>'?').join(',')})`); params.push(...filter.predicates);

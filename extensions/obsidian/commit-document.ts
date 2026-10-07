@@ -3,6 +3,7 @@ import type { ShaleSDK } from "@shale/sdk";
 import type { VaultContext } from "./graph";
 import type { ParsedDocument } from "./parse-document";
 import { commitDocumentGraph } from "./document-graph";
+import { recordCommittedFile } from "./file-progress";
 
 /** Commit source, graph evidence, and checkpoint deletion in one transaction. */
 export function commitDocument(
@@ -23,6 +24,7 @@ export function commitDocument(
       chunks: document.contextualChunks.map((chunk, index) => ({ ...chunk, embedding: embeddings[index] })),
     });
     const graph = commitDocumentGraph(sdk, result.sourceId, namespace, document, vault);
+    recordCommittedFile(sdk, namespace, document.documentUri, document.updatedAt);
     if (checkpointId) sdk.deleteCheckpoint(checkpointId);
     return { ...result, edgesCreated: graph.edgesCount };
   })();

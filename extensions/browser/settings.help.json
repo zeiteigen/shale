@@ -239,6 +239,11 @@
         "max": 256
       }
     },
+    "fetchHistoryPages": {
+      "type": "boolean",
+      "description": "Fetch and parse HTML for eligible history URLs before embedding. Requires web-page-parser allowFetch. Failed fetches retain metadata; fetched content is labelled with its retrieval time.",
+      "default": true
+    },
     "allowPublicPageEnrichment": {
       "type": "boolean",
       "description": "Accept explicitly requested public-page enrichment jobs. Requires web-page-parser allowFetch; fetched pages stay separate from live DOM captures.",

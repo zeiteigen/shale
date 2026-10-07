@@ -116,7 +116,33 @@ it("keeps successful documents when another file fails, and prevents recovery fr
   await recover(sdk);
   expect(sdk.state.getWatermark(documentWatermarkKey(vaultA.path))).toBeNull();
   copyFileSync(files.pdf, join(vaultA.path, "bad.pdf"));
-  expect((await processVault(vaultA, sdk)).documentsProcessed).toBe(2);
+  expect((await processVault(vaultA, sdk)).documentsProcessed).toBe(1);
+});
+
+it("retries only unfinished files, then detects edits and honors forced reprocessing", async () => {
+  const { sdk, vaultA, files, events, settings } = await fixture();
+  settings({ expandAtomicNotes: true });
+  const note = join(vaultA.path, "Completed.md"), document = join(vaultA.path, "bad.pdf");
+  writeFileSync(note, "Alpha particles have two protons and two neutrons.");
+  utimesSync(note, 100, 100);
+  writeFileSync(document, "not a PDF");
+  const prepared = await prepareVault(vaultA, sdk);
+  await expect(finalizeVault(prepared, sdk)).rejects.toThrow("watermark retained");
+  await recover(sdk);
+  expect(sdk.state.getWatermark(`vault:${vaultA.path}:mtime`)).toBeNull();
+  events.length = 0;
+  copyFileSync(files.pdf, document);
+  const retry = await prepareVault(vaultA, sdk);
+  expect(retry.parsedNotes).toHaveLength(0);
+  expect(retry.parsedDocuments).toHaveLength(1);
+  expect(events.filter(event => event.role === "chat")).toHaveLength(1);
+  await finalizeVault(retry, sdk);
+  writeFileSync(note, "Alpha particles have a positive charge of two elementary charges.");
+  utimesSync(note, 200, 200);
+  expect((await prepareVault(vaultA, sdk)).parsedNotes).toHaveLength(1);
+  const forced = await prepareVault(vaultA, sdk, true);
+  expect(forced.parsedNotes).toHaveLength(1);
+  expect(forced.parsedDocuments).toHaveLength(1);
 });
 
 it("reuses prepared document checkpoints and recovers failed embeddings without another parser or chat call", async () => {

@@ -2,6 +2,7 @@ import { SourceGraph, type ShaleSDK } from "@shale/sdk";
 import type { PreparedSessionData } from "./types";
 import { sessionEntityName } from "./identity";
 import { buildSequentialEdges } from "./navigation";
+import { sessionEvidence } from "./session-chunks";
 
 export function sessionObservationText(prepared: PreparedSessionData): string {
   return JSON.stringify(
@@ -42,13 +43,14 @@ export function commitSessionGraph(
     "WebSession",
     context,
   );
-  const observed = { evidence: graph.evidence(1), context };
+  const evidence = sessionEvidence(sdk, sourceId, graph);
+  const observed = { evidence: evidence.observed, context };
   graph.claim(session, "SOURCE_URI", { value: context }, observed);
   const interpretation = {
     ...observed,
     evidence: [
-      ...graph.evidence(1),
-      ...graph.evidence(0, undefined, "generated", "mentions"),
+      ...evidence.observed,
+      ...evidence.generated,
     ],
     status: "proposed" as const,
     method: synthesis.method ?? "llm",

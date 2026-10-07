@@ -9,11 +9,31 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function getGraph(filter: {context?:string;at?:number} = {}) {
+const graphRequests=new Map<string,{promise:Promise<GraphData>;expires:number;pending:boolean}>();
+export function getGraph(filter: {context?:string;at?:number} = {}, refresh=false) {
   const query=new URLSearchParams();
   if (filter.context !== undefined) query.set('context',filter.context);
   if (filter.at !== undefined) query.set('at',String(filter.at));
-  return request<GraphData>(`/api/graph?${query}`);
+  const path=`/api/graph?${query}`,cached=graphRequests.get(path);
+  if(cached && (cached.pending || !refresh && cached.expires>Date.now()))return cached.promise;
+  const entry={promise:Promise.resolve(null as unknown as GraphData),expires:0,pending:true};
+  async function load() {
+    if(!refresh && filter.context===undefined && filter.at===undefined) {
+      try {
+        const [graph,host]=await Promise.all([
+          request<GraphData>(`/knowledge-map-${location.port || '80'}.json`,{cache:'no-store'}),
+          request<{uptime:number}>('/api/host'),
+        ]);
+        const age=Date.now()-Date.parse(graph.generatedAt ?? '');
+        const started=Date.now()-host.uptime*1000;
+        if(age>=0 && age<45_000 && graph.hostStartedAt!==undefined && Math.abs(started-graph.hostStartedAt)<2500)return graph;
+      } catch { /* Fall back when a snapshot is unavailable or belongs to another host. */ }
+    }
+    return request<GraphData>(path);
+  }
+  entry.promise=load().then(data=>{entry.pending=false;entry.expires=Date.now()+30_000;return data;},error=>{if(graphRequests.get(path)===entry)graphRequests.delete(path);throw error;});
+  if(graphRequests.size>=8)graphRequests.delete(graphRequests.keys().next().value!);
+  graphRequests.set(path,entry);return entry.promise;
 }
 
 export function updateKnowledge<T>(action: string, body: unknown) {

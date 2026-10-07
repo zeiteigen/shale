@@ -37,6 +37,7 @@ export interface ClaimFilter {
   entityId?: number; subject?: number; predicate?: string; namespace?: string; context?: string;
   statuses?: ClaimStatus[]; at?: number; knownAt?: number; limit?: number; offset?: number;
   polarity?: 1 | -1; predicates?: string[];
+  objectOnly?: boolean;
 }
 export interface TraversalOptions extends ClaimFilter {
   start: number; direction?: 'out' | 'in' | 'both'; maxDepth?: number; maxNodes?: number; maxClaims?: number;

@@ -4,6 +4,10 @@ export interface ProcessDocumentSettings {
   parserTimeoutMs?: number;
   chunkSize?: number;
   includeNotes?: boolean;
+  enablePdfOcr?: boolean;
+  ocrLanguage?: string;
+  enablePdfVision?: boolean;
+  pdfVisionMinConfidence?: number;
   summarizeDocuments?: boolean;
   summaryPrompt?: string;
   summaryMaxChars?: number;

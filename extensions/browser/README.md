@@ -85,7 +85,19 @@ New limits: `maxPendingJobs`, `maxPendingBytes`, `maxJobsPerRun`, `maxBatchBytes
 
 To request public catalog enrichment, enable **both** `browser.allowPublicPageEnrichment` and `web-page-parser.allowFetch`, then submit a record `{ "type":"public_page_capture", "recordId":"enrich-1", "url":"https://example.com/docs" }` in a versioned batch. These jobs have count/time/response/redirect limits, fetch no browser credentials, carry `public-fetch` provenance, never create visits, and use a separate source URI so catalog enrichment cannot overwrite captured DOM. They do not provide authenticated fetching, archive lookup, or PDF/site adapters.
 
-Bookmarks use collector-scoped IDs and real folder ancestry. Newer sequences win over late snapshots; removal updates current membership and retracts current folder claims. Historical evidence is retained unless `retainRemovedCatalogEvidence=false`. History catalog metadata stays separate from rich captures; optional Chrome visit backfill is documented in the extension README.
+History ingestion fetches eligible URLs through `web:parse` during preparation,
+then embeds readable page chunks alongside visit metadata. `fetchHistoryPages`
+defaults to true; the parser's `allowFetch` must also be enabled (it is enabled
+in the current repository settings). Excluded and stale records are skipped,
+duplicate URLs share a fetch within a batch, and failed or empty fetches log a
+warning and retain metadata. Fetching uses the parser's existing timeout,
+response-size, and redirect limits, without browser credentials or image/LLM
+analysis. Prepared chunks are persisted with the browser job so embedding retries
+and recovery reuse the fetched content. Content is labelled `public-fetch` with
+its retrieval time: it represents the current page, rather than a snapshot of the
+historical visit. Live page captures retain separate source identities.
+
+Bookmarks use collector-scoped IDs and real folder ancestry. Newer sequences win over late snapshots; removal updates current membership and retracts current folder claims. Historical evidence is retained unless `retainRemovedCatalogEvidence=false`. Optional Chrome visit backfill is documented in the extension README.
 
 ## Verification
 
@@ -94,3 +106,5 @@ Bookmarks use collector-scoped IDs and real folder ancestry. Newer sequences win
 `bun run test:browser:chrome` runs actual unpacked Chromium against temporary fixtures/database/profile, including service-worker termination and offline/profile recovery. Model endpoints are mocked. `bun run browser:check` verifies generated protocol and content artifacts; `bun run typecheck` checks the repository.
 
 For a local read-only queue view, run `bun run queue:view` and open `http://127.0.0.1:7426`. It reads browser job rows, including failures, without migrating or changing queue state.
+
+Session narratives and captured observation JSON are stored in bounded chunks without dropping text. Facts from a split observation cite the complete captured source revision; generated interpretations retain separate synthetic chunk references. Recovery defers to an active worker lease and retains its checkpoints.

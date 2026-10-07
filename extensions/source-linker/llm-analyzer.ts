@@ -2,6 +2,7 @@ import type { ShaleSDK } from "@shale/sdk";
 import { acceptedLink } from "./link-decision";
 import { pairCheckpointId } from "./link-batch";
 import { linkEvidence } from "./link-evidence";
+import { linkContext } from "./link-context";
 import type {
   SourceCandidatePair,
   LLMLinkAnalysis,
@@ -240,9 +241,8 @@ export async function analyzeSourcePairWithLLM(
     sdk.settings.get<number>("maxEntityResolutionsPerPair") ??
     10;
 
-  // Hydrate context for both sources
-  const contextA = sdk.context.hydrate(pair.sourceA.id, chunksCount);
-  const contextB = sdk.context.hydrate(pair.sourceB.id, chunksCount);
+  const contextA = linkContext(sdk, pair.sourceA.id, pair.sourceA.hash, chunksCount);
+  const contextB = linkContext(sdk, pair.sourceB.id, pair.sourceB.hash, chunksCount);
 
   const excerptA = contextA.combinedText.slice(0, maxChars);
   const excerptB = contextB.combinedText.slice(0, maxChars);
@@ -267,6 +267,9 @@ export async function analyzeSourcePairWithLLM(
       model: modelOverride || undefined,
       responseFormat: { type: "json_object" },
       temperature: 0.1,
+      reasoningEffort: "none",
+      maxThinkingTokens: null,
+      maxTokens: 8192,
     });
   } catch (err: any) {
     sdk.logger.error(

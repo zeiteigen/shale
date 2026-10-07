@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { mergeOptions } from "../lib/ai/options";
+import { resolveModelId } from "../lib/ai/config";
 import {
   getEmbedding,
   getEmbeddings,
@@ -30,7 +31,8 @@ export class EmbedderClient implements EmbeddingClient {
   }
 
   options(overrides?: EmbedderOptions): EmbedderOptions {
-    return mergeOptions(this.defaultOptions, overrides);
+    const options = mergeOptions(this.defaultOptions, overrides);
+    return { ...options, model: resolveModelId("embedding", options) };
   }
 
   embed(text: string, options?: EmbedderOptions): Promise<number[]> {

@@ -6,14 +6,14 @@ import { ensureCosineIndex } from "./cosine-index";
 import { ensureGraphSchema } from "./graph/schema";
 import { ensureVectorIndex } from "./embedding-storage";
 import { getRootSetting } from "./settings";
+import { configureDatabaseConnection } from "./database-connection";
 
 const configuredPath = getRootSetting("SHALE_DB_PATH");
 const db = new Database(process.env.SHALE_DB_PATH || (configuredPath
   ? resolve(import.meta.dir, "..", configuredPath)
   : join(import.meta.dir, "../production.db")));
 
-db.run("PRAGMA journal_mode = WAL;");
-db.run("PRAGMA foreign_keys = ON;");
+configureDatabaseConnection(db);
 
 sqliteVec.load(db);
 
@@ -48,6 +48,9 @@ db.run(`
 `);
 
 // Safe migration for existing databases lacking chunk_type column
+db.run('CREATE INDEX IF NOT EXISTS idx_chunks_source_recent ON chunks(source_id,chunk_index DESC)');
+db.run('CREATE INDEX IF NOT EXISTS idx_chunks_recent_lookup ON chunks(chunk_index DESC,source_id)');
+db.run('CREATE INDEX IF NOT EXISTS idx_sources_identity_lookup ON sources(id,uri)');
 try {
   db.run(
     "ALTER TABLE chunks ADD COLUMN chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic'));",

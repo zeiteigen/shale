@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { ShaleSDK } from '@shale/sdk';
 import type { ExtractionCheckpoint } from './types';
 import { groundEvidence } from './evidence';
+import { extractionCursorKey } from './source-window';
+import { validateTemporalEvidence } from './temporal-evidence';
 
 /** Resolve checkpoints and progress in the same transaction as graph writes. */
 export function commitExtractions(sdk: ShaleSDK) {
@@ -10,6 +12,7 @@ export function commitExtractions(sdk: ShaleSDK) {
     for (const cp of sdk.checkpoint.getQueue<ExtractionCheckpoint>()) {
       if (!cp.id.startsWith('knowledge-extraction:') || cp.data.type!=='knowledge-extraction') continue;
       const data=cp.data;
+      validateTemporalEvidence(data);
       const ids=new Map<string,number>();
       for (const entity of data.extraction.entities) {
         const stableId=`extracted:${createHash('sha256').update(JSON.stringify([data.namespace,data.sourceId,entity.type,entity.name])).digest('hex')}`;
@@ -40,7 +43,11 @@ export function commitExtractions(sdk: ShaleSDK) {
           method:'llm',model:data.model,extractionRun:cp.id,
           participants:event.participants.map(p=>({...p,entity:ids.get(p.entity)!})),evidence:groundEvidence(data,event.evidence)});
       }
-      sdk.state.set(`extracted:${data.revisionId}`,'complete');
+      if (data.nextCursor) sdk.state.set(extractionCursorKey(data.revisionId), JSON.stringify(data.nextCursor));
+      else {
+        sdk.state.set(`extracted:${data.revisionId}`,'complete');
+        sdk.state.delete(extractionCursorKey(data.revisionId));
+      }
       sdk.checkpoint.resolve(cp.id);committed++;
     }
     return committed;

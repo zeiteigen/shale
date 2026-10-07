@@ -1,4 +1,6 @@
 import { preparePublicCapture } from "./public-capture";
+import { prepareHistoryContent, type HistoryPageContent } from "./history-content";
+import { finalizeHistoryBatch } from "./history-ingest";
 import { finalizeActivity } from "./activity-graph";
 import { applyCatalogDeletion } from "./catalog-lifecycle";
 import type { ShaleSDK } from "@shale/sdk";
@@ -13,7 +15,6 @@ import type {
 import {
   preparePageVisit,
   finalizePageVisit,
-  processHistoryBatch,
   processBookmarksBatch,
 } from "./ingest-processor";
 import { prepareSessionSnapshot, finalizeSession } from "./session-manager";
@@ -21,7 +22,7 @@ import { prepareSessionSnapshot, finalizeSession } from "./session-manager";
 export type PreparedBrowserPayload =
   | { type: "pages"; pages: PreparedPageData[] }
   | { type: "session"; session: PreparedSessionData | null }
-  | { type: "history"; payload: HistoryBatchPayload }
+  | { type: "history"; payload: HistoryBatchPayload; contents?: Array<HistoryPageContent | null> }
   | { type: "bookmarks"; payload: BookmarksBatchPayload }
   | { type: "ping" }
   | {
@@ -65,7 +66,7 @@ export async function prepareBrowserPayload(
         session: await prepareSessionSnapshot(sdk, payload, settings),
       };
     case "history_batch":
-      return { type: "history", payload };
+      return { type: "history", payload, contents: await prepareHistoryContent(sdk, payload, settings) };
     case "bookmarks_batch":
       return { type: "bookmarks", payload };
     case "activity_event":
@@ -105,10 +106,10 @@ export async function finalizeBrowserPayload(
       );
       break;
     case "history":
-      await processHistoryBatch(sdk, prepared.payload, settings, () => {
+      await finalizeHistoryBatch(sdk, prepared.payload, settings, () => {
         assertOwned();
         afterCommit();
-      });
+      }, prepared.contents);
       break;
     case "delete":
       sdk.database.transaction(() => {

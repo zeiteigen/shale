@@ -1,4 +1,6 @@
 export interface BrowserExtensionSettings {
+  /** Fetch and parse readable HTML for history catalog entries before embedding. */
+  fetchHistoryPages?: boolean;
   allowPublicPageEnrichment?: boolean;
   maxPublicPagesPerRun?: number;
   enableImageAnalysis: boolean;

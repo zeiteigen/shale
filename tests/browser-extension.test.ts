@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "bun:test";
+import { describe, expect, it, beforeEach, spyOn } from "bun:test";
 import { Database } from "bun:sqlite";
 import * as sqliteVec from "sqlite-vec";
 import { join } from "node:path";
@@ -43,6 +43,8 @@ import { run as runCron } from "../extensions/browser/index";
 import { subscribe } from "../extensions/browser/subscribe";
 import type { BrowserExtensionSettings } from "../extensions/browser/settings.types";
 import type { TabsBatchPayload } from "../extensions/browser/types";
+import { parseWebPage } from "../extensions/web-page-parser/parser";
+import { prepareBrowserPayload, finalizeBrowserPayload } from "../extensions/browser/payload-pipeline";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
@@ -788,6 +790,87 @@ describe("Browser Ingestion Extension", () => {
   });
 
   describe("7. Browser History & Bookmarks Batch Ingestion", () => {
+    it("fetches and parses history HTML before embedding, falling back for unavailable pages", async () => {
+      const requests: string[] = [];
+      const fetchMock = spyOn(globalThis, "fetch").mockImplementation((async (url: URL | RequestInfo) => {
+        const path = new URL(String(url)).pathname;
+        requests.push(path);
+        if (path === "/missing") return new Response("Not found", { status: 404 });
+        return new Response(`<html><head><title>SQLite Guide</title></head><body><article><h1>SQLite transactions</h1><p>${"Transactions make database updates atomic and durable. ".repeat(20)}</p></article></body></html>`,
+          { headers: { "Content-Type": "text/html" } });
+      }) as typeof fetch);
+      const parserSdk = createExtensionSDK("web-page-parser", {
+        database: testDb,
+        messageBus: testBus,
+        extensionDir: join(import.meta.dir, "../extensions/web-page-parser"),
+      });
+      parserSdk.messages.handle("web:parse", (request, context) =>
+        parseWebPage(parserSdk, request, context.signal));
+      const embedded: string[] = [];
+      (testSdk as any).embed = async (input: string | string[]) => {
+        expect(requests.sort()).toEqual(["/article", "/missing"]);
+        const texts = typeof input === "string" ? [input] : input;
+        embedded.push(...texts);
+        return texts.map(() => new Array(4096).fill(0.01));
+      };
+      try {
+        const result = await processHistoryBatch(testSdk, {
+          type: "history_batch",
+          items: [
+            { url: "https://example.com/article", title: "Guide", visitTime: 1000 },
+            { url: "https://example.com/missing", title: "Unavailable", visitTime: 2000 },
+            { url: "https://reddit.com/excluded", title: "Excluded", visitTime: 3000 },
+          ],
+        }, { excludeDomains: ["reddit.com"], chunkSize: 200 });
+        expect(result).toEqual({ ingestedCount: 2, skippedCount: 1 });
+        expect(embedded.some((text) => text.includes("Transactions make database updates"))).toBe(true);
+        expect(embedded.some((text) => text.includes("Content Origin: public-fetch"))).toBe(true);
+        const chunks = testDb.query<{ text_content: string }, []>(
+          "SELECT text_content FROM chunks ORDER BY id",
+        ).all();
+        expect(chunks.some((chunk) => chunk.text_content.includes("Transactions make database updates"))).toBe(true);
+        expect(chunks.some((chunk) => chunk.text_content.includes("Page: Unavailable"))).toBe(true);
+      } finally {
+        parserSdk.messages.dispose();
+        fetchMock.mockRestore();
+      }
+    });
+
+    it("persists prepared history text for embedding retries and shares duplicate URL fetches", async () => {
+      let parses = 0;
+      testBus.handle("web:parse", async () => {
+        parses++;
+        return {
+          title: "Prepared article", text: "Durable parsed article content.",
+          chunks: ["Durable parsed article content."],
+          contextualSummary: "", imageUrls: [], imageChunks: [],
+        };
+      }, { extensionId: "web-page-parser" });
+      const payload = {
+        type: "history_batch" as const,
+        items: [
+          { id: "h1", collectorId: "test", url: "https://example.com/article", title: "Article", visitTime: 1000 },
+          { id: "h2", collectorId: "test", url: "https://example.com/article", title: "Article", visitTime: 2000 },
+        ],
+      };
+      const prepared = JSON.parse(JSON.stringify(await testSdk.models.phase("chat", () =>
+        prepareBrowserPayload(testSdk, payload, {}))));
+      expect(parses).toBe(1);
+      const embed = testSdk.embed;
+      testSdk.embed = async () => { throw new Error("Embedding offline"); };
+      await expect(finalizeBrowserPayload(testSdk, prepared, {})).rejects.toThrow("Embedding offline");
+      expect(testDb.query("SELECT id FROM sources WHERE type='browser_history'").all()).toHaveLength(0);
+      testSdk.embed = embed;
+      await testSdk.models.phase("embedding", () => finalizeBrowserPayload(testSdk, prepared, {}));
+      expect(parses).toBe(1);
+      expect(testDb.query("SELECT id FROM sources WHERE type='browser_history'").all()).toHaveLength(2);
+      expect(testDb.query("SELECT id FROM chunks WHERE text_content='Durable parsed article content.'").all()).toHaveLength(2);
+      await processHistoryBatch(testSdk, {
+        type: "history_batch", items: [{ url: "https://example.com/disabled", title: "Disabled", visitTime: 3000 }],
+      }, { fetchHistoryPages: false });
+      expect(parses).toBe(1);
+    });
+
     it("ingests history items with domain relationships while excluding social media", async () => {
       const payload = {
         type: "history_batch" as const,

@@ -195,6 +195,10 @@ describe("Browser durable processing", () => {
         "browser-worker-lease",
       );
       expect(await runWorker(f.sdk)).toMatchObject({ busy: true });
+      f.sdk.saveCheckpoint({ type: "browser_page_analysis" }, { id: "owned-checkpoint" });
+      expect(await recover(f.sdk)).toMatchObject({ busy: true });
+      expect(f.sdk.checkpoint.get("owned-checkpoint")).not.toBeNull();
+      f.sdk.deleteCheckpoint("owned-checkpoint");
       expect(f.trace).toEqual([]);
       lease!.release();
       await runWorker(f.sdk);

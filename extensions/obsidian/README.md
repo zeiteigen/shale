@@ -13,6 +13,10 @@ The connector writes accepted `IN_VAULT`, `REFERENCES`, `FEATURES_IMAGE`, and `H
 
 Expanded note context and vision descriptions become proposed claims. Both vision chunks are synthetic. Local image SHA-256 fingerprints participate in source revision identity, so changed image bytes invalidate earlier interpretations even when their description is unchanged.
 
+The default note expansion prompt stays within each note's subject, preserves
+uncertainty and attribution, and labels added concepts as related background.
+Custom prompt and system templates remain configurable in extension settings.
+
 Direct `ingestFile` and `ingestImageFile` calls use the same commit path as vault ingestion and recovery. Their returned title-based `entities` and `edges`, and `commitVaultGraph`, are legacy compatibility helpers; ingestion already commits the authoritative graph.
 
 Existing files receive these records on their next ingestion. Run the Obsidian cron with `forceAll` enabled to refresh unchanged files; return it to false afterward. Existing title-based nodes are preserved for manual identity review rather than automatically merged with path-based nodes.
@@ -54,3 +58,8 @@ bun run settings set obsidian documentRequestTimeoutMs 180000
 `ProcessVaultResult.documentsProcessed` counts committed documents;
 `documentWatermarkAdvancedTo` reports their cursor. Recovery reports
 `recoveredDocuments` separately from the existing `recoveredNotes` count.
+
+Each committed file also records its modification time in the same transaction as
+its source, graph evidence, and checkpoint resolution. When one attachment fails,
+the vault cursor remains unchanged and retries skip completed files. Edited files
+are processed again, and `forceAll` bypasses this per-file progress.

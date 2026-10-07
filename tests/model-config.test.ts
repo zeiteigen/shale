@@ -28,6 +28,23 @@ afterEach(() => {
   process.env = { ...originalEnv };
 });
 
+it("exposes effective model identities freshly for graph provenance and honors profile overrides", () => {
+  const chat = new LLMClient();
+  const embedding = new EmbedderClient();
+  process.env.OPENAI_CHAT_MODEL = "first-chat";
+  process.env.OPENAI_EMBEDDING_MODEL = "first-embedding";
+  expect(chat.options().model).toBe("first-chat");
+  expect(embedding.options().model).toBe("first-embedding");
+  process.env.OPENAI_CHAT_MODEL = "second-chat";
+  process.env.OPENAI_EMBEDDING_MODEL = "second-embedding";
+  expect(chat.options().model).toBe("second-chat");
+  expect(embedding.options().model).toBe("second-embedding");
+  expect(new LLMClient({ model: "profile-chat" }).options().model).toBe("profile-chat");
+  expect(new EmbedderClient({ model: "profile-embedding" }).options().model).toBe("profile-embedding");
+  expect(chat.options({ model: "request-chat" }).model).toBe("request-chat");
+  expect(embedding.options({ model: "request-embedding" }).model).toBe("request-embedding");
+});
+
 function transport() {
   const calls: Array<{ url: string; authorization: string | null; body: any }> =
     [];

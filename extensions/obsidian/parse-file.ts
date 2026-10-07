@@ -4,6 +4,7 @@ import { sdkStorage, logger, getSetting, type ShaleSDK } from "@shale/sdk";
 import type { ChunkType } from "../../lib/db";
 import { parseNoteContent, type ParsedNote } from "./parser";
 import { dynamicChunkNote, type MarkdownChunk } from "./chunker";
+import { expansionPrompt } from "./expansion-prompt";
 
 export interface ContextualChunk {
   metadata?: Record<string, unknown>;
@@ -110,15 +111,7 @@ export async function expandNoteWithChatModel(
         .replace(/\{\{title\}\}/g, noteTitle)
         .replace(/\{\{content\}\}/g, content)
         .replace(/\{\{targetTokens\}\}/g, String(targetTokens))
-    : `Expand the following note for semantic retrieval. Provide key concepts, hardware/compiler flows, bit-level arithmetic, and related architectural domains. 
-
-Format requirements:
-- Structure as dense, telegraphic bullet points or semicolon-separated technical keywords.
-- Omit conversational prose, full sentence syntax, and filler articles (e.g., use "GGUF parser; bitstream generation" rather than complete sentences).
-- Target maximum output length: ~${targetTokens} tokens. Do not count.
-Note Title: ${noteTitle}
-Note Content:
-${content}`;
+    : expansionPrompt(noteTitle, content, targetTokens);
 
   const configuredSystemPrompt =
     sdk?.settings.get<string>("chatSystemPrompt") ??

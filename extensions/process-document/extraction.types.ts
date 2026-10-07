@@ -6,6 +6,8 @@ export interface ExtractionRequest {
   maxFileBytes: number;
   chunkSize: number;
   includeNotes: boolean;
+  enablePdfOcr?: boolean;
+  ocrLanguage?: string;
 }
 
 export interface ExtractedDocument {
@@ -18,4 +20,13 @@ export interface ExtractedDocument {
   warnings: string[];
 }
 
-export type ExtractionReply = { document: ExtractedDocument } | { error: string };
+export type ExtractionReply = { document: ExtractedDocument } | { error: string }
+  | { ocrCache: { key: string; pages: number } }
+  | { ocrPage: { key: string; page: number; result: OcrPage } };
+
+export interface OcrPage { text: string; confidence: number }
+
+export interface OcrPageStore {
+  load(key: string, pages: number): Record<number, OcrPage>;
+  save(key: string, page: number, result: OcrPage): void;
+}

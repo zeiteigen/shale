@@ -237,6 +237,8 @@ if (import.meta.main) {
       ingest: req => handleIngestRequest(req, subscribe_ingest, item => ingestQueue.push(item)),
     }, Number(getRootSetting("PORT")) || 7425);
     console.log(`[host] Shale web interface: http://localhost:${hostServer.port}`);
+    Bun.spawn([process.execPath,join(import.meta.dir,'../scripts/graph-snapshot-worker.ts'),
+      '--parent',String(process.pid),'--origin',`http://127.0.0.1:${hostServer.port}`],{stdout:'inherit',stderr:'inherit'});
   } catch (err: any) {
     if (err.code === "EADDRINUSE") {
       console.warn(

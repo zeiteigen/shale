@@ -25,6 +25,8 @@ export interface GraphEdge {
 }
 
 export interface GraphData {
+  generatedAt?: string;
+  hostStartedAt?: number;
   truncated: boolean;
   nodes: GraphNode[];
   edges: GraphEdge[];

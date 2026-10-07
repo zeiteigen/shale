@@ -6,9 +6,9 @@ export type FetchFn = (
 ) => Promise<Response>;
 
 export interface AIClientOptions {
-  /** Concurrent completion requests or the asynchronous OpenAI Batch API. */
+  /** Concurrent requests or a dedicated batch API (OpenAI jobs or direct chat batches). */
   batchMode?: "concurrent" | "api";
-  /** Full /batches URL; each role resolves its own endpoint. */
+  /** Full /batches URL, or /chat/completions/batch for direct chat batches. */
   batchEndpoint?: string;
   /** Overall Batch API deadline, independent of the HTTP request timeout. */
   batchTimeoutMs?: number;

@@ -1,5 +1,6 @@
 import { SourceGraph, type ShaleSDK } from "@shale/sdk";
 import type { PreparedSessionData } from "./types";
+import { sessionEvidence } from "./session-chunks";
 /** Thread labels and goals carry evidence and inference status independently of visits. */
 export function commitContextGraph(
   sdk: ShaleSDK,
@@ -18,6 +19,7 @@ export function commitContextGraph(
     prepared.synthesis.sessionTitle,
     "WebSession",
   );
+  const evidence = sessionEvidence(sdk, sourceId, graph);
   for (const thread of prepared.threads ?? []) {
     const entity = graph.entity(
       `browser-thread://${thread.id}`,
@@ -33,8 +35,8 @@ export function commitContextGraph(
       model: thread.model,
       confidence: thread.confidence,
       evidence: [
-        ...graph.evidence(1),
-        ...graph.evidence(0, undefined, "generated", "supports"),
+        ...evidence.observed,
+        ...evidence.generated,
       ],
     };
     graph.link(session, "PART_OF_THREAD", entity, interpretation);
