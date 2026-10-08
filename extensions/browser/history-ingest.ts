@@ -11,6 +11,7 @@ import {
   pageEntityName,
 } from "./identity";
 import { commitCatalogGraph } from "./catalog-graph";
+import { isSourceExcluded } from "../../lib/knowledge/exclusions";
 
 import { prepareHistoryContent, type HistoryPageContent } from "./history-content";
 
@@ -27,6 +28,7 @@ export async function finalizeHistoryBatch(
   ensureBrowserSchema(sdk.database);
   const namespace = settings.namespace || sdk.namespace || "browser";
   let skippedCount = 0;
+  let ingestedCount = 0;
 
   const validItems: Array<{
     title: string;
@@ -53,7 +55,17 @@ export async function finalizeHistoryBatch(
       continue;
     }
 
-    const title = (item.title || filter.domain || "Historical Page").trim();
+    let title = (item.title || filter.domain || "Historical Page").trim();
+    if (title.length > 200 || title.includes("://") || title.includes("?")) {
+      try {
+        const u = new URL(title.includes("://") ? title : `https://${title}`);
+        title = `${u.hostname}${u.pathname !== "/" ? u.pathname : ""}`;
+      } catch {
+        // Keep as-is
+      }
+    }
+    title = title.replace(/\s+/g, " ").trim().slice(0, 200);
+
     const visitTime = item.visitTime || Date.now();
     const textContent = `Page: ${title}\nDomain: ${filter.domain}\nURL: ${filter.cleanUrl}\nVisited: ${new Date(
       visitTime,
@@ -62,6 +74,10 @@ export async function finalizeHistoryBatch(
       ? `browser-history://${encodeURIComponent(item.collectorId)}/${encodeURIComponent(item.id || filter.cleanUrl)}`
       : historySourceUri(filter.cleanUrl);
     const sourceId = browserSourceId("history", sourceUri);
+    if (isSourceExcluded(sdk.database, sourceId, sourceUri) || isSourceExcluded(sdk.database,undefined,filter.cleanUrl)) {
+      skippedCount++;
+      continue;
+    }
 
     const content = contents[index];
     const fetched = content?.url === filter.cleanUrl ? content : null;
@@ -106,7 +122,8 @@ export async function finalizeHistoryBatch(
     let embeddingOffset = 0;
     for (let i = 0; i < validItems.length; i++) {
       const v = validItems[i];
-      sdk.ingest.sourceAndChunks({
+      if(isSourceExcluded(sdk.database,undefined,v.filter.cleanUrl)) {skippedCount++;continue;}
+      const result = sdk.ingest.sourceAndChunks({
         source: {
           id: v.sourceId,
           type: "browser_history",
@@ -125,14 +142,21 @@ export async function finalizeHistoryBatch(
         namespace,
       });
 
+      if (result.skipped) {
+        skippedCount++;
+        embeddingOffset += v.chunks.length;
+        continue;
+      }
+
       embeddingOffset += v.chunks.length;
       commitCatalogGraph(sdk, v, namespace);
       recordCatalog(sdk, "history", v.original, v.sourceId);
+      ingestedCount++;
     }
     afterCommit();
   })();
 
-  return { ingestedCount: validItems.length, skippedCount };
+  return { ingestedCount, skippedCount };
 }
 
 /** Standalone callers use the same two-phase boundary as the durable worker. */

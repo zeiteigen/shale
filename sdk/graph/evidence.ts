@@ -57,14 +57,18 @@ export class GraphEvidence {
 
   list(claimId: string): Evidence[] {
     if (!this.db.query("SELECT 1 FROM sqlite_master WHERE name='sources'").get()) return [];
+    const historyExists = this.db.query("SELECT 1 FROM sqlite_master WHERE name='graph_evidence_history'").get();
     const rows = this.db.query<Record<string,unknown>, [string]>(`SELECT e.*,r.source_id,r.hash,r.uri,r.title,
+      ${historyExists ? '(SELECT withdrawn_at FROM graph_evidence_history h WHERE h.evidence_id=e.id)' : 'NULL'} AS withdrawn_at,
+      ${historyExists ? '(SELECT replacement_id FROM graph_evidence_history h WHERE h.evidence_id=e.id)' : 'NULL'} AS replacement_id,
       NOT EXISTS(SELECT 1 FROM sources s WHERE s.id=r.source_id AND s.hash=r.hash) AS stale
       FROM graph_evidence e JOIN graph_source_revisions r ON r.id=e.revision_id WHERE e.claim_id=? ORDER BY e.created_at,e.id`).all(claimId);
     return rows.map(r => ({id:r.id as string,claimId,revisionId:r.revision_id as number,
       sourceId:r.source_id as string,sourceHash:r.hash as string,uri:r.uri as string,title:r.title as string,
       chunkIndex:r.chunk_index as number ?? undefined,stance:r.stance as Evidence['stance'],locator:JSON.parse(r.locator as string),
       quote:r.quote as string ?? undefined,method:r.method as string,model:r.model as string ?? undefined,
-      confidence:r.confidence as number ?? undefined,createdAt:r.created_at as number,stale:Boolean(r.stale)}));
+      confidence:r.confidence as number ?? undefined,createdAt:r.created_at as number,stale:Boolean(r.stale),
+      withdrawnAt:r.withdrawn_at as number ?? undefined,replacementId:r.replacement_id as string ?? undefined}));
   }
 
   revision(revisionId: number) {

@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { ClaimInput, RelationDefinition } from "./types";
 import type { GraphEntities } from "./entities";
 import { serializeValue } from './values';
+import { hydrateClaim } from './claims';
 
 const BUILTINS: RelationDefinition[] = [
   ...['RELATES_TO','SIMILAR_TO','LINKED_TO','IN_SAME_VAULT','CONTRADICTS'].map(name => ({name,symmetric:true})),
@@ -40,6 +41,8 @@ export class GraphRelations {
         this.define({name:definition.inverse,inverse:definition.name,
           sourceTypes:definition.targetTypes,targetTypes:definition.sourceTypes});
       }
+      const live=this.db.query<Record<string,unknown>,[string]>("SELECT * FROM graph_claims WHERE predicate=? AND status IN ('accepted','proposed','disputed')").all(definition.name);
+      for(const row of live) this.validate(hydrateClaim(row));
     })();
   }
   reciprocal(name: string) {

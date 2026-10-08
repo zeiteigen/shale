@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "exports": {
     "./sdk": "./sdk/index.ts",
-    "./sdk/*": "./sdk/*"
+    "./sdk/*": "./sdk/*",
+    "./mcp": "./mcp/index.ts"
   },
   "scripts": {
     "start": "bun run --cwd visualizer build && bun main/index.ts",
@@ -12,6 +13,8 @@
     "test:web:browser": "bun run web:build && SHALE_WEB_E2E=1 bun test tests/web-interface-ui.test.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tests/tsconfig.json && tsc -p tests/types/tsconfig.json && tsc -p visualizer/tsconfig.json",
     "settings": "bun scripts/settings.ts",
+    "mcp": "bun mcp/cli.ts",
+    "test:mcp": "bun test tests/mcp-server.test.ts tests/knowledge-editing.test.ts tests/mcp-errors.test.ts",
     "queue:view": "bun run scripts/browser-queue-viewer.ts",
     "visualizer": "bun run start",
     "browser:build": "bun scripts/build-browser-contract.ts && bun scripts/build-browser-content.ts",
@@ -21,6 +24,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.8.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@mozilla/readability": "^0.6.0",
     "commander": "^15.0.0",
     "linkedom": "^0.18.13",
@@ -28,7 +32,8 @@
     "openai": "^7.12.1",
     "pdfjs-dist": "6.2.108",
     "sqlite-vec": "^0.1.9",
-    "stopword": "^3.1.5"
+    "stopword": "^3.1.5",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

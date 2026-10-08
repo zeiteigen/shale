@@ -12,6 +12,10 @@ export function commitNote(sdk: ShaleSDK, file: ParsedFile, embeddings: number[]
     const result = sdk.ingest.sourceAndChunks({namespace,source:{type:'markdown_note',
       uri:file.noteUri,origin:'obsidian',title:file.noteTitle,updated_at:file.updatedAt},
       chunks:file.contextualChunks.map((chunk,i) => ({...chunk,embedding:embeddings[i]}))});
+    if (result.skipped) {
+      if (checkpointId) sdk.checkpoint.delete(checkpointId);
+      return {...result,edgesCreated:0};
+    }
     const graph = commitNoteGraph(sdk,result.sourceId,namespace,file,vault);
     recordCommittedFile(sdk, namespace, file.noteUri, file.updatedAt);
     if (checkpointId) sdk.checkpoint.delete(checkpointId);
@@ -28,6 +32,10 @@ export function commitImage(sdk: ShaleSDK, image: ParsedImage, embeddings: numbe
       hash:image.assetHash ? createHash('sha256').update(JSON.stringify([image.imageUri,image.assetHash,chunks.map(c=>c.text_content)])).digest('hex') : undefined},
       // Old checkpoints also contain vision-generated layout; it is always synthetic.
       chunks:chunks.map((chunk,i) => ({...chunk,chunk_type:'synthetic',embedding:embeddings[i]}))});
+    if (result.skipped) {
+      if (checkpointId) sdk.checkpoint.delete(checkpointId);
+      return {...result,edgesCreated:0};
+    }
     const graph = commitImageGraph(sdk,result.sourceId,namespace,{...image,contextualChunks:chunks},vault);
     recordCommittedFile(sdk, namespace, image.imageUri, image.updatedAt);
     if (checkpointId) sdk.checkpoint.delete(checkpointId);

@@ -1,4 +1,5 @@
 import db from "./db-init";
+import { excludedSourceId } from "./knowledge/exclusions";
 
 import { randomUUIDv7 } from "bun";
 
@@ -90,6 +91,7 @@ export interface ChunkEntityLink {
 
 // 1. Sources
 export function addSource(source: Source) {
+  if (excludedSourceId(db, source.id, source.uri)) return false;
   const stmt = db.query(`
     INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
     VALUES ($id, $type, $uri, $origin, $created_at, $title, $updated_at, $hash)
@@ -105,6 +107,7 @@ export function addSource(source: Source) {
     $updated_at: source.updated_at,
     $hash: source.hash,
   });
+  return true;
 }
 
 // 2. Chunks and Embeddings
@@ -124,6 +127,8 @@ export function addChunksWithEmbeddings(chunks: ChunkWithEmbedding[]) {
 
   const txn = db.transaction((items: ChunkWithEmbedding[]) => {
     for (const chunk of items) {
+      const uri = db.query<{ uri: string }, [string]>("SELECT uri FROM sources WHERE id=?").get(chunk.source_id)?.uri;
+      if (excludedSourceId(db, chunk.source_id, uri ?? "")) continue;
       const res = insertChunk.get({
         $source_id: chunk.source_id,
         $chunk_index: chunk.chunk_index,
@@ -149,6 +154,7 @@ export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
   chunkIds: number[];
 } {
   const { source, chunks } = options;
+  if (excludedSourceId(db, source.id, source.uri)) return { sourceId: source.id, chunkIds: [] };
 
   const insertSource = db.query(`
     INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
@@ -172,6 +178,7 @@ export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
   `);
 
   const txn = db.transaction(() => {
+    if (excludedSourceId(db, source.id, source.uri)) return { sourceId: source.id, chunkIds: [] };
     db.query("DELETE FROM chunks WHERE source_id=?").run(source.id);
     insertSource.run({
       $id: source.id,

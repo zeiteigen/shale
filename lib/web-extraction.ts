@@ -3,7 +3,7 @@ import type { PageBlock, ExtractionInfo } from "./browser-contract";
 
 const CLUTTER =
   'script,style,noscript,nav,footer,aside,form,dialog,iframe,svg,[hidden],[aria-hidden="true"],[role="navigation"],.advertisement,.cookie-banner';
-const BLOCKS = "h1,h2,h3,h4,h5,h6,p,pre,ul,ol,table,blockquote,figcaption";
+const BLOCKS = "h1,h2,h3,h4,h5,h6,p,pre,ul,ol,table,blockquote,figcaption,dd,dt,summary";
 const escape = (text: string) =>
   text.replace(
     /[&<>"']/g,
@@ -115,6 +115,33 @@ export function extractDocument(
       headingPath: headings.filter(Boolean),
       ...(/^h[1-6]$/.test(tag) ? { level: Number(tag[1]) } : {}),
     });
+  }
+  if (!blocks.length) {
+    // For modern SPAs where content is rendered inside divs/sections without standard <p> tags
+    const contentDivs = [...root.querySelectorAll("div,section,article,[role='article'],[data-message-author-role]")].filter((node) => {
+      const text = clean(node.textContent || "");
+      if (text.length < 20) return false;
+      return !node.querySelector("div,section,article,p,pre,table,ul,ol");
+    });
+    for (const [index, node] of contentDivs.entries()) {
+      const text = clean(node.textContent || "");
+      if (!text) continue;
+      originalChars += text.length;
+      if (
+        blocks.length >= 500 ||
+        text.length > 20000 ||
+        blocks.reduce((n, b) => n + b.text.length + 2, 0) + text.length > maxChars
+      ) {
+        truncated = true;
+        continue;
+      }
+      blocks.push({
+        kind: "paragraph",
+        text,
+        locator: `div:${index}`,
+        headingPath: [],
+      });
+    }
   }
   if (!blocks.length) {
     const text = clean(root.textContent || "");

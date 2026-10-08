@@ -4,6 +4,7 @@ import { StateManager } from "./state";
 import { ContextHydrator } from "./context";
 import { CheckpointManager } from "./checkpoint";
 import { GraphIngestor } from "./graph";
+import { KnowledgeEditor } from './knowledge/changes';
 import { UnifiedIngestor } from "./ingest";
 import { EmbedderClient, type EmbedderOptions } from "./embed";
 import {
@@ -33,6 +34,7 @@ export class ShaleSDK {
   readonly context: ContextHydrator;
   readonly checkpoint: CheckpointManager;
   readonly graph: GraphIngestor;
+  readonly knowledge: KnowledgeEditor;
   readonly ingest: UnifiedIngestor;
   readonly embedder: EmbedderClient;
   readonly llm: LLMClient;
@@ -102,6 +104,7 @@ export class ShaleSDK {
     const batchStore = modelBatchStore(this.state);
     this.embedder = new EmbedderClient({ batchStore, ...defaultEmbedderOptions });
     this.search = new ChunkSearcher(this.database, this.embedder);
+    this.knowledge = new KnowledgeEditor(this.database,this.graph,this.embedder,this.search,this.namespace);
 
     this.llm = new LLMClient({ batchStore, ...defaultLLMOptions });
     this.models = new ModelBatches(this.llm, this.embedder);

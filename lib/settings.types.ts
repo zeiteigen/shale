@@ -29,4 +29,6 @@ export interface RootSettings {
   SHALE_DB_PATH?: string;
   PORT?: number;
   SHALE_QUEUE_VIEWER_PORT?: number;
+  SHALE_MCP_PORT?: number;
+  MCP_PORT?: number;
 }

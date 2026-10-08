@@ -5,7 +5,7 @@ import type { GraphIngestor } from "../graph";
 import type { Evidence, GraphTraversal, TraversalOptions } from "./types";
 
 export interface GraphSearchOptions extends HybridSearchOptions {
-  mode?: 'hybrid'|'bm25'|'vector'; maxSeeds?: number;
+  mode?: 'hybrid'|'bm25'|'vector'; maxSeeds?: number; minScore?: number;
   graph?: Omit<TraversalOptions,'start'>;
 }
 export interface GraphSearchResult {
@@ -22,7 +22,7 @@ export function expandGraphResults(db: Database, graph: GraphIngestor, results: 
   const neighborhoods = selected.map(start=>graph.query.traverse({...options.graph,start,
     maxNodes:options.graph?.maxNodes ?? 50,maxClaims:options.graph?.maxClaims ?? 100,direction:options.graph?.direction ?? 'both'}));
   const claimIds = new Set(neighborhoods.flatMap(n=>n.claims.map(c=>c.id)));
-  const evidence = [...claimIds].flatMap(id=>graph.evidence.list(id));
+  const evidence = [...claimIds].flatMap(id=>graph.evidence.list(id)).filter(e=>e.withdrawnAt===undefined);
   const passages = new Map<string,GraphSearchResult['relatedPassages'][number]>();
   for (const item of evidence) {
     if (item.chunkIndex === undefined) continue;

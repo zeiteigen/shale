@@ -1,4 +1,5 @@
 import { fingerprint } from "./inbox-store";
+import { isSourceExcluded } from "../../lib/knowledge/exclusions";
 import { embedBounded } from "./embed-bounded";
 import { ensureBrowserSchema } from "./storage-schema";
 import { commitContextGraph } from "./context-graph";
@@ -96,6 +97,12 @@ export async function finalizeSession(
     namespace,
   } = prepared;
   const sessionEntity = sessionEntityName(sessionId);
+  const sessionSourceId = `session:${sessionId}`;
+  if (isSourceExcluded(sdk.database, sessionSourceId, sessionEntity)) {
+    sdk.checkpoint.delete(checkpointId);
+    return { sourceId: sessionSourceId, sessionId, title: synthesis.sessionTitle,
+      summary: synthesis.summary, topics: [], pageCount: 0, edgesCount: 0 };
+  }
   const actualDomains = [
     ...new Set(visits.map((visit) => visit.domain).filter(Boolean)),
   ];
@@ -131,9 +138,10 @@ export async function finalizeSession(
   const unseen = prepared.collectorId
     ? visits.filter(
         (v) =>
-          !sdk.database
+        !sdk.database
             .query("SELECT 1 FROM sources WHERE id=?")
-            .get(visitSource(v).id),
+            .get(visitSource(v).id) &&
+          !isSourceExcluded(sdk.database, visitSource(v).id, visitSource(v).uri),
       )
     : [];
   const embeddings = await embedBounded(
@@ -176,6 +184,10 @@ export async function finalizeSession(
       },
       chunks: chunks.map((chunk, index) => ({ ...chunk, embedding: embeddings[index] })),
     });
+    if (sourceRes.skipped) {
+      sdk.checkpoint.delete(checkpointId);
+      return { sourceRes, edgesCount: 0 };
+    }
     const graph = commitSessionGraph(
       sdk,
       sourceRes.sourceId,

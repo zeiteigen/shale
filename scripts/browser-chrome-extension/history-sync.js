@@ -2,6 +2,20 @@ import { allowedTab } from "./capture.js";
 import { settings } from "./settings.js";
 import { enqueueRecords, nextSequence, hasRecord } from "./outbox.js";
 const DAY = 86400000;
+
+function cleanDisplayTitle(title, url) {
+  let clean = (title || "").trim();
+  if (!clean || clean.length < 3) {
+    try {
+      const u = new URL(url);
+      clean = `${u.hostname}${u.pathname !== "/" ? u.pathname : ""}`;
+    } catch {
+      clean = url;
+    }
+  }
+  return clean.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
 export function historyWindows(range) {
   const now = Date.now(),
     days = { "24h": 1, "7d": 7, "30d": 30, "90d": 90, all: now / DAY };
@@ -24,7 +38,7 @@ export async function historyStep(job) {
         kind: "history_backfill",
         collectorId: config.collectorId,
         url: job.backfillPage.url,
-        title: job.backfillPage.title || job.backfillPage.url,
+        title: cleanDisplayTitle(job.backfillPage.title, job.backfillPage.url),
         visitedAt: Math.round(visit.visitTime),
         sequence: await nextSequence(),
         transitionType: visit.transition || "history",
@@ -111,12 +125,13 @@ export async function removedHistory(info) {
 export async function queueHistoryItem(item) {
   if (!item.url || !(await allowedTab({ url: item.url })).allowed) return false;
   const config = await settings();
+  const title = cleanDisplayTitle(item.title, item.url);
   const record = {
     type: "history_item",
     collectorId: config.collectorId,
     id: item.id,
     url: item.url,
-    title: item.title || item.url,
+    title,
     visitTime: Math.round(item.lastVisitTime || 0),
     visitCount: item.visitCount,
     typedCount: item.typedCount,

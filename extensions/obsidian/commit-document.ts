@@ -23,6 +23,10 @@ export function commitDocument(
       },
       chunks: document.contextualChunks.map((chunk, index) => ({ ...chunk, embedding: embeddings[index] })),
     });
+    if (result.skipped) {
+      if (checkpointId) sdk.deleteCheckpoint(checkpointId);
+      return { ...result, edgesCreated: 0 };
+    }
     const graph = commitDocumentGraph(sdk, result.sourceId, namespace, document, vault);
     recordCommittedFile(sdk, namespace, document.documentUri, document.updatedAt);
     if (checkpointId) sdk.deleteCheckpoint(checkpointId);

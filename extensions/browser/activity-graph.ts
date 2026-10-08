@@ -5,6 +5,7 @@ import { normalizeUrl } from "./filter";
 import { SourceGraph, type ShaleSDK } from "@shale/sdk";
 import type { PreparedSessionData, SessionVisitRecord } from "./types";
 import { fingerprint } from "./inbox-store";
+import { isSourceExcluded } from "../../lib/knowledge/exclusions";
 
 export function visitSource(visit: SessionVisitRecord) {
   const collector = visit.collectorId ?? "legacy",
@@ -22,6 +23,7 @@ export function commitActivityGraph(
   embedding: number[],
 ) {
   const identity = visitSource(visit);
+  if (isSourceExcluded(sdk.database, identity.id, identity.uri)) return null;
   if (sdk.database.query("SELECT 1 FROM sources WHERE id=?").get(identity.id))
     return;
   const observation = visitObservation(sdk, visit);

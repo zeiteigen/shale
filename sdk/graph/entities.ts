@@ -1,6 +1,7 @@
 import { randomUUIDv7 } from "bun";
 import type { Database } from "bun:sqlite";
 import type { EntityInput, GraphEntity } from "./types";
+import { recordVersion } from '../knowledge/version';
 
 export class GraphEntities {
   constructor(private db: Database, private namespace: string) {}
@@ -9,7 +10,7 @@ export class GraphEntities {
     const row = this.db.query<GraphEntity, [number]>(`SELECT id,stable_id AS stableId,namespace,
       coalesce(display_name,name) AS name,type,canonical_id AS canonicalId FROM entities WHERE id=?`).get(id);
     if (!row) throw new Error(`Unknown graph entity ${id}`);
-    return row;
+    return {...row,version:recordVersion(this.db,'entity',id)};
   }
 
   canonical(id: number): GraphEntity {

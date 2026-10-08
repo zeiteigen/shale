@@ -140,7 +140,8 @@ export class ChunkSearcher {
   async graph(options: GraphSearchOptions) {
     const results = options.mode === 'bm25' ? await this.bm25(options)
       : options.mode === 'vector' ? await this.vector(options) : await this.hybrid(options);
-    return expandGraphResults(this.db,new GraphIngestor('default',this.db),results,options);
+    if(options.minScore!==undefined && (!Number.isFinite(options.minScore) || options.minScore<0)) throw new Error('minScore must be finite and nonnegative');
+    return expandGraphResults(this.db,new GraphIngestor('default',this.db),results.filter(r=>r.score>=(options.minScore ?? 0)),options);
   }
 
   /**

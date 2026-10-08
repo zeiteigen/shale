@@ -131,6 +131,7 @@ export interface IngestSourceAndChunksResult {
   sourceId: string;
   chunkIds: number[];
   chunksCount: number;
+  skipped?: "excluded";
 }
 
 export type {

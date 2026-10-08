@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { EventInput, EventRecord } from "./types";
+import { recordVersion } from '../knowledge/version';
 import type { GraphEntities } from "./entities";
 import type { GraphClaims } from "./claims";
 
@@ -35,7 +36,7 @@ export class GraphEvents {
     if (!event) throw new Error('Unknown event');
     const participants = this.db.query<EventRecord['participants'][number], [number]>(
       'SELECT entity_id AS entity,role,position,claim_id AS claimId FROM graph_participants WHERE event_id=? ORDER BY position,role,entity_id').all(id);
-    return {entity:this.entities.get(id),claimId:event.claim_id,kind:event.kind,context:event.context,
+    return {entity:this.entities.get(id),version:recordVersion(this.db,'event',id),claimId:event.claim_id,kind:event.kind,context:event.context,
       occurredFrom:event.occurred_from,occurredTo:event.occurred_to,participants};
   }
 

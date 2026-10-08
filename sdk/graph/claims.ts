@@ -4,6 +4,7 @@ import type { Claim, ClaimFilter, ClaimInput } from "./types";
 import type { GraphRelations } from "./relations";
 import type { GraphEvidence } from "./evidence";
 import { serializeValue, validateValue } from "./values";
+import { recordVersion } from '../knowledge/version';
 
 export function hydrateClaim(row: Record<string,unknown>): Claim {
   return {id:row.id as string,namespace:row.namespace as string,subject:row.subject_id as number,
@@ -47,7 +48,8 @@ export class GraphClaims {
           input.model ?? null,input.extractionRun ?? null,status);
       for (const parent of input.dependsOn ?? []) {
         const dependency = this.get(parent);
-        if (['rejected','retracted','superseded','stale','disputed'].includes(dependency.status)) throw new Error('Cannot derive from inactive or disputed claims');
+        if (['rejected','retracted','superseded','stale','disputed'].includes(dependency.status) ||
+          (status === 'accepted' && dependency.status !== 'accepted')) throw new Error('Accepted conclusions require accepted dependencies; cannot derive from inactive or disputed claims');
         this.db.query('INSERT INTO graph_dependencies VALUES(?,?)').run(id,parent);
       }
       for (const item of input.evidence ?? []) this.evidence.add(id,item);
@@ -58,12 +60,12 @@ export class GraphClaims {
   get(id: string): Claim {
     const row = this.db.query<Record<string,unknown>, [string]>('SELECT * FROM graph_claims WHERE id=?').get(id);
     if (!row) throw new Error(`Unknown claim ${id}`);
-    return hydrateClaim(row);
+    return {...hydrateClaim(row),version:recordVersion(this.db,'claim',id)};
   }
 
   list(filter: ClaimFilter = {}): Claim[] {
     const where: string[] = []; const params: (string|number)[] = [];
-    for (const [key,column] of [['subject','subject_id'],['predicate','predicate'],['namespace','namespace'],['context','context'],['polarity','polarity']] as const)
+    for (const [key,column] of [['subject','subject_id'],['object','object_id'],['predicate','predicate'],['namespace','namespace'],['context','context'],['polarity','polarity']] as const)
       if (filter[key] !== undefined) { where.push(`${column}=?`); params.push(filter[key]!); }
     if (filter.entityId !== undefined) { where.push('(subject_id=? OR object_id=?)'); params.push(filter.entityId,filter.entityId); }
     if (filter.objectOnly) where.push('object_id IS NOT NULL');

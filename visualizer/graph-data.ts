@@ -28,6 +28,14 @@ export function getGraphData(sdk: ShaleSDK, filter: ClaimFilter = {}): GraphData
   return sdk.database.transaction(() => graphSnapshot(sdk, filter))();
 }
 
+function sourceRank(s: { uri: string }): number {
+  if (/^https?:\/\//.test(s.uri)) return 4;
+  if (s.uri.startsWith("browser-public:")) return 3;
+  if (s.uri.startsWith("browser-content-version:")) return 2;
+  if (s.uri.startsWith("browser-history:")) return 1;
+  return 0;
+}
+
 function graphSnapshot(sdk: ShaleSDK, filter: ClaimFilter): GraphData {
   const db = sdk.database;
   const entities = db.query<{ id: number; namespace: string; name: string; identityName: string; type: string; stableId:string;canonicalId:number|null }, []>(
@@ -56,9 +64,8 @@ function graphSnapshot(sdk: ShaleSDK, filter: ClaimFilter): GraphData {
   const sourceByUri = new Map<string, (typeof sources)[number]>();
   for (const source of sources) {
     const identity = graphIdentityFromSourceUri(source.uri);
-    // Rich web-page sources are queried first and remain the preferred material
-    // when history/bookmark metadata points at the same page node.
-    if (!sourceByUri.has(identity) || /^https?:\/\//.test(source.uri)) {
+    const existing = sourceByUri.get(identity);
+    if (!existing || sourceRank(source) > sourceRank(existing)) {
       sourceByUri.set(identity, source);
     }
   }

@@ -24,6 +24,32 @@ const TRACKING_PARAMS = new Set([
   "_hsenc",
   "_hsmi",
   "igshid",
+  // Ephemeral Google search tracking and transient session parameters
+  "fbs",
+  "mstk",
+  "ved",
+  "sxsrf",
+  "aep",
+  "ntc",
+  "aioh",
+  "csuir",
+  "cs",
+  "mtid",
+  "sourceid",
+  "ei",
+  "sei",
+  "gs_lcrp",
+  "oq",
+  "sca_esv",
+  "bshm",
+  "biw",
+  "bih",
+  "dpr",
+  "client",
+  // Social and share tracking
+  "si",
+  "feature",
+  "session_id",
 ]);
 
 /**

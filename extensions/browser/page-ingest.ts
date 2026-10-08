@@ -19,6 +19,7 @@ import { recordSessionVisit } from "./session-manager";
 import { finalizeSession } from "./session-ingest";
 import { chunkText } from "./chunk-text";
 import { commitPageGraph } from "./page-graph";
+import { isSourceExcluded } from "../../lib/knowledge/exclusions";
 
 /**
  * Phase 1: Discovers and prepares a web page using Chat model analysis and checkpoints.
@@ -263,6 +264,27 @@ export async function finalizePageVisit(
 ): Promise<IngestedPageResult> {
   const { pageData, analysis, cleanUrl, domain, checkpointId, namespace } =
     prepared;
+  const sourceId = browserSourceId(
+    pageData.captureOrigin === "public-fetch" ? "public" : "web",
+    cleanUrl,
+  );
+  const sourceUri =
+    pageData.captureOrigin === "public-fetch"
+      ? `browser-public://${encodeURIComponent(cleanUrl)}`
+      : cleanUrl;
+  const version = contentVersion(prepared);
+  if (
+    isSourceExcluded(sdk.database, sourceId, sourceUri) ||
+    (version && isSourceExcluded(sdk.database, version.id, version.uri))
+  ) {
+    if (prepared.jobId) finishJob(sdk, prepared.jobId, { sourceId, skipped: "excluded" });
+    else sdk.checkpoint.delete(checkpointId);
+    return {
+      sourceId, chunkIds: [], entitiesCount: 0, edgesCount: 0,
+      summary: analysis.summary, topics: [], category: analysis.category,
+      sessionId: prepared.sessionUpdate?.activeSession.sessionId,
+    };
+  }
   if (prepared.sessionUpdate?.preparedSession) {
     await finalizeSession(
       sdk,
@@ -290,15 +312,6 @@ export async function finalizePageVisit(
         )
         .get(cache.source_id)?.hash
     : undefined;
-  const sourceId = browserSourceId(
-    pageData.captureOrigin === "public-fetch" ? "public" : "web",
-    cleanUrl,
-  );
-  const sourceUri =
-    pageData.captureOrigin === "public-fetch"
-      ? `browser-public://${encodeURIComponent(cleanUrl)}`
-      : cleanUrl;
-  const version = contentVersion(prepared);
   const canonicalType =
     pageData.captureOrigin === "public-fetch" ? "public_web_page" : "web_page";
   const capturedAt = pageData.capturedAt ?? pageData.visitedAt;
@@ -477,6 +490,11 @@ export async function finalizePageVisit(
           chunks,
         })
       : null;
+    if (immutable?.skipped) {
+      if (prepared.jobId) finishJob(sdk, prepared.jobId, { sourceId, skipped: "excluded" });
+      else sdk.checkpoint.delete(checkpointId);
+      return { sourceRes: immutable, graphRes: { entitiesInserted: 0, edgesInserted: 0 } };
+    }
     const sourceRes =
       newest || !immutable
         ? sdk.ingest.sourceAndChunks({
@@ -500,6 +518,11 @@ export async function finalizePageVisit(
             chunks,
           })
         : immutable;
+    if (sourceRes.skipped) {
+      if (prepared.jobId) finishJob(sdk, prepared.jobId, { sourceId, skipped: "excluded" });
+      else sdk.checkpoint.delete(checkpointId);
+      return { sourceRes, graphRes: { entitiesInserted: 0, edgesInserted: 0 } };
+    }
     const indexedId = immutable?.sourceId ?? sourceRes.sourceId;
     const imageOffset = 2 + rawChunks.length + referenceChunks.length;
     const graph = commitPageGraph(

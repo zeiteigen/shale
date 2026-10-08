@@ -10,11 +10,16 @@
     "youtube.com"
   ],
   "excludePatterns": [
+    "*localhost:7425*",
     "*mail.google.com*",
     "*accounts.google.com*",
     "*bank*",
     "*login*",
-    "*signin*"
+    "*signin*",
+    "*duosecurity.com*",
+    "*/oauth/*",
+    "*/oidc/*",
+    "*adfs/ls*"
   ],
   "excludePrivateBrowsing": true,
   "sessionInactivityMinutes": 30,

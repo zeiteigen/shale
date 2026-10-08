@@ -201,7 +201,10 @@
       "description": "Maximum padded characters per synchronous embedding request (longest text times input count). Larger individual texts run alone without truncation. Ignored by the asynchronous Batch API.",
       "default": 16384,
       "integer": true,
-      "range": { "min": 1, "max": 2147483647 }
+      "range": {
+        "min": 1,
+        "max": 2147483647
+      }
     },
     "MODEL_BATCH_TIMEOUT_MS": {
       "type": "number",
@@ -237,6 +240,16 @@
       "type": "number",
       "description": "Browser queue viewer HTTP port. Requires restarting the viewer.",
       "default": 7426,
+      "integer": true,
+      "range": {
+        "min": 1,
+        "max": 65535
+      }
+    },
+    "SHALE_MCP_PORT": {
+      "type": "number",
+      "description": "Knowledge Graph MCP HTTP server port. Requires restarting the daemon.",
+      "default": 7427,
       "integer": true,
       "range": {
         "min": 1,

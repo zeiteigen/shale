@@ -26,6 +26,7 @@ export async function finalizeFiles(sdk: ShaleSDK, files: PendingDirectoryFile[]
       const committed = commitFile(sdk, id, data, embeddings);
       result.filesProcessed++;
       result.chunksCreated += committed.chunksCount;
+      if (committed.skipped) continue;
       try {
         await sdk.messages.publish("source:ingested", { sourceId: committed.sourceId, type: data.parsed.fileType,
           uri: pathToFileURL(data.filePath).href, title: data.parsed.title, origin: "directories",

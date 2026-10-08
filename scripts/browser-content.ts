@@ -31,18 +31,34 @@ import { extractDocument } from "../lib/web-extraction";
       copied[i]?.remove();
   }
   const extracted = extractDocument(snapshot, location.href, 60000);
-  const title = (
-    snapshot.querySelector("h1")?.textContent ||
-    document.title ||
-    location.href
-  )
-    .trim()
-    .slice(0, 2000);
+  const rawDocTitle = (document.title || "").trim();
+  const rawH1 = (snapshot.querySelector("h1")?.textContent || "").trim();
+
+  let title = rawDocTitle;
+  const isGeneric =
+    !title ||
+    title.length < 3 ||
+    /^(untitled|new tab|home|index|loading[\s.]*)$/i.test(title);
+  if (isGeneric && rawH1 && rawH1.length >= 3) {
+    title = rawH1;
+  } else if (isGeneric) {
+    try {
+      title = `${location.hostname}${location.pathname !== "/" ? location.pathname : ""}`;
+    } catch {
+      title = location.href;
+    }
+  }
+  title = title.replace(/\s+/g, " ").trim().slice(0, 200);
+
   const excerpt = (
     document
       .querySelector('meta[name="description"]')
       ?.getAttribute("content") || extracted.text.slice(0, 300)
-  ).slice(0, 2000);
+  )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+
   const canonical = document
     .querySelector('link[rel="canonical"]')
     ?.getAttribute("href");

@@ -17,7 +17,11 @@ export function commitPageGraph(
     namespace,
     page.visitedAt,
   );
-  const entity = graph.entity(cleanUrl, page.title, "WebPage", cleanUrl);
+  const cleanTitle = (page.title || domain || "Web Page")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  const entity = graph.entity(cleanUrl, cleanTitle, "WebPage", cleanUrl);
   const observed = { evidence: graph.evidence(imageOffset - 1) };
   graph.claim(entity, "SOURCE_URI", { value: cleanUrl }, observed);
   if (page.captureOrigin)
@@ -27,7 +31,7 @@ export function commitPageGraph(
       { value: page.captureOrigin },
       observed,
     );
-  graph.claim(entity, "TITLE", { value: page.title }, observed);
+  graph.claim(entity, "TITLE", { value: cleanTitle }, observed);
   graph.link(
     entity,
     "BELONGS_TO_DOMAIN",
@@ -78,7 +82,11 @@ export function commitPageGraph(
     } catch {
       continue;
     }
-    const target = graph.entity(url, link.text || url, "WebPage", url);
+    const linkText = (link.text || "").trim();
+    const cleanLinkTitle = linkText
+      ? linkText.replace(/\s+/g, " ").slice(0, 200)
+      : url;
+    const target = graph.entity(url, cleanLinkTitle, "WebPage", url);
     graph.link(entity, "REFERENCES", target, {
       method: "dom",
       evidence: graph.quote(link.url),
@@ -86,7 +94,11 @@ export function commitPageGraph(
     });
   }
   for (const image of page.images ?? []) {
-    const target = graph.entity(image.url, image.alt || image.url, "Image");
+    const target = graph.entity(
+      image.url,
+      (image.alt || image.url).slice(0, 200),
+      "Image",
+    );
     graph.link(entity, "FEATURES_IMAGE", target, {
       method: "dom",
       evidence: graph.quote(image.url),
@@ -108,7 +120,7 @@ export function commitPageGraph(
   const visit = graph.event(
     `visit:${page.visitedAt}:${page.tabId ?? ""}:${sessionId ?? ""}`,
     {
-      name: `${page.recordInSession === false ? "Observed" : "Visited"} ${page.title}`,
+      name: `${page.recordInSession === false ? "Observed" : "Visited"} ${cleanTitle}`,
       kind: page.recordInSession === false ? "page_observation" : "page_visit",
       occurredFrom: page.visitedAt,
       participants: [{ entity, role: "page" }],

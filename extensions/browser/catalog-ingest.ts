@@ -11,6 +11,7 @@ import {
   pageEntityName,
 } from "./identity";
 import { commitCatalogGraph } from "./catalog-graph";
+import { isSourceExcluded } from "../../lib/knowledge/exclusions";
 
 export { processHistoryBatch } from "./history-ingest";
 
@@ -26,6 +27,7 @@ export async function processBookmarksBatch(
   ensureBrowserSchema(sdk.database);
   const namespace = settings.namespace || sdk.namespace || "browser";
   let skippedCount = 0;
+  let ingestedCount = 0;
 
   const validItems: Array<{
     title: string;
@@ -63,6 +65,10 @@ export async function processBookmarksBatch(
       ? `browser-bookmark://${encodeURIComponent(item.collectorId)}/${encodeURIComponent(item.id)}`
       : bookmarkSourceUri(item.id, filter.cleanUrl);
     const sourceId = browserSourceId("bookmark", sourceUri);
+    if (isSourceExcluded(sdk.database, sourceId, sourceUri) || isSourceExcluded(sdk.database,undefined,filter.cleanUrl)) {
+      skippedCount++;
+      continue;
+    }
 
     validItems.push({
       title,
@@ -96,7 +102,8 @@ export async function processBookmarksBatch(
   sdk.database.transaction(() => {
     for (let i = 0; i < validItems.length; i++) {
       const v = validItems[i];
-      sdk.ingest.sourceAndChunks({
+      if(isSourceExcluded(sdk.database,undefined,v.filter.cleanUrl)) {skippedCount++;continue;}
+      const result = sdk.ingest.sourceAndChunks({
         source: {
           id: v.sourceId,
           type: "bookmark",
@@ -117,11 +124,17 @@ export async function processBookmarksBatch(
         namespace,
       });
 
+      if (result.skipped) {
+        skippedCount++;
+        continue;
+      }
+
       commitCatalogGraph(sdk, v, namespace);
       recordCatalog(sdk, "bookmark", v.original, v.sourceId);
+      ingestedCount++;
     }
     afterCommit();
   })();
 
-  return { ingestedCount: validItems.length, skippedCount };
+  return { ingestedCount, skippedCount };
 }

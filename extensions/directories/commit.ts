@@ -17,6 +17,10 @@ export function commitFile(sdk: ShaleSDK, id: string, file: PreparedDirectoryFil
       chunks: parsed.chunks.map((chunk, index) => ({ text_content: chunk.text_content, chunk_index: index,
         chunk_type: chunk.chunk_type ?? "verbatim", embedding: embeddings[index] })),
     });
+    if (result.skipped) {
+      sdk.checkpoint.delete(id);
+      return result;
+    }
     const graph = new SourceGraph(sdk.database, sdk.graph, result.sourceId, namespace, file.updatedAt);
     const primary = parsed.entities.find(entity => entity.name === parsed.title);
     const subject = graph.entity(uri, parsed.title, primary?.type ?? (parsed.fileType === "image" ? "Image" : "Document"));

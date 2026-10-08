@@ -3,6 +3,7 @@ import { randomUUIDv7 } from "bun";
 import defaultDb from "../lib/db-init";
 import { ensureGraphSchema } from "../lib/graph/schema";
 import { getIndexDimension, vectorBuffer } from "../lib/embedding-index";
+import { excludedSourceId } from "../lib/knowledge/exclusions";
 import {
   assertEmbeddingProfile,
   embeddingProfile,
@@ -33,6 +34,12 @@ export class UnifiedIngestor {
     input: IngestSourceAndChunksInput,
   ): IngestSourceAndChunksResult {
     const { source, chunks, namespace = this.defaultNamespace } = input;
+
+    const skipped = (sourceId: string): IngestSourceAndChunksResult => ({
+      sourceId, chunkIds: [], chunksCount: 0, skipped: "excluded",
+    });
+    const excludedId = excludedSourceId(this.db, source.id, source.uri);
+    if (excludedId) return skipped(source.id ?? excludedId);
 
     if (!chunks || chunks.length === 0) {
       throw new Error("Cannot ingest source without any chunks.");
@@ -96,6 +103,8 @@ export class UnifiedIngestor {
     `);
 
     const txn = this.db.transaction(() => {
+      const excludedId = excludedSourceId(this.db, source.id, source.uri);
+      if (excludedId) return skipped(source.id ?? excludedId);
       const dimension = getIndexDimension(this.db);
       const buffers = chunks.map((chunk) =>
         vectorBuffer(chunk.embedding, dimension),
@@ -118,7 +127,8 @@ export class UnifiedIngestor {
         .query<{ id: string }, { $uri: string }>(
           "SELECT id FROM sources WHERE uri = $uri",
         )
-        .get({ $uri: source.uri });
+        .get({ $uri: source.uri }) ?? this.db.query<{id:string},[string]>(`SELECT source_id AS id FROM graph_source_archives
+          WHERE json_extract(snapshot,'$.source.uri')=? ORDER BY removed_at DESC LIMIT 1`).get(source.uri);
       if (existing) {
         if (!source.id) sourceId = existing.id;
         if (sourceId !== existing.id) this.db.query("DELETE FROM sources WHERE id = ?").run(existing.id);
@@ -136,6 +146,7 @@ export class UnifiedIngestor {
         $updated_at: updatedAt,
         $hash: hash,
       });
+      this.db.query('DELETE FROM graph_source_archives WHERE source_id=?').run(sourceId);
 
       const chunkIds: number[] = [];
 

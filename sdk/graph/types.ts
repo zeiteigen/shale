@@ -1,7 +1,7 @@
 export type ClaimStatus = 'proposed' | 'accepted' | 'disputed' | 'rejected' | 'superseded' | 'retracted' | 'stale';
 export type GraphValue = string | number | boolean | null | GraphValue[] | { [key: string]: GraphValue };
 export interface GraphEntity {
-  id: number; stableId: string; namespace: string; name: string; type: string; canonicalId: number | null;
+  id: number; stableId: string; namespace: string; name: string; type: string; canonicalId: number | null; version?: number;
 }
 export interface EntityInput {
   stableId?: string; name: string; type: string; namespace?: string;
@@ -9,7 +9,7 @@ export interface EntityInput {
   externalIds?: Record<string, string>;
 }
 export interface RelationDefinition {
-  name: string; sourceTypes?: string[]; targetTypes?: string[];
+  name: string; description?: string; sourceTypes?: string[]; targetTypes?: string[];
   symmetric?: boolean; inverse?: string; transitive?: boolean; maxTargets?: number;
 }
 export interface ClaimInput {
@@ -21,7 +21,7 @@ export interface ClaimInput {
   evidence?: EvidenceInput[];
 }
 export interface Claim extends Omit<ClaimInput, 'id' | 'evidence' | 'dependsOn' | 'namespace' | 'status'> {
-  id: string; namespace: string; status: ClaimStatus; recordedAt: number;
+  id: string; namespace: string; status: ClaimStatus; recordedAt: number; version?: number;
 }
 export interface EvidenceInput {
   id?: string; sourceId?: string; revisionId?: number; chunkIndex?: number;
@@ -31,10 +31,10 @@ export interface EvidenceInput {
 }
 export interface Evidence extends EvidenceInput {
   id: string; claimId: string; revisionId: number; sourceId: string; sourceHash: string;
-  uri: string; title: string; createdAt: number; stale: boolean;
+  uri: string; title: string; createdAt: number; stale: boolean; withdrawnAt?: number; replacementId?: string;
 }
 export interface ClaimFilter {
-  entityId?: number; subject?: number; predicate?: string; namespace?: string; context?: string;
+  entityId?: number; subject?: number; object?: number; predicate?: string; namespace?: string; context?: string;
   statuses?: ClaimStatus[]; at?: number; knownAt?: number; limit?: number; offset?: number;
   polarity?: 1 | -1; predicates?: string[];
   objectOnly?: boolean;
@@ -53,6 +53,6 @@ export interface EventInput {
   method?: string; model?: string; extractionRun?: string;
 }
 export interface EventRecord {
-  entity: GraphEntity; claimId:string; kind: string; context: string; occurredFrom: number | null; occurredTo: number | null;
+  entity: GraphEntity; version?: number; claimId:string; kind: string; context: string; occurredFrom: number | null; occurredTo: number | null;
   participants: Array<{ entity: number; role: string; position: number; claimId: string }>;
 }

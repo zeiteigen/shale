@@ -18,6 +18,7 @@ import { startCli, handleCliCommand } from "./cli";
 import { startWebServer } from "./web-server";
 import { WebLogs } from "./web-logs";
 import { trackCronRun } from "./cron-runs";
+import { startMcpServer, type RunningMcpServer } from "../mcp";
 
 export {
   startCli,
@@ -217,28 +218,85 @@ if (import.meta.main) {
   const logs = new WebLogs();
   const restoreLogs = logs.captureConsole();
   let hostServer: ReturnType<typeof Bun.serve>;
-  const shutdown = () => {
+  let mcpServer: RunningMcpServer | undefined;
+
+  const shutdown = async () => {
     console.log("[host] Shutting down Shale.");
     restoreLogs();
+    if (mcpServer) {
+      try {
+        await mcpServer.close();
+      } catch {}
+    }
     hostServer?.stop(true);
     process.exit(0);
   };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  try {
+    const mcpPort = Number(getRootSetting("SHALE_MCP_PORT") || getRootSetting("MCP_PORT")) || 7427;
+    mcpServer = await startMcpServer({
+      port: mcpPort,
+      namespace: "knowledge",
+    });
+    console.log(`[host] Knowledge Graph MCP server: ${mcpServer.url} (/mcp, /sse)`);
+  } catch (err: any) {
+    if (err?.code === "EADDRINUSE") {
+      console.warn(
+        `[mcp] Port ${getRootSetting("SHALE_MCP_PORT") || getRootSetting("MCP_PORT") || 7427} already in use; skipping dedicated MCP port.`,
+      );
+    } else {
+      console.warn(`[mcp] Could not initialize MCP server:`, err?.message || err);
+    }
+  }
+
   const webContext = {
-    rootDir: join(import.meta.dir, ".."), crons, extensions: extensionNamespaces,
-    runCron, runAllCrons, logs, shutdown,
+    rootDir: join(import.meta.dir, ".."),
+    crons,
+    extensions: extensionNamespaces,
+    runCron,
+    runAllCrons,
+    logs,
+    shutdown,
     port: () => hostServer?.port ?? (Number(getRootSetting("PORT")) || 7425),
     command: (line: string) => handleCliCommand(line, { isTTY: false }),
   };
+
   try {
-    hostServer = startWebServer(webContext, {
-      health: () => Response.json({ status: "ok", ...connectorCapabilities(subscribe_ingest) }),
-      connectors: () => Response.json(connectorCapabilities(subscribe_ingest)),
-      connector: req => handleConnectorRequest(req, subscribe_ingest),
-      ingest: req => handleIngestRequest(req, subscribe_ingest, item => ingestQueue.push(item)),
-    }, Number(getRootSetting("PORT")) || 7425);
+    hostServer = startWebServer(
+      webContext,
+      {
+        health: () =>
+          Response.json({
+            status: "ok",
+            ...connectorCapabilities(subscribe_ingest),
+            mcp: mcpServer?.url,
+          }),
+        connectors: () => Response.json(connectorCapabilities(subscribe_ingest)),
+        connector: (req) => handleConnectorRequest(req, subscribe_ingest),
+        ingest: (req) =>
+          handleIngestRequest(req, subscribe_ingest, (item) => ingestQueue.push(item)),
+        mcpUrl: () => mcpServer?.url,
+      },
+      Number(getRootSetting("PORT")) || 7425,
+    );
     console.log(`[host] Shale web interface: http://localhost:${hostServer.port}`);
-    Bun.spawn([process.execPath,join(import.meta.dir,'../scripts/graph-snapshot-worker.ts'),
-      '--parent',String(process.pid),'--origin',`http://127.0.0.1:${hostServer.port}`],{stdout:'inherit',stderr:'inherit'});
+    if (mcpServer) {
+      console.log(`[host] Knowledge Graph MCP proxy: http://localhost:${hostServer.port}/mcp`);
+    }
+    Bun.spawn(
+      [
+        process.execPath,
+        join(import.meta.dir, "../scripts/graph-snapshot-worker.ts"),
+        "--parent",
+        String(process.pid),
+        "--origin",
+        `http://127.0.0.1:${hostServer.port}`,
+      ],
+      { stdout: "inherit", stderr: "inherit" },
+    );
   } catch (err: any) {
     if (err.code === "EADDRINUSE") {
       console.warn(
