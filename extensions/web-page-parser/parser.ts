@@ -134,7 +134,6 @@ export async function parseWebPage(
             filePath: imageUrl,
             fileType: "image",
             contextEntity: title,
-            options: { deferEmbedding: true },
           },
           { target: "process-image", timeoutMs: 300000, signal },
         );

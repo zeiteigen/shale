@@ -28,9 +28,7 @@ export {
 } from "./parse-image";
 
 /**
- * Processes a batch of image files adhering strictly to the Two-Phase Local GPU Optimization Pattern:
- * Phase 1 (Chat Model Only): Parses all images, generates descriptions and builds contextual chunks (Zero embeddings).
- * Phase 2 (Embedding Model Only): If deferEmbedding is false, batch embeds all generated chunks in a single GPU call (Zero chat calls).
+ * Process images as a chat batch and return descriptions and contextual chunks.
  */
 export async function processImageFilesBatch(
   request: ProcessFilesBatchRequest,
@@ -79,9 +77,7 @@ export async function processImageFilesBatch(
     };
   }
 
-  sdk.logger.info(
-    `[process-image] [Phase 1: Chat Model] Batch parsing ${items.length} image file(s) with Chat model...`,
-  );
+  sdk.logger.info(`[process-image] Batch parsing ${items.length} image file(s) with Chat model...`);
 
   const results: ProcessFileResponse[] = [];
   const errors: Array<{ filePath: string; error: string }> = [];
@@ -91,7 +87,6 @@ export async function processImageFilesBatch(
   const relation = settings?.defaultRelation ?? "CONTAINED_IN";
 
   const prepare = async () => {
-    // Phase 1: Chat Model Only across all images (Zero embeddings)
     await sdk.models.mapChat(items, async (item, index) => {
       signal?.throwIfAborted();
       const rawPath = item.filePath.startsWith("file://")
@@ -129,10 +124,6 @@ export async function processImageFilesBatch(
           chunk_type: c.chunk_type,
           text_content: c.text_content,
           metadata: c.metadata,
-          embedding:
-            c.chunk_index === 0 && item.options?.precomputedEmbedding
-              ? item.options.precomputedEmbedding
-              : undefined,
         }));
 
         results[index] = {
@@ -157,7 +148,7 @@ export async function processImageFilesBatch(
         };
       } catch (err: any) {
         sdk.logger.error(
-          `Error parsing image ${item.filePath} in Phase 1:`,
+          `Error parsing image ${item.filePath}:`,
           err,
         );
         errors.push({
@@ -184,7 +175,7 @@ export async function processImageFilesBatch(
     });
 
     sdk.logger.info(
-      `[process-image] [Phase 1: Chat Model] Parsed ${results.filter(result => result.success).length} image(s), ${errors.length} failed. (Zero embeddings performed)`,
+      `[process-image] Parsed ${results.filter(result => result.success).length} image(s), ${errors.length} failed.`,
     );
 
     return results;
@@ -197,60 +188,8 @@ export async function processImageFilesBatch(
     results,
     errors: errors.length ? errors : undefined,
   });
-  if (request.options?.deferEmbedding) {
-    return sdk.models.phase("chat", async () => {
-      await prepare();
-      return response();
-    });
-  }
-
-  const finalize = async () => {
-    // Phase 2: Embedding Model Only across all generated chunks (Zero Chat calls)
-    const chunksToEmbed: Array<{ chunk: ProcessedChunk }> = [];
-    const textsToEmbed: string[] = [];
-
-    for (const res of results) {
-      if (!res.success) continue;
-      for (const chunk of res.chunks) {
-        if (!chunk.embedding) {
-          chunksToEmbed.push({ chunk });
-          textsToEmbed.push(chunk.text_content);
-        }
-      }
-    }
-
-    if (textsToEmbed.length > 0) {
-      sdk.logger.info(
-        `[process-image] [Phase 2: Embedding Model] Batch embedding ${textsToEmbed.length} chunk(s) across ${results.length} image(s)...`,
-      );
-
-      try {
-        const embeddings = await sdk.embed(textsToEmbed, { signal });
-        if (Array.isArray(embeddings)) {
-          for (let i = 0; i < chunksToEmbed.length; i++) {
-            chunksToEmbed[i].chunk.embedding = embeddings[i];
-          }
-        }
-        sdk.logger.info(
-          `[process-image] [Phase 2: Embedding Model] Completed batch embedding of ${textsToEmbed.length} chunk(s). (Zero chat calls performed in Phase 2)`,
-        );
-      } catch (embErr) {
-        for (const result of results) {
-          if (
-            result.success &&
-            result.chunks.some((chunk) => !chunk.embedding)
-          ) {
-            result.success = false;
-            result.error = String(embErr);
-            errors.push({ filePath: result.filePath, error: result.error });
-          }
-        }
-      }
-    }
-
-    return response();
-  };
-  return sdk.models.batch(prepare, finalize);
+  await prepare();
+  return response();
 }
 
 /**

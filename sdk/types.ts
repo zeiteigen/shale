@@ -115,9 +115,6 @@ export interface ChunkInput {
   text_content: string;
   chunk_index?: number;
   chunk_type?: ChunkType;
-  embedding: number[] | Float32Array;
-  /** Required for serialized/precomputed embeddings in a profile-tracked index. */
-  embedding_profile?: import("../lib/embedding-profile").EmbeddingProfile;
   entity_names?: string[];
 }
 
@@ -136,8 +133,6 @@ export interface IngestSourceAndChunksResult {
 
 export type {
   AIClientOptions,
-  EmbedderOptions,
-  OpenAIEmbeddingResponse,
   LLMOptions,
   LLMResponse,
   LLMImageInput,
@@ -146,9 +141,8 @@ export type {
   LLMQueryInput,
 } from "../lib/ai";
 
-export type SearchMode = "hybrid" | "vector" | "bm25";
+export type SearchMode = "bm25";
 
-export type HybridFusionStrategy = "rrf" | "linear" | "custom";
 
 export type BM25KeywordFusionStrategy =
   "rrf" | "sum_scores" | "max_score" | "disjunctive";
@@ -162,52 +156,17 @@ export interface ChunkSearchResult {
   source_title?: string | null;
   source_uri?: string | null;
   score: number;
-  cosineSimilarity?: number;
-  distance?: number;
   bm25Score?: number;
   preview?: string | null;
   matchedKeywords?: string[];
   rank?: number;
   fusionDetails?: {
     strategy: string;
-    vectorRank?: number;
-    vectorScore?: number;
     bm25Rank?: number;
     bm25Score?: number;
     rrfScore?: number;
     [key: string]: any;
   };
-}
-
-export interface HybridFusionItemInfo {
-  chunkId: number;
-  vectorRank?: number;
-  vectorScore?: number;
-  cosineSimilarity?: number;
-  bm25Rank?: number;
-  bm25Score?: number;
-  item: Omit<ChunkSearchResult, "score">;
-}
-
-export interface HybridFusionOptions {
-  strategy?: HybridFusionStrategy;
-  rrfK?: number;
-  vectorWeight?: number;
-  bm25Weight?: number;
-  customFusion?: (info: HybridFusionItemInfo) => number;
-}
-
-export interface VectorSearchOptions {
-  embeddingProfile?: import("../lib/embedding-profile").EmbeddingProfile;
-  query?: string;
-  vector?: number[] | Float32Array;
-  chunkId?: number;
-  limit?: number;
-  excludeSelf?: boolean;
-  minSimilarity?: number;
-  filterSourceId?: string;
-  filterChunkType?: ChunkType;
-  embedderOptions?: import("../lib/ai").EmbedderOptions;
 }
 
 export interface BM25SearchOptions {
@@ -220,38 +179,11 @@ export interface BM25SearchOptions {
   stopWords?: string[] | Set<string>;
   keepStopWords?: boolean;
   filterSourceId?: string;
+  excludeSourceId?: string;
   filterChunkType?: ChunkType;
   useSqliteStopwords?: boolean;
 }
 
-export interface HybridSearchOptions {
-  query: string;
-  vector?: number[] | Float32Array;
-  chunkId?: number;
-  limit?: number;
-  vectorCandidateLimit?: number;
-  bm25CandidateLimit?: number;
-  fusion?: HybridFusionOptions;
-  filterSourceId?: string;
-  filterChunkType?: ChunkType;
-  bm25Options?: Omit<
-    BM25SearchOptions,
-    "query" | "limit" | "filterSourceId" | "filterChunkType"
-  >;
-  vectorOptions?: Omit<
-    VectorSearchOptions,
-    | "query"
-    | "vector"
-    | "chunkId"
-    | "limit"
-    | "filterSourceId"
-    | "filterChunkType"
-  >;
-}
-
-export type UnifiedSearchOptions =
-  | ({ mode: "hybrid" } & HybridSearchOptions)
-  | ({ mode: "vector" } & VectorSearchOptions)
-  | ({ mode: "bm25" } & BM25SearchOptions);
+export type UnifiedSearchOptions = { mode: "bm25" } & BM25SearchOptions;
 
 export * from "../lib/messages.types";

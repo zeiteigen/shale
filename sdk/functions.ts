@@ -3,7 +3,6 @@ import type { ContextHydrator } from "./context";
 import type { CheckpointManager } from "./checkpoint";
 import type { GraphIngestor } from "./graph";
 import type { UnifiedIngestor } from "./ingest";
-import type { EmbedderOptions } from "./embed";
 import type { LLMOptions, LLMResponse, LLMQueryInput } from "./llm";
 import type { ChunkSearcher } from "./search";
 import type { SettingsManager } from "./settings";
@@ -20,8 +19,6 @@ import type {
   IngestSourceAndChunksInput,
   IngestSourceAndChunksResult,
   ChunkSearchResult,
-  HybridSearchOptions,
-  VectorSearchOptions,
   BM25SearchOptions,
   UnifiedSearchOptions,
 } from "./types";
@@ -216,33 +213,9 @@ export const searchChunks = (
   options: UnifiedSearchOptions,
 ): Promise<ChunkSearchResult[]> => getActiveSDK().search.query(options);
 
-export const searchHybrid = (
-  options: HybridSearchOptions,
-): Promise<ChunkSearchResult[]> => getActiveSDK().search.hybrid(options);
-
-export const searchVector = (
-  options: VectorSearchOptions,
-): Promise<ChunkSearchResult[]> => getActiveSDK().search.vector(options);
-
 export const searchBM25 = (
   options: BM25SearchOptions,
 ): Promise<ChunkSearchResult[]> => getActiveSDK().search.bm25(options);
-
-// Embed functions (delegating to active SDK instance)
-export async function embed(
-  input: string,
-  options?: EmbedderOptions,
-): Promise<number[]>;
-export async function embed(
-  input: string[],
-  options?: EmbedderOptions,
-): Promise<number[][]>;
-export async function embed(
-  input: string | string[],
-  options?: EmbedderOptions,
-): Promise<number[] | number[][]> {
-  return getActiveSDK().embed(input as any, options);
-}
 
 // LLM query function (delegating to active SDK instance)
 export async function queryLLM(

@@ -1,6 +1,6 @@
 # Obsidian connector
 
-Vault ingestion completes note expansion, image analysis, and document parsing before embedding across all configured vaults. Each prepared file keeps its parsed metadata, link resolutions, provenance, and namespace in a checkpoint. Source chunks, graph assertions, and checkpoint completion commit together. A failed file retains its checkpoint and prevents the discovery batch from advancing its watermarks.
+Vault ingestion prepares note expansion, image analysis, and document parsing across configured vaults. Each prepared file keeps its parsed metadata, link resolutions, provenance, and namespace in a checkpoint. Source chunks, graph assertions, and checkpoint completion commit together. A failed file retains its checkpoint and prevents the discovery batch from advancing its watermarks.
 
 Delegated image batches use each vision request's model timeout rather than a
 30-second deadline for the whole batch. Failed processing is left pending for the
@@ -29,7 +29,7 @@ ODP, ODS, RTF, TXT, CSV, HTML, and EPUB attachments. Hidden folders and
 `ignoredDirectories` are skipped. Markdown stays on the existing note pipeline.
 
 The connector calls `process-document` through the typed `file:process` message
-channel with `deferEmbedding: true`. The host loads that extension automatically;
+channel. The host loads that extension automatically;
 standalone SDK callers must register its message handlers on the same bus. Parser
 limits, supported formats, and optional summaries are configured in
 [process-document](../process-document/README.md). Missing handlers or failed parsing
@@ -43,7 +43,7 @@ after a document cursor has advanced may require a `forceAll` scan. Existing
 unchanged notes also need a `forceAll` scan to gain new document-reference claims.
 
 Each document is checkpointed immediately after preparation, including optional
-summaries, so retries and recovery can embed cached chunks without parsing or
+summaries, so retries and recovery can commit cached chunks without parsing or
 calling the chat model again. Document source revisions include the binary
 fingerprint, parsed metadata, and chunk content. Parsed metadata and page, slide,
 sheet, and heading locations are stored as graph claims linked to source evidence.

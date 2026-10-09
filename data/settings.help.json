@@ -3,7 +3,7 @@
   "settings": {
     "OPENAI_BASE_URL": {
       "type": "string",
-      "description": "Shared API base URL. Shale appends /chat/completions for chat and /embeddings for embeddings. Role-specific base URLs or full endpoints override it.",
+      "description": "Shared API base URL. Shale appends /chat/completions. The chat-specific base URL or full endpoint overrides it.",
       "default": "https://api.openai.com/v1",
       "format": "url"
     },
@@ -13,21 +13,9 @@
       "default": null,
       "format": "url"
     },
-    "EMBEDDING_BASE_URL": {
-      "type": "string",
-      "description": "Optional embedding API base URL. Shale appends /embeddings. When unset, OPENAI_BASE_URL is used.",
-      "default": null,
-      "format": "url"
-    },
     "OPENAI_CHAT_ENDPOINT": {
       "type": "string",
       "description": "Optional full chat request URL, including /chat/completions. Leave unset to derive it from the base URL.",
-      "default": null,
-      "format": "url"
-    },
-    "EMBEDDING_ENDPOINT": {
-      "type": "string",
-      "description": "Optional full embedding request URL, including /embeddings. Leave unset to derive it from the base URL.",
       "default": null,
       "format": "url"
     },
@@ -37,25 +25,14 @@
       "default": null,
       "format": "url"
     },
-    "EMBEDDING_BATCH_ENDPOINT": {
-      "type": "string",
-      "description": "Independent OpenAI-style embedding Batch API URL ending in /batches. Files API is alongside it.",
-      "default": null,
-      "format": "url"
-    },
     "OPENAI_CHAT_MODEL": {
       "type": "string",
       "description": "Default chat/vision model.",
       "default": "gpt-4o-mini"
     },
-    "OPENAI_EMBEDDING_MODEL": {
-      "type": "string",
-      "description": "Default embedding model. Changing models on a populated index requires reindexing.",
-      "default": "text-embedding-3-small"
-    },
     "MODEL_GPU_RESOURCE": {
       "type": "string",
-      "description": "Shared local GPU identity used to coordinate chat and embedding phases.",
+      "description": "Shared local GPU identity used to coordinate chat batches.",
       "default": "local-gpu"
     },
     "SHALE_DB_PATH": {
@@ -66,16 +43,6 @@
     "CHAT_TIMEOUT_MS": {
       "type": "number",
       "description": "Chat HTTP request timeout in milliseconds. Defaults to 300000 locally or 60000 remotely.",
-      "default": null,
-      "integer": true,
-      "range": {
-        "min": 1,
-        "max": 4294967295
-      }
-    },
-    "EMBEDDING_TIMEOUT_MS": {
-      "type": "number",
-      "description": "Embedding HTTP request timeout in milliseconds. Defaults to 300000 locally or 60000 remotely.",
       "default": null,
       "integer": true,
       "range": {
@@ -128,26 +95,7 @@
         "max": 4294967295
       }
     },
-    "EMBEDDING_DIMENSIONS": {
-      "type": "number",
-      "description": "Embedding storage padding and new/empty index dimensions. Populated indexes require explicit reindexing after changes.",
-      "default": 4096,
-      "integer": true,
-      "range": {
-        "min": 1,
-        "max": 4294967295
-      }
-    },
     "OPENAI_CHAT_BATCH_MODE": {
-      "type": "string",
-      "description": "Select bounded concurrent calls or the asynchronous OpenAI-style Batch API.",
-      "default": "concurrent",
-      "possibleValues": [
-        "concurrent",
-        "api"
-      ]
-    },
-    "EMBEDDING_BATCH_MODE": {
       "type": "string",
       "description": "Select bounded concurrent calls or the asynchronous OpenAI-style Batch API.",
       "default": "concurrent",
@@ -174,36 +122,6 @@
       "range": {
         "min": 1,
         "max": 50000
-      }
-    },
-    "EMBEDDING_BATCH_SIZE": {
-      "type": "number",
-      "description": "Maximum texts per embedding request.",
-      "default": 64,
-      "integer": true,
-      "range": {
-        "min": 1,
-        "max": 50000
-      }
-    },
-    "EMBEDDING_CONCURRENCY": {
-      "type": "number",
-      "description": "Maximum concurrent synchronous embedding requests per endpoint.",
-      "default": 1,
-      "integer": true,
-      "range": {
-        "min": 1,
-        "max": 1024
-      }
-    },
-    "EMBEDDING_BATCH_MAX_CHARS": {
-      "type": "number",
-      "description": "Maximum padded characters per synchronous embedding request (longest text times input count). Larger individual texts run alone without truncation. Ignored by the asynchronous Batch API.",
-      "default": 16384,
-      "integer": true,
-      "range": {
-        "min": 1,
-        "max": 2147483647
       }
     },
     "MODEL_BATCH_TIMEOUT_MS": {

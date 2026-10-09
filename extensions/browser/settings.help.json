@@ -104,7 +104,7 @@
     },
     "chunkSize": {
       "type": "number",
-      "description": "Target character size for text chunks stored in the vector and full-text search index.",
+      "description": "Target character size for stored text chunks.",
       "default": 1000,
       "range": {
         "min": 200,
@@ -179,7 +179,7 @@
     "maxJobsPerRun": {
       "type": "number",
       "default": 20,
-      "description": "Maximum jobs selected for one chat-then-embedding batch.",
+      "description": "Maximum jobs selected for one processing batch.",
       "range": {
         "min": 1,
         "max": 100
@@ -230,18 +230,9 @@
         "max": 60000
       }
     },
-    "maxEmbeddingTexts": {
-      "type": "number",
-      "default": 64,
-      "description": "Maximum texts per embedding request.",
-      "range": {
-        "min": 1,
-        "max": 256
-      }
-    },
     "fetchHistoryPages": {
       "type": "boolean",
-      "description": "Fetch and parse HTML for eligible history URLs before embedding. Requires web-page-parser allowFetch. Failed fetches retain metadata; fetched content is labelled with its retrieval time.",
+      "description": "Fetch and parse HTML for eligible history URLs. Requires web-page-parser allowFetch. Failed fetches retain metadata; fetched content is labelled with its retrieval time.",
       "default": true
     },
     "allowPublicPageEnrichment": {

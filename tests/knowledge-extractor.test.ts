@@ -16,7 +16,7 @@ function fixture(count=1) {
   const sdk=createExtensionSDK('knowledge-extractor',{database:db,namespace:'knowledge'});
   sdk.settings.get=((key:string)=>({enabled:true,maxSourcesPerRun:5,maxContentChars:12000,namespace:'knowledge',llmModel:'test-model'} as Record<string,unknown>)[key]) as typeof sdk.settings.get;
   for (let i=0;i<count;i++) sdk.ingest.sourceAndChunks({source:{id:`source-${i}`,uri:`file:///source-${i}.md`,title:`Source ${i}`,origin:'test',type:'note',hash:`v1-${i}`,created_at:100+i,updated_at:100+i},
-    chunks:[{text_content:'Alice recommended SQLite for Atlas.',embedding:[1,0,0,0]}]});
+    chunks:[{text_content:'Alice recommended SQLite for Atlas.'}]});
   const extraction={entities:[{key:'alice',name:'Alice',type:'Person'},{key:'sqlite',name:'SQLite',type:'Product'},{key:'atlas',name:'Atlas',type:'Project'}],
     claims:[{subject:'alice',predicate:'RECOMMENDS',object:'sqlite',context:'Atlas',confidence:0.9,evidence:[{chunkIndex:0,quote:'Alice recommended SQLite for Atlas.'}]}],
     events:[{key:'decision',name:'Atlas database recommendation',kind:'Recommendation',context:'Atlas',participants:[{entity:'alice',role:'recommender'},{entity:'sqlite',role:'choice'},{entity:'atlas',role:'project'}],
@@ -36,7 +36,7 @@ it('processes the entire revision in bounded windows with correct Unicode eviden
   windowLimits(sdk);
   const prefix = '😀'.repeat(50) + 'a'.repeat(50), quote = 'Bob chose SQLite.';
   sdk.ingest.sourceAndChunks({ source: { id: 'long', uri: 'file:///long.md', title: 'Long source', type: 'note', origin: 'test' },
-    chunks: [{ text_content: prefix + quote + 'z'.repeat(100), embedding: [1, 0, 0, 0] }] });
+    chunks: [{ text_content: prefix + quote + 'z'.repeat(100) }] });
   const revision = db.query<{ id: number }, []>('SELECT id FROM graph_source_revisions').get()!.id;
   let calls = 0;
   sdk.queryLLM = (async (prompt: string) => {
@@ -66,7 +66,7 @@ it('recovers a partial window transaction without repeating chat or marking the 
   const { sdk, db, extraction } = fixture(0);
   windowLimits(sdk);
   sdk.ingest.sourceAndChunks({ source: { id: 'long', uri: 'file:///long.md', title: 'Long source', type: 'note', origin: 'test' },
-    chunks: [{ text_content: 'Alice recommended SQLite for Atlas.' + 'x'.repeat(200), embedding: [1, 0, 0, 0] }] });
+    chunks: [{ text_content: 'Alice recommended SQLite for Atlas.' + 'x'.repeat(200) }] });
   const revision = db.query<{ id: number }, []>('SELECT id FROM graph_source_revisions').get()!.id;
   let calls = 0;
   sdk.queryLLM = (async () => { calls++; return JSON.stringify(extraction); }) as unknown as typeof sdk.queryLLM;
@@ -85,7 +85,7 @@ it('gives unprocessed sources a turn before continuing a long source', async () 
   const { sdk } = fixture(2);
   windowLimits(sdk, 1);
   sdk.ingest.sourceAndChunks({ source: { id: 'source-0', uri: 'file:///source-0.md', title: 'Long source', type: 'note', origin: 'test', hash: 'long', updated_at:100 },
-    chunks: [{ text_content: 'a'.repeat(300), embedding: [1, 0, 0, 0] }] });
+    chunks: [{ text_content: 'a'.repeat(300) }] });
   const prompts: string[] = [];
   sdk.queryLLM = (async (prompt: string) => { prompts.push(prompt); return '{"entities":[],"claims":[],"events":[]}'; }) as typeof sdk.queryLLM;
   await run(sdk);
@@ -110,7 +110,6 @@ it('completes every chat request before graph commits, grounds events and claims
   sdk.queryLLM=(async()=>{chats++;expect(sdk.graph.claims.list()).toHaveLength(0);return JSON.stringify(extraction);}) as unknown as typeof sdk.queryLLM;
   const add=sdk.graph.claims.add.bind(sdk.graph.claims);
   sdk.graph.claims.add=(input)=>{expect(chats).toBe(2);return add(input);};
-  sdk.embed=(()=>{throw new Error('Extraction must reuse existing embeddings');}) as typeof sdk.embed;
   expect((await run(sdk)).committed).toBe(2);
   expect(sdk.graph.claims.list()).toHaveLength(10);
   expect(sdk.graph.claims.list().every(c=>c.status==='proposed')).toBe(true);
@@ -221,7 +220,7 @@ it('keeps checkpoint evidence on the original revision when a source changes dur
   const {sdk,extraction}=fixture();
   sdk.queryLLM=(async()=> {
     sdk.ingest.sourceAndChunks({source:{id:'source-0',uri:'file:///source-0.md',title:'Changed',origin:'test',type:'note',hash:'v2'},
-      chunks:[{text_content:'Bob recommended PostgreSQL.',embedding:[1,0,0,0]}]});
+      chunks:[{text_content:'Bob recommended PostgreSQL.'}]});
     return JSON.stringify(extraction);
   }) as unknown as typeof sdk.queryLLM;
   await run(sdk);

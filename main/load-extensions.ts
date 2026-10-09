@@ -47,7 +47,6 @@ for await (const file of glob.scan(extensionsDir)) {
             manifest.namespace || manifest.name,
             undefined,
             undefined,
-            undefined,
             manifest.name,
             extensionFolder,
           );
@@ -77,7 +76,6 @@ for await (const file of glob.scan(extensionsDir)) {
           const sdk = createExtensionSDK(
             manifest.name,
             manifest.namespace || manifest.name,
-            undefined,
             undefined,
             undefined,
             manifest.name,

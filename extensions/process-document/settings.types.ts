@@ -12,7 +12,6 @@ export interface ProcessDocumentSettings {
   summaryPrompt?: string;
   summaryMaxChars?: number;
   summaryTimeoutMs?: number;
-  embeddingBatchSize?: number;
   defaultEntityType?: string;
   defaultRelation?: string;
 }

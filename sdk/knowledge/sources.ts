@@ -2,9 +2,6 @@ import { randomUUIDv7 } from 'bun';
 import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import type { GraphIngestor } from '../graph';
-import type { EmbeddingClient } from '../embed';
-import { getIndexDimension, vectorBuffer } from '../../lib/embedding-index';
-import { assertEmbeddingProfile, embeddingProfile, readEmbeddingProfile } from '../../lib/embedding-profile';
 import { graphIdentityFromSourceUri, sourceEntityName } from '../../lib/source-identity';
 import { mutationSchemas, type MutationName } from './schemas';
 import { checkVersion, recordVersion } from './version';
@@ -16,43 +13,22 @@ const split = (text:string,size:number) => Array.from({length:Math.ceil(text.len
 const hash = (uri:string,chunks:Pick<Chunk,'chunk_index'|'chunk_type'|'text_content'>[]) =>
   createHash('sha256').update(JSON.stringify([uri,chunks.map(c=>[c.chunk_index,c.chunk_type,c.text_content])])).digest('hex');
 
-/** Source edits run in the caller's transaction; embedding work happens beforehand. */
+/** Source edits run atomically in the caller's transaction. */
 export class KnowledgeSources {
   private records:SourceRecords;
   constructor(private db:Database,private graph:GraphIngestor,private namespace:string) { this.records=new SourceRecords(db); }
 
-  async prepare(name:MutationName,args:Record<string,unknown>,embedder:EmbeddingClient):Promise<number[][]|undefined> {
-    const texts=this.texts(name,args);
-    return texts?.length ? embedder.embedBatch(texts) : texts ? [] : undefined;
-  }
-
-  texts(name:MutationName,args:Record<string,unknown>):string[]|undefined {
-    let texts:string[]|undefined;
-    switch (name) {
-      case 'add_source': { const a=mutationSchemas.add_source.parse(args); texts=split(a.text,a.chunkSize); break; }
-      case 'add_chunk': { const a=mutationSchemas.add_chunk.parse(args); texts=[a.text]; break; }
-      case 'revise_chunk': { const a=mutationSchemas.revise_chunk.parse(args); if(a.text!==undefined) texts=[a.text]; break; }
-      case 'restore_source': { const a=mutationSchemas.restore_source.parse(args); texts=this.records.archive(a.sourceId).chunks.map(c=>c.text_content); break; }
-      case 'update_source': mutationSchemas.update_source.parse(args); break;
-      case 'remove_source': mutationSchemas.remove_source.parse(args); break;
-      case 'remove_chunk': mutationSchemas.remove_chunk.parse(args); break;
-      default: throw new Error(`Unsupported source mutation: ${name}`);
-    }
-    return texts;
-  }
-
-  execute(name:MutationName,args:Record<string,unknown>,vectors:number[][]|undefined,actor:string,reason:string):unknown {
+  execute(name:MutationName,args:Record<string,unknown>,actor:string,reason:string):unknown {
     switch(name) {
       case 'add_source': {
         const a=mutationSchemas.add_source.parse(args), id=a.id ?? randomUUIDv7(), now=Date.now();
         if(this.db.query('SELECT 1 FROM sources WHERE id=?').get(id) || this.db.query('SELECT 1 FROM graph_source_archives WHERE source_id=?').get(id)) throw new Error(`Source identity already exists: ${id}`);
         this.checkIdentity(id,a.uri);
         const chunks=split(a.text,a.chunkSize).map((text_content,chunk_index)=>({text_content,chunk_index,chunk_type:'verbatim'}));
-        const buffers=this.buffers(vectors,chunks.length);
         this.db.query('INSERT INTO sources(id,type,uri,origin,created_at,title,updated_at,hash) VALUES(?,?,?,?,?,?,?,?)')
           .run(id,a.type,a.uri,a.origin,now,a.title,now,hash(a.uri,chunks));
         this.metadata(id,{...a.metadata,namespace:a.namespace ?? this.namespace});
-        const chunkIds=chunks.map((c,i)=>this.insertChunk(id,c,buffers[i]!));
+        const chunkIds=chunks.map((c,i)=>this.insertChunk(id,c));
         this.snapshotRevision(id);
         const entity=this.graph.entities.create({stableId:`knowledge-source:${id}`,namespace:a.namespace ?? this.namespace,
           name:a.title,type:'Source',aliases:[{name:id,scope:'source-id'},{name:a.uri,scope:'source-uri'}]});
@@ -93,7 +69,6 @@ export class KnowledgeSources {
         if(this.db.query('SELECT 1 FROM sources WHERE id=?').get(source.id)) throw new Error('Source is already live');
         if(a.unblockReingestion) this.db.query('DELETE FROM graph_source_exclusions WHERE source_id=?').run(source.id);
         this.checkIdentity(source.id,source.uri);
-        const buffers=this.buffers(vectors,archived.chunks.length);
         this.db.query('INSERT INTO sources(id,type,uri,origin,created_at,title,updated_at,hash) VALUES(?,?,?,?,?,?,?,?)')
           .run(source.id,source.type,source.uri,source.origin,source.created_at,source.title,Date.now(),source.hash);
         this.metadata(source.id,archived.metadata);
@@ -101,7 +76,7 @@ export class KnowledgeSources {
         for(const [i,c] of archived.chunks.entries()) {
           // Preserve IDs when free, but never replace another source's chunks.
           const available=!this.db.query('SELECT 1 FROM chunks WHERE id=?').get(c.id);
-          const id=this.insertChunk(source.id,c,buffers[i]!,available ? c.id : undefined); ids.set(c.id,id);
+          const id=this.insertChunk(source.id,c,available ? c.id : undefined); ids.set(c.id,id);
         }
         for(const link of archived.links) if(this.db.query('SELECT 1 FROM entities WHERE id=?').get(link.entity_id))
           this.db.query('INSERT OR IGNORE INTO chunk_entities(chunk_id,entity_id) VALUES(?,?)').run(ids.get(link.chunk_id)!,link.entity_id);
@@ -115,10 +90,10 @@ export class KnowledgeSources {
           SELECT chunk_index FROM chunks WHERE source_id=? UNION ALL SELECT c.chunk_index FROM graph_revision_chunks c
           JOIN graph_source_revisions r ON r.id=c.revision_id WHERE r.source_id=?)`).get(a.sourceId,a.sourceId)!.max ?? -1;
         const nextIndex=chunk_index+1;
-        const next={chunk_index:nextIndex,text_content:a.text,chunk_type:a.chunkType}, buffer=this.buffers(vectors,1)[0]!;
+        const next={chunk_index:nextIndex,text_content:a.text,chunk_type:a.chunkType};
         // Set the new revision first so the chunk INSERT trigger cannot alter the old snapshot.
         this.db.query('UPDATE sources SET hash=?,updated_at=? WHERE id=?').run(hash(source.uri,[...this.records.chunks(a.sourceId),next]),Date.now(),a.sourceId);
-        const chunkId=this.insertChunk(a.sourceId,next,buffer);
+        const chunkId=this.insertChunk(a.sourceId,next);
         this.snapshotRevision(a.sourceId); this.assign(a.sourceId,chunkId,a.entityIds,a.claimIds,actor,reason);
         return {sourceId:a.sourceId,chunkId,version:recordVersion(this.db,'chunk',chunkId),sourceVersion:recordVersion(this.db,'source',a.sourceId),notice:staleNotice};
       }
@@ -127,9 +102,7 @@ export class KnowledgeSources {
         if(a.text===undefined && a.chunkType===undefined && a.entityIds===undefined && a.claimIds===undefined) throw new Error('Chunk revision requires text, type, entities, or claims');
         checkVersion(this.db,'chunk',chunk.id,a.expectedVersion); checkVersion(this.db,'source',a.sourceId,a.expectedSourceVersion);
         if(a.text!==undefined || a.chunkType!==undefined) {
-          const buffer=a.text!==undefined ? this.buffers(vectors,1)[0]! : undefined;
           this.db.query('UPDATE chunks SET text_content=?,chunk_type=? WHERE id=?').run(a.text ?? chunk.text_content,a.chunkType ?? chunk.chunk_type,chunk.id);
-          if(buffer) { this.db.query('DELETE FROM vector_index WHERE rowid=?').run(chunk.id); this.db.query('INSERT INTO vector_index(rowid,embedding) VALUES(?,?)').run(chunk.id,buffer); }
           this.refresh(a.sourceId);
         }
         this.assign(a.sourceId,chunk.id,a.entityIds,a.claimIds,actor,reason);
@@ -183,21 +156,10 @@ export class KnowledgeSources {
   private metadata(id:string,value:Record<string,unknown>) {
     this.db.query('INSERT INTO graph_source_metadata(source_id,metadata) VALUES(?,?) ON CONFLICT(source_id) DO UPDATE SET metadata=excluded.metadata').run(id,JSON.stringify(value));
   }
-  private buffers(vectors:number[][]|undefined,count:number):Uint8Array[] {
-    if(!vectors || vectors.length!==count) throw new Error(`Expected ${count} prepared embeddings`);
-    const recorded=readEmbeddingProfile(this.db), dimension=getIndexDimension(this.db);
-    const tracked=recorded!==null || vectors.some(v=>embeddingProfile(v)!==undefined);
-    return vectors.map(vector=>{
-      const profile=embeddingProfile(vector);
-      if(profile) assertEmbeddingProfile(this.db,profile,true);
-      else if(tracked) throw new Error('Prepared embedding lacks the indexed embedding profile');
-      return vectorBuffer(vector,dimension);
-    });
-  }
-  private insertChunk(sourceId:string,c:Pick<Chunk,'chunk_index'|'text_content'|'chunk_type'>,buffer:Uint8Array,id?:number):number {
+  private insertChunk(sourceId:string,c:Pick<Chunk,'chunk_index'|'text_content'|'chunk_type'>,id?:number):number {
     const chunk=this.db.query<{id:number},[number|null,string,number,string,string]>(
       'INSERT INTO chunks(id,source_id,chunk_index,chunk_type,text_content) VALUES(?,?,?,?,?) RETURNING id').get(id ?? null,sourceId,c.chunk_index,c.chunk_type,c.text_content)!;
-    this.db.query('INSERT INTO vector_index(rowid,embedding) VALUES(?,?)').run(chunk.id,buffer); return chunk.id;
+    return chunk.id;
   }
   private refresh(id:string) {
     const source=this.records.source(id);

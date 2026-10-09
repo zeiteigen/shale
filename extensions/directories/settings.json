@@ -35,7 +35,6 @@
   ],
   "maxFileSizeMB": 50,
   "processingTimeoutMs": 120000,
-  "embeddingBatchSize": 64,
   "forceAll": false,
   "namespace": "directories"
 }

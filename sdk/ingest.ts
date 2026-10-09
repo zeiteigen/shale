@@ -2,13 +2,7 @@ import { Database } from "bun:sqlite";
 import { randomUUIDv7 } from "bun";
 import defaultDb from "../lib/db-init";
 import { ensureGraphSchema } from "../lib/graph/schema";
-import { getIndexDimension, vectorBuffer } from "../lib/embedding-index";
 import { excludedSourceId } from "../lib/knowledge/exclusions";
-import {
-  assertEmbeddingProfile,
-  embeddingProfile,
-  readEmbeddingProfile,
-} from "../lib/embedding-profile";
 import type {
   IngestSourceAndChunksInput,
   IngestSourceAndChunksResult,
@@ -25,10 +19,10 @@ export class UnifiedIngestor {
   }
 
   /**
-   * Atomically ingests a source document, its text chunks, and vector embeddings in one transaction.
+   * Atomically ingests a source document, its text chunks in one transaction.
    * If any part fails, all changes are rolled back.
    *
-   * @param input Source metadata and array of chunks with vector embeddings
+   * @param input Source metadata and array of chunks
    */
   sourceAndChunks(
     input: IngestSourceAndChunksInput,
@@ -82,11 +76,6 @@ export class UnifiedIngestor {
       RETURNING id
     `);
 
-    const insertVectorStmt = this.db.query(`
-      INSERT INTO vector_index (rowid, embedding)
-      VALUES ($rowid, $embedding)
-    `);
-
     const insertEntityStmt = this.db.query<
       { id: number },
       { $namespace: string; $name: string; $type: string }
@@ -105,24 +94,7 @@ export class UnifiedIngestor {
     const txn = this.db.transaction(() => {
       const excludedId = excludedSourceId(this.db, source.id, source.uri);
       if (excludedId) return skipped(source.id ?? excludedId);
-      const dimension = getIndexDimension(this.db);
-      const buffers = chunks.map((chunk) =>
-        vectorBuffer(chunk.embedding, dimension),
-      );
-      const recorded = readEmbeddingProfile(this.db);
-      const profiles = chunks.map(
-        (chunk) => chunk.embedding_profile ?? embeddingProfile(chunk.embedding),
-      );
-      const tracked = recorded || profiles.some(Boolean);
-      for (const profile of new Set(profiles)) {
-        if (profile) assertEmbeddingProfile(this.db, profile, true);
-        else if (tracked) {
-          throw new Error(
-            "An indexed embedding requires its embedding_profile when supplied as a precomputed vector",
-          );
-        }
-      }
-      // 0. Cleanly remove any previous chunks and vectors for this source URI
+      // 0. Cleanly remove any previous chunks for this source URI
       const existing = this.db
         .query<{ id: string }, { $uri: string }>(
           "SELECT id FROM sources WHERE uri = $uri",
@@ -150,7 +122,7 @@ export class UnifiedIngestor {
 
       const chunkIds: number[] = [];
 
-      // 2. Insert chunks and embeddings
+      // 2. Insert chunks
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         const chunkIndex = chunk.chunk_index ?? i;
@@ -167,14 +139,6 @@ export class UnifiedIngestor {
         }
 
         chunkIds.push(res.id);
-
-        // Convert embedding to binary Uint8Array representation for sqlite-vec
-        const embeddingBuffer = buffers[i];
-
-        insertVectorStmt.run({
-          $rowid: res.id,
-          $embedding: embeddingBuffer,
-        });
 
         // 3. Optional entity linkage
         if (chunk.entity_names && chunk.entity_names.length > 0) {

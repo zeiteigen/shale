@@ -17,9 +17,8 @@ export { processHistoryBatch, processBookmarksBatch } from "./catalog-ingest";
 export { chunkText } from "./chunk-text";
 
 /**
- * Processes a single active web page visit through two-phase execution:
- * Phase 1: preparePageVisit (Chat model only, zero embeddings)
- * Phase 2: finalizePageVisit (Embedding model only, zero chat calls)
+ * Processes a single active web page visit:
+ * Prepare each page visit, then commit its text and graph data.
  */
 export async function processPageVisit(
   sdk: ShaleSDK,
@@ -36,9 +35,8 @@ export async function processPageVisit(
 }
 
 /**
- * Processes a batch of open tabs strictly enforcing the two-phase pipeline:
- * Phase 1: Prepares all tabs using Chat model (zero embeddings).
- * Phase 2: Embeds and commits all tabs using Embedding model (zero chat calls).
+ * Processes a batch of open tabs:
+ * Prepares and commits all tabs.
  */
 export async function processTabsBatch(
   sdk: ShaleSDK,
@@ -51,7 +49,7 @@ export async function processTabsBatch(
   }
 
   sdk.logger.info(
-    `[browser] [Phase 1: Chat Model] Batch preparing ${pages.length} tab(s) with Chat model...`,
+    `[browser] Batch preparing ${pages.length} tab(s) with Chat model...`,
   );
 
   return sdk.models.batch(

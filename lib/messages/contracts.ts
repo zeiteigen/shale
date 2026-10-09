@@ -13,14 +13,10 @@ import type { PreparedSourceClaim } from "../../sdk/graph/prepared";
 
 // 1. File Processor: "file:process" & "files:process"
 export interface ProcessFileOptions {
-  /** If true, skip vector embeddings generation for Phase 1 local GPU optimization */
-  deferEmbedding?: boolean;
   /** Execution timeout in milliseconds */
   timeoutMs?: number;
   /** Custom prompt override */
   customPrompt?: string;
-  /** Precomputed embedding vector if already computed */
-  precomputedEmbedding?: number[];
   /** Target graph/data namespace */
   namespace?: string;
   /** Concurrency limit when processing multiple files */
@@ -64,7 +60,6 @@ export interface ProcessedChunk {
   chunk_index: number;
   chunk_type?: ChunkType;
   text_content: string;
-  embedding?: number[] | Float32Array;
   entity_names?: string[];
   metadata?: Record<string, any>;
 }
@@ -240,7 +235,7 @@ export interface SystemBackupResponse {
 // 7. Cross-Extension Search: "search:query"
 export interface SearchQueryRequest {
   query: string;
-  mode?: "hybrid" | "vector" | "bm25";
+  mode?: "bm25";
   limit?: number;
   namespace?: string;
   origin?: string;

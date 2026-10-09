@@ -21,25 +21,16 @@ function json(data: unknown, status = 200) {
   });
 }
 
-async function search(req: Request, mode: "hybrid" | "vector" | "bm25", sdk = createExtensionSDK("visualizer")) {
+async function search(req: Request, mode: "bm25", sdk = createExtensionSDK("visualizer")) {
   const body = (await req.json()) as { query?: string; limit?: number };
   const query = body.query?.trim();
   if (!query) return json({ error: "A query is required." }, 400);
   const limit = Math.max(1, Math.min(30, Number(body.limit) || 12));
 
   try {
-    const results = mode === "vector"
-      ? await sdk.search.vector({ query, limit })
-      : mode === "bm25"
-        ? await sdk.search.bm25({ query, limit })
-        : await sdk.search.hybrid({ query, limit });
+    const results = await sdk.search.bm25({ query, limit });
     return json({ query, results: enrichResults(results, sdk.database) });
   } catch (error: any) {
-    if (mode === "hybrid") {
-      try {
-        return json({ query, results: enrichResults(await sdk.search.bm25({ query, limit }), sdk.database), fallback: "bm25" });
-      } catch {}
-    }
     return json({ error: error?.message || "Search failed." }, 500);
   }
 }
@@ -78,8 +69,8 @@ export async function handleVisualizerRequest(req: Request, sdkOverride = sdk): 
         try {return json(await sdkOverride.search.graph(await req.json()));}
         catch (error) {return json({error:error instanceof Error ? error.message : 'Search failed'},400);}
       }
-      const searchMatch = pathname.match(/^\/api\/search\/(hybrid|vector|bm25)$/);
-      if (searchMatch && req.method === "POST") return search(req, searchMatch[1] as "hybrid" | "vector" | "bm25", sdkOverride);
+      const searchMatch = pathname.match(/^\/api\/search\/(bm25)$/);
+      if (searchMatch && req.method === "POST") return search(req, searchMatch[1] as "bm25", sdkOverride);
       if (pathname === "/api/health") return json({ ok: true });
       return staticFile(pathname);
   } catch (error) {

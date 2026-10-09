@@ -19,7 +19,7 @@ const result = await sdk.messages.request("file:can-process", {
 
 ## Scope and routing
 
-Handlers, capability predicates, and event listeners run in the receiving SDK's scope, including asynchronous work. Ambient settings, state, logger, and nested messaging therefore belong to the receiver. Sender identity is available as `context.senderId`; SDK clients set it automatically. The caller's GPU reservation and chat/embedding phase still propagate across the call, so a nested handler cannot issue embeddings during a chat phase.
+Handlers, capability predicates, and event listeners run in the receiving SDK's scope, including asynchronous work. Ambient settings, state, logger, and nested messaging therefore belong to the receiver. Sender identity is available as `context.senderId`; SDK clients set it automatically. The caller's GPU reservation propagates across the call so nested handlers share model scheduling.
 
 Requests take a registration snapshot and examine handlers by descending priority, in registration order for ties. `target` matches an extension ID exactly or a handler name without regard to case. `canHandle` predicates run sequentially. A predicate failure is logged and selection continues; the first accepted handler executes once. A handler failure rejects the request without retrying another handler, which avoids duplicating side effects.
 

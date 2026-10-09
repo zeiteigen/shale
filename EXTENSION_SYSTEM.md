@@ -1,6 +1,6 @@
 # Shale Extension System Architecture & Developer Guide
 
-The Shale Extension System is a modular, event-driven, and cron-capable framework designed to ingest, process, enrich, and index diverse external data streams (e.g. Obsidian vaults, Discord chats, Git repositories, bookmarks) into a unified SQLite knowledge layer powered by vector embeddings, BM25 full-text search, and knowledge graph relationships.
+The Shale Extension System is a modular, event-driven, and cron-capable framework designed to ingest, process, and enrich diverse data streams into a unified SQLite knowledge layer with BM25 full-text search and evidence-backed knowledge graph relationships.
 
 This document details every layer of the extension architecture, from configuration schemas to crash recovery checkpoints and the unified SDK.
 
@@ -20,8 +20,8 @@ This document details every layer of the extension architecture, from configurat
    - [Unified Ingestion (`sdk.ingest`)](#3-unified-ingestion-sdkingest)
    - [Knowledge Graph Ingestion (`sdk.graph`)](#4-knowledge-graph-ingestion-sdkgraph)
    - [Checkpoints & Crash Recovery (`sdk.checkpoint`)](#5-checkpoints--crash-recovery-sdkcheckpoint)
-   - [LLM & Embedding Clients (`sdk.llm` / `sdk.embedder`)](#6-llm--embedding-clients)
-   - [Multi-Modal Search (`sdk.search`)](#7-multi-modal-search-sdksearch)
+   - [Chat LLM Client (`sdk.llm`)](#6-chat-llm-client-sdkllm)
+   - [Full-Text Search (`sdk.search`)](#7-full-text-search-sdksearch)
    - [Universal Logger (`sdk.logger`)](#8-universal-logger-sdklogger)
    - [Cross-Extension Messaging (`sdk.messages`)](#9-cross-extension-messaging-sdkmessages)
 7. [Cron Scheduling & Dynamic Script Execution](#7-cron-scheduling--dynamic-script-execution)
@@ -29,7 +29,7 @@ This document details every layer of the extension architecture, from configurat
 9. [Ingestion Pipelines: Push vs. Pull](#9-ingestion-pipelines-push-vs-pull)
    - [Push Model: HTTP Webhook & `QueueManager`](#push-model-http-webhook--queuemanager)
    - [Pull Model: Cron Delta Ingestion SOP](#pull-model-cron-delta-ingestion-sop)
-10. [The Two-Phase Local GPU Optimization Pattern](#10-the-two-phase-local-gpu-optimization-pattern)
+10. [Bounded Chat Batches and Transactional Finalization](#10-bounded-chat-batches-and-transactional-finalization)
 11. [End-to-End Case Study: Obsidian Extension](#11-end-to-end-case-study-obsidian-extension)
 
 ---
@@ -49,8 +49,7 @@ graph TD
     end
 
     subgraph Core ["Database Layer (lib/)"]
-        DB["SQLite (production.db)"]
-        Vec["sqlite-vec (vector_index)"]
+        DB["SQLite (data/production.db)"]
         FTS["FTS5 (chunks_fts)"]
         GraphDB["Graph (entities & edges)"]
         StateDB["extension_state & checkpoints"]
@@ -63,7 +62,7 @@ graph TD
 
     subgraph SDK ["Shale SDK (@shale/sdk)"]
         ALS["AsyncLocalStorage Scope"]
-        Submodules["state | context | ingest | graph | checkpoint | search | llm | embed"]
+        Submodules["state | context | ingest | graph | checkpoint | search | llm"]
     end
 
     Loader -->|Scans manifest.json| Extensions
@@ -78,7 +77,7 @@ graph TD
 ```
 
 - **Host Runtime ([`main/`](file:///home/munch/Projects/shale/main)):** Scans extension folders, registers cron jobs with Bun, runs the HTTP ingest webhook on port 7425, and routes inbound payloads through an asynchronous FIFO queue.
-- **Core Storage ([`lib/`](file:///home/munch/Projects/shale/lib)):** Single SQLite database ([`production.db`](file:///home/munch/Projects/shale/production.db)) with WAL journal mode, vector search via `sqlite-vec` (float[4096]), BM25 search via SQLite `fts5`, relational entity-graph tables, an `extension_state` key-value store, and a `checkpoints` crash recovery table.
+- **Core Storage ([`lib/`](file:///home/munch/Projects/shale/lib)):** Single SQLite database ([`data/production.db`](file:///home/munch/Projects/shale/data/production.db)) with WAL journal mode, BM25 search via SQLite `fts5`, relational entity-graph tables, an `extension_state` key-value store, and a `checkpoints` crash recovery table.
 - **Shale SDK ([`sdk/`](file:///home/munch/Projects/shale/sdk)):** Typesafe abstraction layer that extensions import via `@shale/sdk`. Extensions never write raw SQL queries; they invoke SDK services that manage transactions and entity deduplication.
 - **Extensions ([`extensions/`](file:///home/munch/Projects/shale/extensions)):** Autonomous modules containing manifest declarations, configurable settings, cron routines, ingestion hooks, and recovery scripts.
 
@@ -319,8 +318,8 @@ Extensions can obtain an SDK instance in two ways:
 #### 3. Unified Ingestion (`sdk.ingest`)
 - **File:** [`sdk/ingest.ts`](file:///home/munch/Projects/shale/sdk/ingest.ts) -> [`UnifiedIngestor`](file:///home/munch/Projects/shale/sdk/ingest.ts#L9-L166)
 - **Database Function:** [`addSourceWithChunks`](file:///home/munch/Projects/shale/lib/db.ts#L140-L213)
-- **Purpose:** Atomically writes a source document, its chunked text, vector embeddings, and full-text search index in a single SQLite transaction.
-- **Triggers:** Automatically updates `chunks_fts` (FTS5) and cleans up orphaned embeddings in `vector_index` upon replacement.
+- **Purpose:** Atomically writes a source document, its chunked text, graph associations, and full-text search index in a single SQLite transaction.
+- **Triggers:** Automatically updates `chunks_fts` (FTS5) upon replacement.
 - **Method:**
   - [`sourceAndChunks(input: IngestSourceAndChunksInput): IngestSourceAndChunksResult`](file:///home/munch/Projects/shale/sdk/ingest.ts#L24-L165)
 
@@ -336,7 +335,6 @@ sdk.ingest.sourceAndChunks({
     {
       chunk_index: 0,
       text_content: "Qubits and superposition...",
-      embedding: [0.012, -0.045, ...], // Float32Array or number[]
       entity_names: ["Quantum Computing", "Qubit"], // Optional provenance link
     }
   ],
@@ -377,16 +375,13 @@ sdk.graph.ingest({
   - [`resolve(id: string): boolean`](file:///home/munch/Projects/shale/sdk/checkpoint.ts#L191-L193)
   - [`clear(): number`](file:///home/munch/Projects/shale/sdk/checkpoint.ts#L198-L206)
 
-#### 6. LLM & Embedding Clients
-- **Embeddings ([`sdk/embed.ts`](file:///home/munch/Projects/shale/sdk/embed.ts)):** [`sdk.embed(text | texts)`](file:///home/munch/Projects/shale/sdk/index.ts#L152-L162) connects to any OpenAI-compatible `/v1/embeddings` endpoint (OpenAI, Ollama, vLLM, LMStudio), padding vectors to the configured storage dimensions (default 4096) and rejecting truncation. See [model configuration and index migration](sdk/MODELS.md).
+#### 6. Chat LLM Client
 - **Chat LLM ([`sdk/llm.ts`](file:///home/munch/Projects/shale/sdk/llm.ts)):** [`sdk.queryLLM(prompt | options)`](file:///home/munch/Projects/shale/sdk/index.ts#L167-L180) connects to `/v1/chat/completions` with support for system instructions, images (URLs or base64 data URIs), and token controls.
 
-#### 7. Multi-Modal Search (`sdk.search`)
+#### 7. Full-Text Search (`sdk.search`)
 - **File:** [`sdk/search.ts`](file:///home/munch/Projects/shale/sdk/search.ts) -> [`ChunkSearcher`](file:///home/munch/Projects/shale/sdk/search.ts)
 - **Search Modes:**
-  1. **Hybrid (`sdk.search.hybrid`):** Combines sqlite-vec KNN cosine similarity with FTS5 BM25 keyword rankings using Reciprocal Rank Fusion (RRF), linear score fusion, or custom weighting functions.
-  2. **Vector (`sdk.search.vector`):** High-speed K-Nearest Neighbor similarity over raw embeddings or chunk IDs.
-  3. **BM25 (`sdk.search.bm25`):** Full-text keyword search with automatic stopword removal and highlighted `<mark>` preview snippets.
+  1. **BM25 (`sdk.search.bm25`):** Full-text keyword search with automatic stopword removal and highlighted `<mark>` preview snippets.
 
 #### 8. Universal Logger (`sdk.logger`)
 - **File:** [`sdk/logger.ts`](file:///home/munch/Projects/shale/sdk/logger.ts) -> [`Logger`](file:///home/munch/Projects/shale/sdk/logger.ts#L14-L82)
@@ -402,14 +397,14 @@ sdk.graph.ingest({
 - **Features:**
   - **Arbitrary Channels:** Send and receive custom events and queries on any string topic (`sdk.messages.request("my:query", data)`, `sdk.messages.publish("my:event", data)`).
   - **Type-Safe Built-in Channels:** Compile-time parameter and return type inference for core system channels:
-    - `file:process`: Unified file parsing returning chunks, embeddings, and graph entities/edges.
+    - `file:process`: Unified file parsing returning chunks and graph entities/edges.
     - `file:can-process` & `files:can-process`: Discovers which loaded extension can process a given file or batch of files.
-    - `files:process` (alias `file:process-batch`): Bulk file parsing adhering to the Two-Phase Local GPU Optimization Pattern.
+    - `files:process` (alias `file:process-batch`): Bulk file parsing with bounded chat preparation and transactional ingestion.
     - `source:ingested`: Event emitted when any source document is committed to SQLite.
     - `graph:link-entities`: Request cross-extension entity connections.
     - `content:summarize` & `content:summarize-batch`: Centralized text summarization via LLM.
     - `system:backup`: Trigger database backups on demand.
-    - `search:query`: Cross-extension hybrid and semantic search queries.
+    - `search:query`: Cross-extension full-text search queries.
   - **Predicate & Priority Routing:** Handlers can register with `canHandle: (req) => boolean` and `priority: number`.
   - **Lifecycle Registration:** Extensions register handlers in `setup_script` (e.g. `setup.ts`), invoked automatically during startup in `load-extensions.ts`.
 
@@ -419,7 +414,7 @@ const response = await sdk.messages.request("file:process", {
   filePath: "/vault/architecture.png",
   fileType: "image",
   contextEntity: "Vault: Engineering",
-  options: { deferEmbedding: true }
+  options: { namespace: "obsidian" }
 });
 
 // Registering a file processor handler in an extension (e.g. process-image)
@@ -497,22 +492,22 @@ Shale’s checkpointing architecture prevents lost work:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Phase1_Chat: Cron starts
-    Phase1_Chat --> CheckpointSaved: Call Chat Model (Summaries/Images)
+    [*] --> PrepareContent: Cron starts
+    PrepareContent --> CheckpointSaved: Call Chat Model (Summaries/Images)
     note right of CheckpointSaved: Checkpoint written to SQLite\nstatus = 'queued'
-    CheckpointSaved --> Phase2_Embedding: Memory swap / Process Continues
+    CheckpointSaved --> IngestPrepared: Process Continues
     
     state CrashScenario {
         CheckpointSaved --> ProcessCrash: Sudden OOM / Termination!
         ProcessCrash --> NextStartup: Host restarts or next Cron triggers
         NextStartup --> WaitForRecovery: wait_for_checkpoint_script()
         WaitForRecovery --> RunRecovery: Execute recover.ts
-        RunRecovery --> IngestCheckpoints: Embed cached summaries & ingest
+        RunRecovery --> IngestCheckpoints: Commit cached summaries and chunks
         IngestCheckpoints --> DeleteCheckpoints: Checkpoints resolved & deleted
         DeleteCheckpoints --> AdvanceWatermark: Watermark updated
     }
 
-    Phase2_Embedding --> IngestionComplete: Embed & write to DB
+    IngestPrepared --> IngestionComplete: Write to DB
     IngestionComplete --> DeleteCheckpoints: sdk.deleteCheckpoint()
     DeleteCheckpoints --> AdvanceWatermark: Watermark updated
     AdvanceWatermark --> [*]: Cron finished
@@ -538,17 +533,16 @@ stateDiagram-v2
    );
    ```
 2. **Normal Resolution:**
-   Once Phase 2 commits the chunks and embeddings to SQLite, it calls [`sdk.deleteCheckpoint(\`ai_summary:${note.filePath}\`)`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts#L434).
+   Once finalization commits the chunks to SQLite, it calls [`sdk.deleteCheckpoint(\`ai_summary:${note.filePath}\`)`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts#L434).
 3. **Crash Recovery Execution:**
-   If the process died before Phase 2:
+   If the process died before finalization:
    - Next time `runCron()` triggers, [`wait_for_checkpoint_script`](file:///home/munch/Projects/shale/main/index.ts#L101-L143) detects uncommitted rows via [`hasQueuedCheckpoints`](file:///home/munch/Projects/shale/lib/db.ts#L411-L419).
    - An in-flight lock map (`inFlightRecoveries`) prevents duplicate recovery runs across overlapping cron tasks.
    - The extension's `checkpoint_recover` script (e.g. [`extensions/obsidian/recover.ts`](file:///home/munch/Projects/shale/extensions/obsidian/recover.ts#L20-L145)) runs:
      1. Fetches queued checkpoints via `sdk.getCheckpointContext()`.
-     2. Generates vector embeddings for the cached summaries.
-     3. Commits the sources and chunks to SQLite.
-     4. Advances the vault watermark timestamp in `sdk.state`.
-     5. Calls `context.resolve(checkpoint.id)`.
+     2. Commits the sources and chunks to SQLite.
+     3. Advances the vault watermark timestamp in `sdk.state`.
+     4. Calls `context.resolve(checkpoint.id)`.
    - The cron script proceeds immediately afterward, skipping already-recovered notes because the watermark was advanced!
 
 ---
@@ -606,40 +600,30 @@ graph TD
    const priorContext = sdk.context.hydrate(fileUri, 3);
    ```
 4. **Process Contextually:** Use `sdk.queryLLM()` to extract summaries, concepts, or entities. Checkpoint intermediate results.
-5. **Ingest Atomically:** Commit sources, chunks, embeddings, and graph edges via `sdk.ingest.sourceAndChunks()` and `sdk.graph.ingest()`.
+5. **Ingest Atomically:** Commit sources, chunks, and graph edges via `sdk.ingest.sourceAndChunks()` and `sdk.graph.ingest()`.
 6. **Advance Watermark:** Update watermark to `maxMtime` via `sdk.state.setWatermark(String(maxMtime))`.
 
 ---
 
-## 10. The Two-Phase Local GPU Optimization Pattern
+## 10. Bounded Chat Batches and Transactional Finalization
 
-When running local models (e.g. Ollama or vLLM on a single GPU), swapping between a large Chat model (e.g. Llama-3 8B) and an Embedding model (e.g. Nomic-Embed) causes severe VRAM thrashing and model reload delays.
-
-Shale extensions enforce a strict two-phase pipeline across all items:
+Local chat and vision requests can be expensive, so the model coordinator bounds
+concurrent requests and lets extensions reserve a shared local GPU resource for
+a batch. A batch can checkpoint prepared output before finalization. Finalization
+commits prepared source text, graph data, checkpoints, and watermarks in a
+transaction. It does not switch to or call a second model.
 
 ```mermaid
 graph LR
-    subgraph Phase1 ["Phase 1: Chat Model Only (Zero Embeddings)"]
-        P1A["Discover Delta"] --> P1B["Expand Short Notes (LLM)"]
-        P1B --> P1C["Describe Images (Vision LLM)"]
-        P1C --> P1D["Save Checkpoints to SQLite"]
-    end
-
-    subgraph MemoryTransition ["GPU VRAM Transition"]
-        M1["Unload Chat Model / Load Embedding Model"]
-    end
-
-    subgraph Phase2 ["Phase 2: Embedding Model Only (Zero Chat Calls)"]
-        P2A["Batch Embed Contextual Chunks"] --> P2B["Atomically Ingest Sources & Chunks"]
-        P2B --> P2C["Commit Graph Edges"]
-        P2C --> P2D["Resolve Checkpoints & Advance Watermarks"]
-    end
-
-    Phase1 --> MemoryTransition --> Phase2
+    A["Discover delta"] --> B["Bounded chat and vision work"]
+    B --> C["Save prepared checkpoints"]
+    C --> D["Commit source text and graph data"]
+    D --> E["Resolve checkpoints and advance watermarks"]
 ```
 
-1. **Phase 1 ([`prepareVault`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts#L223-L363)):** Runs all LLM calls across all vaults (summaries, note expansions, image descriptions). **Zero embedding calls occur.** All generated summaries are saved to checkpoints.
-2. **Phase 2 ([`finalizeVault`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts#L370-L504)):** Executes batch embeddings across all prepared chunks, commits records to SQLite, inserts graph edges, clears checkpoints, and advances watermarks. **Zero Chat LLM calls occur.**
+Preparation may be retried from its saved checkpoint after a crash. Finalization
+does not repeat completed chat work, and failed transactions leave prepared data
+available for recovery.
 
 ---
 
@@ -658,7 +642,7 @@ The Obsidian extension ([`extensions/obsidian/`](file:///home/munch/Projects/sha
 | [`parse-file.ts`](file:///home/munch/Projects/shale/extensions/obsidian/parse-file.ts) | Note expansion & contextual chunks | [`parseFile()`](file:///home/munch/Projects/shale/extensions/obsidian/parse-file.ts#L232-L308), [`expandNoteWithChatModel()`](file:///home/munch/Projects/shale/extensions/obsidian/parse-file.ts#L69-L167) |
 | [`parse-image.ts`](file:///home/munch/Projects/shale/extensions/obsidian/parse-image.ts) | Multimodal image description (delegates to process-image via `file:process` messaging) | [`parseImageFile()`](file:///home/munch/Projects/shale/extensions/obsidian/parse-image.ts#L43-L107), [`describeImageWithChatModel()`](file:///home/munch/Projects/shale/extensions/obsidian/parse-image.ts#L23-L37) |
 | [`ingest-file.ts`](file:///home/munch/Projects/shale/extensions/obsidian/ingest-file.ts) | Note & image DB ingestion | [`ingestFile()`](file:///home/munch/Projects/shale/extensions/obsidian/ingest-file.ts#L148-L235), [`ingestImageFile()`](file:///home/munch/Projects/shale/extensions/obsidian/ingest-file.ts#L244-L327) |
-| [`process-vaults.ts`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts) | Two-phase pipeline coordinator | [`prepareVault()`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts#L223-L363), [`finalizeVault()`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts#L370-L504) |
+| [`process-vaults.ts`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts) | Preparation and commit coordinator | [`prepareVault()`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts#L223-L363), [`finalizeVault()`](file:///home/munch/Projects/shale/extensions/obsidian/process-vaults.ts#L370-L504) |
 | [`recover.ts`](file:///home/munch/Projects/shale/extensions/obsidian/recover.ts) | Crash recovery runner | [`run()`](file:///home/munch/Projects/shale/extensions/obsidian/recover.ts#L20-L145) |
 | [`index.ts`](file:///home/munch/Projects/shale/extensions/obsidian/index.ts) | Main entrypoint for cron | [`run()`](file:///home/munch/Projects/shale/extensions/obsidian/index.ts#L55-L101) |
 

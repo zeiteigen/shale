@@ -6,7 +6,6 @@ import { CheckpointManager } from "./checkpoint";
 import { GraphIngestor } from "./graph";
 import { KnowledgeEditor } from './knowledge/changes';
 import { UnifiedIngestor } from "./ingest";
-import { EmbedderClient, type EmbedderOptions } from "./embed";
 import {
   LLMClient,
   type LLMOptions,
@@ -36,7 +35,6 @@ export class ShaleSDK {
   readonly graph: GraphIngestor;
   readonly knowledge: KnowledgeEditor;
   readonly ingest: UnifiedIngestor;
-  readonly embedder: EmbedderClient;
   readonly llm: LLMClient;
   readonly models: ModelBatches;
   readonly search: ChunkSearcher;
@@ -53,7 +51,6 @@ export class ShaleSDK {
     extensionId: string,
     namespace?: string | ExtensionSDKOptions,
     database?: Database,
-    defaultEmbedderOptions?: EmbedderOptions,
     defaultLLMOptions?: LLMOptions,
     extensionName?: string,
     extensionDir?: string,
@@ -71,10 +68,6 @@ export class ShaleSDK {
         throw new Error(
           "Shared model connections must specify a baseUrl, not a role-specific endpoint",
         );
-      defaultEmbedderOptions = mergeOptions(
-        shared,
-        configured.models?.embedding,
-      );
       defaultLLMOptions = mergeOptions(shared, configured.models?.chat);
     }
     this.extensionId = extensionId;
@@ -102,27 +95,11 @@ export class ShaleSDK {
     this.graph = new GraphIngestor(this.namespace, this.database);
     this.ingest = new UnifiedIngestor(this.namespace, this.database);
     const batchStore = modelBatchStore(this.state);
-    this.embedder = new EmbedderClient({ batchStore, ...defaultEmbedderOptions });
-    this.search = new ChunkSearcher(this.database, this.embedder);
-    this.knowledge = new KnowledgeEditor(this.database,this.graph,this.embedder,this.search,this.namespace);
+    this.search = new ChunkSearcher(this.database);
+    this.knowledge = new KnowledgeEditor(this.database,this.graph,this.search,this.namespace);
 
     this.llm = new LLMClient({ batchStore, ...defaultLLMOptions });
-    this.models = new ModelBatches(this.llm, this.embedder);
-  }
-
-  /**
-   * Generates embeddings for a single text or an array of texts using an OpenAI-compatible endpoint.
-   */
-  async embed(text: string, options?: EmbedderOptions): Promise<number[]>;
-  async embed(texts: string[], options?: EmbedderOptions): Promise<number[][]>;
-  async embed(
-    input: string | string[],
-    options?: EmbedderOptions,
-  ): Promise<number[] | number[][]> {
-    if (Array.isArray(input)) {
-      return this.embedder.embedBatch(input, options);
-    }
-    return this.embedder.embed(input, options);
+    this.models = new ModelBatches(this.llm);
   }
 
   /**
@@ -208,14 +185,12 @@ export class ShaleSDK {
  * @param extensionId Unique identifier of the extension (scopes state/watermarks)
  * @param namespace Optional namespace for graph entities (defaults to extensionId)
  * @param database Optional SQLite database instance (defaults to production DB)
- * @param defaultEmbedderOptions Optional embedding client configuration
  * @param defaultLLMOptions Optional LLM client configuration
  */
 export function createExtensionSDK(
   extensionId: string,
   namespace?: string | ExtensionSDKOptions,
   database?: Database,
-  defaultEmbedderOptions?: EmbedderOptions,
   defaultLLMOptions?: LLMOptions,
   extensionName?: string,
   extensionDir?: string,
@@ -225,7 +200,6 @@ export function createExtensionSDK(
     extensionId,
     namespace,
     database,
-    defaultEmbedderOptions,
     defaultLLMOptions,
     extensionName,
     extensionDir,

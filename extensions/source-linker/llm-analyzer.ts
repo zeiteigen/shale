@@ -131,7 +131,7 @@ export function buildAnalysisPrompt(
   }
 
   return `You are an expert knowledge graph architect.
-Analyze the relationship between the two sources below, which were identified as potentially related via vector similarity (cosine score: ${pair.knnSimilarity.toFixed(3)}).
+Analyze the relationship between the two sources below, which were identified as potentially related via full-text retrieval (score: ${pair.textScore.toFixed(3)}).
 
 Source 1:
 Title: "${pair.sourceA.title}"
@@ -258,7 +258,7 @@ export async function analyzeSourcePairWithLLM(
   );
 
   sdk.logger.log(
-    `Analyzing candidate pair via LLM: "${pair.sourceA.title}" <-> "${pair.sourceB.title}" (KNN: ${pair.knnSimilarity.toFixed(3)})`,
+    `Analyzing candidate pair via LLM: "${pair.sourceA.title}" <-> "${pair.sourceB.title}" (full-text: ${pair.textScore.toFixed(3)})`,
   );
 
   let rawResponse: string;
@@ -293,7 +293,7 @@ export async function analyzeSourcePairWithLLM(
       sourceB: { id: pair.sourceB.id, title: pair.sourceB.title },
       analysis,
       accepted: analysis.shouldLink && analysis.weight >= minConfidence,
-      knnSimilarity: pair.knnSimilarity,
+      textScore: pair.textScore,
       updatedAt: Math.max(pair.sourceA.updated_at, pair.sourceB.updated_at),
       evidenceA,evidenceB,extractionRun:checkpointId,model:modelOverride || sdk.llm.options?.().model,
     },
@@ -322,7 +322,7 @@ export async function analyzeSourcePairWithLLM(
     relation: analysis.relation,
     reason: analysis.reason,
     weight: analysis.weight,
-    knnSimilarity: pair.knnSimilarity,
+    textScore: pair.textScore,
     entityResolutions: analysis.entityResolutions,
     evidenceA,evidenceB,extractionRun:checkpointId,model:modelOverride || sdk.llm.options?.().model,
   };

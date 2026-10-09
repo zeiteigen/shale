@@ -19,7 +19,7 @@ function fixture() {
 }
 function ingest(sdk:ReturnType<typeof createExtensionSDK>,text='Alice leads Atlas.',hash='v1') {
   return sdk.ingest.sourceAndChunks({source:{id:'source-1',uri:'file:///atlas.md',title:'Atlas',origin:'test',type:'note',hash},
-    chunks:[{text_content:text,embedding:[1,0,0,0]}]});
+    chunks:[{text_content:text}]});
 }
 
 describe('Knowledge graph',()=> {
@@ -202,7 +202,7 @@ describe('Knowledge graph',()=> {
 
   it('keeps unknown directional source links one-way and uses known inverse labels',()=> {
     const {sdk,graph}=fixture();
-    const link={sourceIdA:'a',sourceTitleA:'A',sourceIdB:'b',sourceTitleB:'B',relation:'EXPANDS_UPON',reason:'Expansion',weight:0.9,knnSimilarity:0.8,entityResolutions:[]};
+    const link={sourceIdA:'a',sourceTitleA:'A',sourceIdB:'b',sourceTitleB:'B',relation:'EXPANDS_UPON',reason:'Expansion',weight:0.9,textScore:0.8,entityResolutions:[]};
     expect(commitLinksToGraph([link],sdk)).toBe(2);
     expect(graph.claims.list().map(c=>c.predicate)).toContain('EXPANDED_BY');
     expect(commitLinksToGraph([{...link,relation:'CUSTOM_DIRECTIONAL'}],sdk)).toBe(1);

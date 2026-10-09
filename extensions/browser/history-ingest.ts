@@ -1,4 +1,3 @@
-import { embedBounded } from "./embed-bounded";
 import { ensureBrowserSchema } from "./storage-schema";
 import { recordCatalog, isCatalogStale } from "./catalog-lifecycle";
 import type { ShaleSDK } from "@shale/sdk";
@@ -114,12 +113,7 @@ export async function finalizeHistoryBatch(
     `[History] Ingesting batch of ${validItems.length} items (${skippedCount} excluded/skipped)...`,
   );
 
-  // All page fetches and parsing finished in preparation.
-  const texts = validItems.flatMap((v) => v.chunks);
-  const embeddings = await embedBounded(sdk, texts, settings);
-
   sdk.database.transaction(() => {
-    let embeddingOffset = 0;
     for (let i = 0; i < validItems.length; i++) {
       const v = validItems[i];
       if(isSourceExcluded(sdk.database,undefined,v.filter.cleanUrl)) {skippedCount++;continue;}
@@ -137,18 +131,15 @@ export async function finalizeHistoryBatch(
           chunk_index,
           chunk_type: "verbatim" as const,
           text_content,
-          embedding: embeddings[embeddingOffset + chunk_index],
         })),
         namespace,
       });
 
       if (result.skipped) {
         skippedCount++;
-        embeddingOffset += v.chunks.length;
         continue;
       }
 
-      embeddingOffset += v.chunks.length;
       commitCatalogGraph(sdk, v, namespace);
       recordCatalog(sdk, "history", v.original, v.sourceId);
       ingestedCount++;
@@ -159,7 +150,7 @@ export async function finalizeHistoryBatch(
   return { ingestedCount, skippedCount };
 }
 
-/** Standalone callers use the same two-phase boundary as the durable worker. */
+/** Standalone callers fetch and parse page content before committing history. */
 export function processHistoryBatch(
   sdk: ShaleSDK,
   payload: HistoryBatchPayload,

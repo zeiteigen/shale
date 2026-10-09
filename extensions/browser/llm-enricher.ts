@@ -203,7 +203,7 @@ Visited Pages (in chronological order):
 ${pageListFormatted}
 
 Task:
-1. Formulate a descriptive, high-level session title that encapsulates the user's intent or research topic (e.g. "Investigating SQLite Vector Extensions in Bun").
+1. Formulate a descriptive, high-level session title that encapsulates the user's intent or research topic (e.g. "Investigating SQLite Full-Text Search in Bun").
 2. Write a concise 2-4 sentence narrative summary synthesizing what the user investigated, tools/docs reviewed, and how the navigation flowed.
 3. Identify 3 to 6 overarching topics or technologies explored across the whole session.
 4. List the dominant domains.

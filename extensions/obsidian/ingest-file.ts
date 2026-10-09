@@ -29,9 +29,8 @@ export interface IngestImageResult {
 }
 
 export interface IngestFileOptions {
-  embeddings?: number[][];
   expandAtomicNotes?: boolean;
-  deferEmbedding?: boolean;
+  prepareOnly?: boolean;
   parsedFile?: ParsedFile;
   contextHydrationLimit?: number;
   namespace?: string;
@@ -40,22 +39,10 @@ export interface IngestFileOptions {
 }
 
 export interface IngestImageOptions {
-  precomputedEmbedding?: number[];
-  precomputedEmbeddings?: number[][];
-  deferEmbedding?: boolean;
+  prepareOnly?: boolean;
   parsedImage?: ParsedImage;
   namespace?: string;
   vaultPath?: string;
-}
-
-/** Failed embeddings stay pending; fabricated vectors never enter the index. */
-export async function embedContextualChunks(
-  sdk: ShaleSDK,
-  contextualChunks: ContextualChunk[],
-  _noteTitle: string,
-): Promise<number[][]> {
-  const texts = contextualChunks.map((chunk) => chunk.text_content);
-  return texts.length ? sdk.embed(texts) : [];
 }
 
 /**
@@ -103,9 +90,8 @@ export function buildNoteGraphElements(
  * Ingests an individual markdown file using the Shale SDK:
  * 1. Calls parseFile to read and structure note content (and expands atomic notes if enabled)
  * 2. Checks context hydration
- * 3. Embeds contextual chunks outside note chunking/parsing (or uses precomputed embeddings)
- * 4. Atomically ingests source and chunks
- * 5. Constructs note graph entities and edges (including FEATURES_IMAGE)
+ * 3. Atomically ingests source and chunks
+ * 4. Constructs note graph entities and edges (including FEATURES_IMAGE)
  */
 export async function ingestFile(
   filePath: string,
@@ -137,8 +123,7 @@ export async function ingestFile(
       parsedFile.parsed.images,
     );
 
-    // If embedding is deferred (Phase 1 Chat-only phase), return early without calling embedder
-    if (options?.deferEmbedding) {
+    if (options?.prepareOnly) {
       return {
         filePath,
         noteTitle: parsedFile.noteTitle,
@@ -165,22 +150,13 @@ export async function ingestFile(
       );
     }
 
-    // 2. Embedding happens OUTSIDE note chunking/parsing
-    const embeddings =
-      options?.embeddings ??
-      (await embedContextualChunks(
-        sdk,
-        parsedFile.contextualChunks,
-        parsedFile.noteTitle,
-      ));
-
     const ns =
       options?.namespace ??
       sdk?.settings.get<string>("namespace") ??
       getSetting<string>("namespace", "obsidian");
 
     // 3. Ingest note source and chunks atomically
-    const ingestResult = commitNote(sdk,parsedFile,embeddings,
+    const ingestResult = commitNote(sdk,parsedFile,
       {name:vaultEntityName.replace(/^Vault: /,""),path:options?.vaultPath ?? dirname(filePath)},ns);
 
     return {
@@ -192,29 +168,24 @@ export async function ingestFile(
       parsedFile,
     };
   };
-  return options?.deferEmbedding
-    ? sdk.models.phase("chat", async () => finalize(await prepare()))
-    : sdk.models.batch(prepare, finalize);
+  return sdk.models.batch(prepare, finalize);
 }
 
 /**
  * Ingests an individual image file using the Shale SDK:
  * 1. Calls parseImageFile to generate multimodal description using Chat model
- * 2. Embeds the description chunks outside of parsing (or uses precomputed embeddings)
- * 3. Atomically ingests source, synthetic vision chunks, and evidence-backed graph claims
- * 4. Commits the Image identity and directed vault membership
+ * 2. Atomically ingests source, synthetic vision chunks, and evidence-backed graph claims
+ * 3. Commits the Image identity and directed vault membership
  */
 export async function ingestImageFile(
   filePath: string,
   vaultEntityName: string = "Vault",
   sdkOverride?: ShaleSDK,
-  embeddingOrOptions?: number[] | IngestImageOptions,
+  imageOptions?: IngestImageOptions,
 ): Promise<IngestImageResult> {
   const sdk = sdkOverride ?? getSDK();
 
-  const options: IngestImageOptions = Array.isArray(embeddingOrOptions)
-    ? { precomputedEmbedding: embeddingOrOptions }
-    : (embeddingOrOptions ?? {});
+  const options = imageOptions ?? {};
 
   const prepare = async () =>
     options.parsedImage ?? parseImageFile(filePath, sdk);
@@ -233,8 +204,7 @@ export async function ingestImageFile(
       },
     ];
 
-    // If embedding is deferred (Phase 1 Chat-only phase), return early without calling embedder
-    if (options.deferEmbedding) {
+    if (options.prepareOnly) {
       return {
         filePath,
         imageTitle: parsedImage.imageTitle,
@@ -245,44 +215,13 @@ export async function ingestImageFile(
       };
     }
 
-    // 2. Embedding generated OUTSIDE parsing
-    const targetChunks =
-      parsedImage.contextualChunks && parsedImage.contextualChunks.length > 0
-        ? parsedImage.contextualChunks
-        : [parsedImage.contextualChunk];
-
-    let embeddings: number[][];
-    if (
-      options.precomputedEmbeddings &&
-      options.precomputedEmbeddings.length >= targetChunks.length
-    ) {
-      embeddings = options.precomputedEmbeddings;
-    } else if (options.precomputedEmbedding) {
-      if (targetChunks.length === 1) {
-        embeddings = [options.precomputedEmbedding];
-      } else {
-        const restEmbeddings = await embedContextualChunks(
-          sdk,
-          targetChunks.slice(1),
-          parsedImage.imageTitle,
-        );
-        embeddings = [options.precomputedEmbedding, ...restEmbeddings];
-      }
-    } else {
-      embeddings = await embedContextualChunks(
-        sdk,
-        targetChunks,
-        parsedImage.imageTitle,
-      );
-    }
-
     const imageNs =
       options.namespace ??
       sdk?.settings.get<string>("namespace") ??
       getSetting<string>("namespace", "obsidian");
 
     // 3. Atomically ingest image source and chunks
-    const ingestResult = commitImage(sdk,parsedImage,embeddings,
+    const ingestResult = commitImage(sdk,parsedImage,
       {name:vaultEntityName.replace(/^Vault: /,""),path:options.vaultPath ?? dirname(filePath)},imageNs);
 
     return {
@@ -294,9 +233,7 @@ export async function ingestImageFile(
       parsedImage,
     };
   };
-  return options.deferEmbedding
-    ? sdk.models.phase("chat", async () => finalize(await prepare()))
-    : sdk.models.batch(prepare, finalize);
+  return sdk.models.batch(prepare, finalize);
 }
 
 export default ingestFile;

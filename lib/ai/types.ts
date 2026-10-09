@@ -31,19 +31,6 @@ export interface AIClientOptions {
   signal?: AbortSignal;
 }
 
-export interface EmbedderOptions extends AIClientOptions {
-  /** Maximum texts per embedding request (default 64). */
-  batchSize?: number;
-  /** Maximum padded characters per synchronous request (default 16384); larger texts run alone. */
-  batchMaxChars?: number;
-  /** Maximum concurrent embedding requests (default 1). */
-  concurrency?: number;
-  model?: string;
-  dimensions?: number;
-  padToDimensions?: number | null;
-  instruction?: string;
-}
-
 export type LLMImageDetail = "auto" | "low" | "high";
 
 export interface LLMImageObject {
@@ -101,23 +88,4 @@ export interface LLMResponse {
     totalTokens: number;
   };
   raw: OpenAI.Chat.Completions.ChatCompletion;
-}
-
-export interface OpenAIEmbeddingResponse {
-  object?: string;
-  data: Array<{
-    object?: string;
-    index: number;
-    embedding: number[];
-  }>;
-  model?: string;
-  usage?: {
-    prompt_tokens: number;
-    total_tokens: number;
-  };
-  error?: {
-    message: string;
-    type?: string;
-    code?: string;
-  };
 }

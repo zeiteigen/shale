@@ -1,11 +1,9 @@
 import { Database } from "bun:sqlite";
-import * as sqliteVec from "sqlite-vec";
 import { resolve } from "node:path";
 
-/** Read-only integrity and provenance audit for an actual populated Shale index. */
-const path = resolve(process.argv[2] ?? "production.db");
+/** Read-only integrity and provenance audit for an actual populated Shale graph. */
+const path = resolve(process.argv[2] ?? resolve(import.meta.dir, "../data/production.db"));
 const db = new Database(path, { readonly: true });
-sqliteVec.load(db);
 const count = (sql: string) => db.query<{ n: number }, []>(sql).get()!.n;
 const issues: Record<string, number> = {};
 db.transaction(() => {
@@ -15,8 +13,6 @@ db.transaction(() => {
   if (foreignKeys.length) issues.foreignKeys = foreignKeys.length;
   const checks = {
     emptySources: "SELECT count(*) n FROM sources s WHERE NOT EXISTS(SELECT 1 FROM chunks c WHERE c.source_id=s.id)",
-    missingVectors: "SELECT count(*) n FROM chunks c WHERE NOT EXISTS(SELECT 1 FROM vector_index v WHERE v.rowid=c.id)",
-    orphanVectors: "SELECT count(*) n FROM vector_index v WHERE NOT EXISTS(SELECT 1 FROM chunks c WHERE c.id=v.rowid)",
     missingEvidence: "SELECT count(*) n FROM graph_claims c WHERE method NOT IN ('legacy','manual') AND NOT EXISTS(SELECT 1 FROM graph_evidence e WHERE e.claim_id=c.id)",
     missingEvidenceChunks: "SELECT count(*) n FROM graph_evidence e WHERE chunk_index IS NOT NULL AND NOT EXISTS(SELECT 1 FROM graph_revision_chunks c WHERE c.revision_id=e.revision_id AND c.chunk_index=e.chunk_index)",
     missingModelProvenance: "SELECT count(*) n FROM graph_claims WHERE method IN ('llm','vision','document-summary') AND (model IS NULL OR trim(model)='')",
@@ -43,7 +39,6 @@ db.transaction(() => {
   if (!sources) issues.emptyGraph = 1;
   console.log(JSON.stringify({ path, at: new Date().toISOString(), sources,
     chunks: count("SELECT count(*) n FROM chunks"),
-    vectors: count("SELECT count(*) n FROM vector_index"),
     entities: count("SELECT count(*) n FROM entities"),
     claims: count("SELECT count(*) n FROM graph_claims"),
     evidence: count("SELECT count(*) n FROM graph_evidence"),

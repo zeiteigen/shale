@@ -7,13 +7,10 @@ This document outlines the core conventions, architecture patterns, and best pra
 ## 1. Core Principles
 
 1. **Local-First & Resource Conscious**: Shale operates on local SQLite databases and local LLM endpoints (or remote fallback endpoints). Extensions must be performant, non-blocking, and cleanly isolate long-running workloads.
-2. **Strict Two-Phase Local GPU Optimization Pattern**: Local consumer GPUs frequently cannot keep both large vision/chat LLMs (e.g. Qwen 2.5 7B) and embedding models (e.g. BGE-M3) resident in VRAM simultaneously. When processing documents or media batches:
-   - **Phase 1: Chat Model**: Perform all chat/multimodal completions first without issuing any embedding requests.
-   - **Phase 2: Embedding Model**: Ingest, chunk, and batch-embed all texts and metadata strictly after Phase 1 has completed.
-3. **Resilient Hot-Reloading & State Isolation**:
+2. **Resilient Hot-Reloading & State Isolation**:
    - Settings are read dynamically on the fly from disk without sticky in-memory caches.
    - Extensions use persistent watermarks and transactional checkpoints to guarantee recovery upon crashes or interruptions.
-4. **Cross-Extension Decoupling**: Extensions communicate via a unified, typed cross-extension message bus (`lib/messages.ts`, `sdk/messages.ts`), avoiding direct import coupling.
+3. **Cross-Extension Decoupling**: Extensions communicate via a unified, typed cross-extension message bus (`lib/messages.ts`, `sdk/messages.ts`), avoiding direct import coupling.
 
 ---
 
@@ -21,18 +18,17 @@ This document outlines the core conventions, architecture patterns, and best pra
 
 ```
 shale/
-├── lib/                     # Low-level core infrastructure (database, vector index, message bus, models)
-│   ├── db.ts                # SQLite database setup, vector tables, schema migrations
+├── lib/                     # Low-level core infrastructure (database, message bus, models)
+│   ├── db.ts                # SQLite database setup, schema migrations
 │   ├── messages.ts          # Core pub/sub and request/response message broker
-│   ├── ai.ts                # LLM and embedding API clients
-│   ├── vector.ts            # High-performance vector cosine similarity search
+│   ├── ai.ts                # LLM API clients
 │   └── extension.ts         # Extension interfaces and cron definitions
 ├── sdk/                     # High-level developer SDK (@shale/sdk)
 │   ├── index.ts             # SDK entry point, ambient scope, factory
 │   ├── settings.ts          # SettingsManager (reads settings.json fresh on every call)
 │   ├── state.ts             # StateManager for extension watermarks and kv-state
 │   ├── ingest.ts            # Document chunking, hashing, and database ingestion
-│   ├── search.ts            # Hybrid search engine (Vector + BM25 + Reciprocal Rank Fusion)
+│   ├── search.ts            # Full-text search engine (BM25 + keyword rank fusion)
 │   ├── messages.ts          # Type-safe messaging interface for extensions
 │   ├── llm.ts               # LLM querying interface with thinking tokens & multimodal support
 │   └── checkpoint.ts        # Recovery checkpoint manager for multi-phase tasks
@@ -110,7 +106,6 @@ Extensions should never directly import files or internal classes from other ext
 // Sender
 const result = await sdk.messages.request("file:process", {
   filePath: "/path/to/diagram.png",
-  options: { deferEmbedding: true },
 });
 
 // Receiver (in extension index.ts)

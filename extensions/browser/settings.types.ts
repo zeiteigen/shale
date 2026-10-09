@@ -1,5 +1,5 @@
 export interface BrowserExtensionSettings {
-  /** Fetch and parse readable HTML for history catalog entries before embedding. */
+  /** Fetch and parse readable HTML for history catalog entries. */
   fetchHistoryPages?: boolean;
   allowPublicPageEnrichment?: boolean;
   maxPublicPagesPerRun?: number;
@@ -14,7 +14,6 @@ export interface BrowserExtensionSettings {
   maxSessionsPerRun: number;
   maxSessionEvents: number;
   collectionWindowMs: number;
-  maxEmbeddingTexts: number;
 
   /**
    * List of domain names or hostnames to exclude from ingestion (e.g. social media, messaging).
@@ -62,7 +61,7 @@ export interface BrowserExtensionSettings {
   maxContentChars: number;
 
   /**
-   * Target character chunk size for text indexing and embeddings.
+   * Target character chunk size for text indexing.
    */
   chunkSize: number;
 

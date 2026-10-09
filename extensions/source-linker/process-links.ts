@@ -2,7 +2,7 @@ import { commitResolutions } from "./resolution-graph";
 import type { ShaleSDK, IngestEdgeInput, EvidenceInput } from "@shale/sdk";
 import { bindConnectorSources } from './source-bindings';
 import { createHash } from "node:crypto";
-import { findKnnCandidatePairs } from "./knn-finder";
+import { findCandidatePairs } from "./candidate-finder";
 import { analyzeSourcePairWithLLM } from "./llm-analyzer";
 import type { DiscoveredLink, ProcessLinksResult, RunOptions } from "./types";
 import { sourceEntityName } from "../../lib/source-identity";
@@ -62,7 +62,7 @@ export function commitLinksToGraph(
     });
     const metadata = {
       reason: link.reason,
-      knnSimilarity: link.knnSimilarity,
+      textScore: link.textScore,
       linkedAt: Date.now(),
       sourceIdA: link.sourceIdA,
       sourceTitleA: link.sourceTitleA,
@@ -111,9 +111,8 @@ export function commitLinksToGraph(
 }
 
 /**
- * Executes the complete two-phase source analysis and linking pipeline:
- * Phase 1: KNN candidate search + Chat model relationship analysis & reason generation.
- * Phase 2: Knowledge graph ingestion, checkpoint resolution, and watermark progression.
+ * Finds full-text candidates, analyzes relationships, and commits graph evidence.
+ * Checkpoints retain unfinished work and watermarks advance after completion.
  *
  * @param sdk Scoped ShaleSDK instance
  * @param options Run options
@@ -122,7 +121,7 @@ export async function processSourceLinks(
   sdk: ShaleSDK,
   options?: RunOptions,
 ): Promise<ProcessLinksResult> {
-  return sdk.models.phase("chat", () =>
+  return sdk.models.run( () =>
     analyzeAndCommitSourceLinks(sdk, options),
   );
 }
@@ -152,9 +151,8 @@ async function analyzeAndCommitSourceLinks(
     };
   }
   if (!batch) {
-    const pairs = await findKnnCandidatePairs(targetSources, sdk, {
-      knnK: options?.knnK,
-      minKnnSimilarity: options?.minKnnSimilarity,
+    const pairs = await findCandidatePairs(targetSources, sdk, {
+      candidatesPerChunk: options?.candidatesPerChunk,
       maxPairsPerRun: Number.MAX_SAFE_INTEGER,
     });
     batch = {

@@ -1,4 +1,3 @@
-import { embedBounded } from "./embed-bounded";
 import { ensureBrowserSchema } from "./storage-schema";
 import { recordCatalog, isCatalogStale } from "./catalog-lifecycle";
 import type { ShaleSDK } from "@shale/sdk";
@@ -95,10 +94,6 @@ export async function processBookmarksBatch(
     `[Bookmarks] Ingesting batch of ${validItems.length} bookmarks (${skippedCount} excluded/skipped)...`,
   );
 
-  // Batch embed all items simultaneously
-  const texts = validItems.map((v) => v.textContent);
-  const embeddings = await embedBounded(sdk, texts, settings);
-
   sdk.database.transaction(() => {
     for (let i = 0; i < validItems.length; i++) {
       const v = validItems[i];
@@ -118,7 +113,6 @@ export async function processBookmarksBatch(
             chunk_index: 0,
             chunk_type: "verbatim",
             text_content: v.textContent,
-            embedding: embeddings[i],
           },
         ],
         namespace,

@@ -9,7 +9,6 @@ export async function modelRequest<T>(
   resource?: string | null,
 ): Promise<T> {
   return modelCoordinator.request(
-    role,
     endpoint,
     async () => {
       try {
@@ -22,9 +21,8 @@ export async function modelRequest<T>(
           );
         }
         if (error instanceof OpenAI.APIError) {
-          const label = role === "chat" ? "Chat" : "Embedding";
           throw new Error(
-            `OpenAI ${label} API error (HTTP ${error.status} from ${endpoint}): ${error.message}`,
+            `OpenAI Chat API error (HTTP ${error.status} from ${endpoint}): ${error.message}`,
             { cause: error },
           );
         }

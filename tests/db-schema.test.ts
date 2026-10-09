@@ -1,12 +1,10 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import * as sqliteVec from "sqlite-vec";
 
 function createTestDb(): Database {
   const db = new Database(":memory:");
   db.run("PRAGMA journal_mode = WAL;");
   db.run("PRAGMA foreign_keys = ON;");
-  sqliteVec.load(db);
 
   // Sources
   db.run(`
@@ -32,13 +30,6 @@ function createTestDb(): Database {
       chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic')),
       FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
     ) STRICT;
-  `);
-
-  // Vector virtual table
-  db.run(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS vector_index USING vec0(
-      embedding float[4]
-    );
   `);
 
   // FTS5 virtual table
@@ -68,19 +59,6 @@ function createTestDb(): Database {
     CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
       INSERT INTO chunks_fts(chunks_fts, rowid, text_content) VALUES ('delete', old.id, old.text_content);
       INSERT INTO chunks_fts(rowid, text_content) VALUES (new.id, new.text_content);
-    END;
-  `);
-
-  // Vector triggers
-  db.run(`
-    CREATE TRIGGER IF NOT EXISTS chunks_vector_ad AFTER DELETE ON chunks BEGIN
-      DELETE FROM vector_index WHERE rowid = old.id;
-    END;
-  `);
-
-  db.run(`
-    CREATE TRIGGER IF NOT EXISTS chunks_vector_au AFTER UPDATE ON chunks BEGIN
-      DELETE FROM vector_index WHERE rowid = old.id AND old.id != new.id;
     END;
   `);
 
@@ -157,7 +135,7 @@ describe("Database Schema & Trigger Integrity", () => {
     db = createTestDb();
   });
 
-  describe("Phase 1: Entity Namespacing", () => {
+  describe("Entity Namespacing", () => {
     it("allows different namespaces to store entities with the same name", () => {
       const insertEntity = db.query<
         { id: number },
@@ -237,7 +215,7 @@ describe("Database Schema & Trigger Integrity", () => {
     });
   });
 
-  describe("Phase 1: Extension State Table", () => {
+  describe("Extension State Table", () => {
     it("isolates state between different extensions", () => {
       const upsert = db.query(`
         INSERT INTO extension_state (extension_id, state_key, value, updated_at)
@@ -309,8 +287,8 @@ describe("Database Schema & Trigger Integrity", () => {
     });
   });
 
-  describe("Phase 2: Virtual Table Synchronization & Orphan Prevention", () => {
-    it("deletes vector embeddings automatically when parent source is deleted (cascade)", () => {
+  describe("FTS synchronization and orphan prevention", () => {
+    it("deletes chunks and their full-text entries when a parent source is deleted", () => {
       // 1. Insert source
       db.run(`
         INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
@@ -322,35 +300,23 @@ describe("Database Schema & Trigger Integrity", () => {
         .query<{ id: number }, []>(
           `
         INSERT INTO chunks (source_id, chunk_index, text_content)
-        VALUES ('src-1', 0, 'Hello vector world')
+          VALUES ('src-1', 0, 'Hello searchable world')
         RETURNING id;
       `,
         )
         .get()!;
 
-      // 3. Insert vector
-      const v = new Uint8Array(new Float32Array([1.0, 2.0, 3.0, 4.0]).buffer);
-      db.run("INSERT INTO vector_index (rowid, embedding) VALUES (?, ?);", [
-        chunkRes.id,
-        v,
-      ]);
-
-      // Verify presence in chunks, fts, and vector_index
+      // Verify presence in chunks and FTS.
       const countChunksBefore = db
         .query<{ c: number }, []>("SELECT count(*) as c FROM chunks")
         .get()!.c;
       const countFtsBefore = db
         .query<{ c: number }, []>("SELECT count(*) as c FROM chunks_fts")
         .get()!.c;
-      const countVecBefore = db
-        .query<{ c: number }, []>("SELECT count(*) as c FROM vector_index")
-        .get()!.c;
-
       expect(countChunksBefore).toBe(1);
       expect(countFtsBefore).toBe(1);
-      expect(countVecBefore).toBe(1);
 
-      // 4. Delete source -> cascades to chunks -> triggers chunks_vector_ad and chunks_ad
+      // Delete source -> cascades to chunks -> FTS delete trigger.
       db.run("DELETE FROM sources WHERE id = 'src-1';");
 
       const countChunksAfter = db
@@ -359,16 +325,11 @@ describe("Database Schema & Trigger Integrity", () => {
       const countFtsAfter = db
         .query<{ c: number }, []>("SELECT count(*) as c FROM chunks_fts")
         .get()!.c;
-      const countVecAfter = db
-        .query<{ c: number }, []>("SELECT count(*) as c FROM vector_index")
-        .get()!.c;
-
       expect(countChunksAfter).toBe(0);
       expect(countFtsAfter).toBe(0);
-      expect(countVecAfter).toBe(0); // Vector orphan prevented!
     });
 
-    it("deletes vector embedding when a chunk is deleted directly", () => {
+    it("removes full-text entries when a chunk is deleted directly", () => {
       db.run(`
         INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
         VALUES ('src-2', 'doc', 'test://doc2', 'local', 100, 'Doc 2', 100, 'h2');
@@ -384,21 +345,10 @@ describe("Database Schema & Trigger Integrity", () => {
         )
         .get()!;
 
-      const v = new Uint8Array(new Float32Array([0.1, 0.2, 0.3, 0.4]).buffer);
-      db.run("INSERT INTO vector_index (rowid, embedding) VALUES (?, ?);", [
-        chunk.id,
-        v,
-      ]);
-
-      expect(
-        db.query<{ c: number }, []>("SELECT count(*) as c FROM vector_index").get()!
-          .c,
-      ).toBe(1);
-
       db.run("DELETE FROM chunks WHERE id = ?;", [chunk.id]);
 
       expect(
-        db.query<{ c: number }, []>("SELECT count(*) as c FROM vector_index").get()!
+        db.query<{ c: number }, []>("SELECT count(*) as c FROM chunks_fts").get()!
           .c,
       ).toBe(0);
     });
@@ -527,4 +477,3 @@ describe("Database Schema & Trigger Integrity", () => {
     });
   });
 });
-

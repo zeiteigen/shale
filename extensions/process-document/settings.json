@@ -22,7 +22,6 @@
   "summaryPrompt": "Summarize the main subjects, findings, and key details of this document.",
   "summaryMaxChars": 16000,
   "summaryTimeoutMs": 60000,
-  "embeddingBatchSize": 64,
   "defaultEntityType": "Document",
   "defaultRelation": "CONTAINED_IN",
   "enablePdfOcr": true,

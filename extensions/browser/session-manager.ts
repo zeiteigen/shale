@@ -39,8 +39,7 @@ export function setActiveSession(
 }
 
 /**
- * Commits a synthesized browsing session to the database, vector index, and knowledge graph.
- * Enforces two-phase execution: prepareSession (Phase 1 Chat) -> finalizeSession (Phase 2 Embed).
+ * Commits a synthesized browsing session to the database and knowledge graph.
  */
 export async function commitSessionToGraph(
   sdk: ShaleSDK,

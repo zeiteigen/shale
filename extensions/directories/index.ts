@@ -7,7 +7,7 @@ import { DEFAULT_FILE_EXTENSIONS, type DirectorySettings } from "./settings.type
 export type { DirectoryResult } from "./types";
 export { run as recover } from "./recover";
 
-/** Finish chat/vision processing across every selected root before embedding. */
+/** Process selected roots and commit their parsed text and graph metadata. */
 export async function run(sdkOverride?: ShaleSDK, forceAll?: boolean) {
   const sdk = sdkOverride ?? getSDK(import.meta.dir);
   const settings = sdk.settings.getAll<DirectorySettings>();
@@ -16,14 +16,12 @@ export async function run(sdkOverride?: ShaleSDK, forceAll?: boolean) {
     sdk.logger.log("No directories selected. Set directories in extensions/directories/settings.json.");
     return [];
   }
-  return withDirectoryRun(sdk, () => sdk.models.batch(
-    () => prepareDirectories(sdk, settings, forceAll ?? settings.forceAll ?? false),
-    async ({ results, pending }) => {
-      await finalizeFiles(sdk, pending);
-      for (const result of results) sdk.logger.log(`${result.directory}: ${result.filesProcessed} file(s) ingested, ${result.filesSkipped} skipped, ${result.errors.length} error(s).`);
-      return results;
-    },
-  ));
+  return withDirectoryRun(sdk, async () => {
+    const { results, pending } = await prepareDirectories(sdk, settings, forceAll ?? settings.forceAll ?? false);
+    await finalizeFiles(sdk, pending);
+    for (const result of results) sdk.logger.log(`${result.directory}: ${result.filesProcessed} file(s) ingested, ${result.filesSkipped} skipped, ${result.errors.length} error(s).`);
+    return results;
+  });
 }
 
 if (import.meta.main) {

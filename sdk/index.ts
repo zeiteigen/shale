@@ -18,7 +18,6 @@ export {
   defaultMessageBus,
   createMessageBus,
 } from "../lib/messages";
-export { EmbedderClient, getEmbedding, getEmbeddings, type EmbedderOptions } from "./embed";
 export { ModelBatches } from "./models";
 export {
   LLMClient,
@@ -50,10 +49,5 @@ export * from "./scope";
 export * from "./functions";
 export type { ExtensionSDKOptions, ModelProfiles } from "./sdk-options";
 export { ModelCoordinator, modelCoordinator } from "../lib/ai/scheduler";
-export {
-  adoptEmbeddingProfile,
-  readEmbeddingProfile,
-  type EmbeddingProfile,
-} from "../lib/embedding-profile";
 
 export type * from "../lib/messages.types";

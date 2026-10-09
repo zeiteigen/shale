@@ -24,7 +24,6 @@ it("rescans older unfinished files after recovery of an interrupted preparation"
       type: "ai_summary", vault, mtime: 200000,
       parsedFile: { noteTitle: "Recovered", noteUri: `file://${newer}`, updatedAt: 200000, contextualChunks: [{ chunk_index: 0, text_content: "Cached material" }] },
     }, { id: `ai_summary:${newer}` });
-    sdk.embed = (async (texts: string[]) => texts.map(() => [1, 0, 0, 0])) as any;
     sdk.queryLLM = (async () => "Expanded material") as any;
     await recover(sdk);
     expect(sdk.state.getWatermark(`vault:${directory}:mtime`)).toBe("50000");

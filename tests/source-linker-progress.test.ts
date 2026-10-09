@@ -16,11 +16,11 @@ function fixture() {
   for (const [i, title] of ["Same title", "Same title", "Third"].entries()) {
     sdk.ingest.sourceAndChunks({
       source: { id: `id${i}`, type: "test", origin: "test", uri: `uri:${i}`, title, updated_at: 100 + i },
-      chunks: [{ text_content: `content ${i}`, embedding: [1, 0, 0, 0] }],
+      chunks: [{ text_content: `content ${i}` }],
     });
   }
   const sources = sdk.context.getAllSources();
-  const pair: SourceCandidatePair = { sourceA: sources[0], sourceB: sources[1], knnSimilarity: 1, matchedChunkIds: [] };
+  const pair: SourceCandidatePair = { sourceA: sources[0], sourceB: sources[1], textScore: 1, matchedChunkIds: [] };
   const analysis = { shouldLink: true, relation: "RELATES_TO", reason: "Similar", weight: 0.9, entityResolutions: [] };
   sdk.queryLLM = (async () => JSON.stringify(analysis)) as any;
   return { database, sdk, pair, analysis };
@@ -86,7 +86,7 @@ it("applies the same confidence decision to fresh, cached, and legacy recovered 
     expect(await analyzeSourcePairWithLLM(pair, sdk)).toBeNull();
     await recover(sdk);
     expect(database.query("SELECT * FROM edges").all()).toHaveLength(0);
-    sdk.saveCheckpoint({ sourceA: pair.sourceA, sourceB: pair.sourceB, analysis: { ...analysis, weight: 0.1 }, knnSimilarity: 1 }, { id: pairCheckpointId(pair) });
+    sdk.saveCheckpoint({ sourceA: pair.sourceA, sourceB: pair.sourceB, analysis: { ...analysis, weight: 0.1 }, textScore: 1 }, { id: pairCheckpointId(pair) });
     await recover(sdk);
     expect(database.query("SELECT * FROM edges").all()).toHaveLength(0);
     expect(sdk.state.getWatermark(WATERMARK_KEY)).toBeNull();
@@ -99,7 +99,7 @@ it("keeps same-titled sources distinct and maps visualizer chunks by source ID",
     expect(commitLinksToGraph([{
       sourceIdA: pair.sourceA.id, sourceTitleA: pair.sourceA.title,
       sourceIdB: pair.sourceB.id, sourceTitleB: pair.sourceB.title,
-      ...analysis, knnSimilarity: 1,
+      ...analysis, textScore: 1,
     }], sdk)).toBe(2);
     const graph = getGraphData(sdk);
     expect(graph.nodes).toHaveLength(2);

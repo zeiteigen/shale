@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach, spyOn } from "bun:test";
 import { Database } from "bun:sqlite";
-import * as sqliteVec from "sqlite-vec";
 import { join } from "node:path";
 import { isTExtensionManifest, type ExtensionManifest } from "../lib/extension";
 import {
@@ -50,7 +49,6 @@ function createTestDb(): Database {
   const db = new Database(":memory:");
   db.run("PRAGMA journal_mode = WAL;");
   db.run("PRAGMA foreign_keys = ON;");
-  sqliteVec.load(db);
 
   // Sources
   db.run(`
@@ -76,13 +74,6 @@ function createTestDb(): Database {
       chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic')),
       FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
     ) STRICT;
-  `);
-
-  // Vector index
-  db.run(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS vector_index USING vec0(
-      embedding float[4096]
-    );
   `);
 
   // FTS5
@@ -169,44 +160,6 @@ function createTestDb(): Database {
   return db;
 }
 
-function createMockEmbedder() {
-  const dummyVec = new Array(4096).fill(0.01);
-  return {
-    embed: async (input: string | string[]) => {
-      if (Array.isArray(input)) {
-        return input.map(() => [...dummyVec]);
-      }
-      return [...dummyVec];
-    },
-  } as any;
-}
-
-function createMockLLM(responseGenerator?: (prompt: string) => string) {
-  return {
-    query: async (prompt: any) => {
-      const text = typeof prompt === "string" ? prompt : prompt.prompt;
-      if (responseGenerator) {
-        return responseGenerator(text);
-      }
-      if (text.includes("single browsing session")) {
-        return JSON.stringify({
-          sessionTitle: "Researching SQLite Vector Extensions in Bun",
-          summary:
-            "Explored sqlite-vec and Bun documentation to integrate vector search into SQLite.",
-          topics: ["SQLite", "Vector Search", "Bun"],
-          dominantDomains: ["bun.sh", "github.com"],
-        });
-      }
-      return JSON.stringify({
-        summary:
-          "Documentation covering SQLite full-text search with FTS5 and trigram tokenizers.",
-        topics: ["SQLite", "FTS5", "Search"],
-        category: "Documentation",
-      });
-    },
-  } as any;
-}
-
 describe("Browser Ingestion Extension", () => {
   let testDb: Database;
   let testSdk: ShaleSDK;
@@ -215,33 +168,21 @@ describe("Browser Ingestion Extension", () => {
   beforeEach(() => {
     testDb = createTestDb();
     testBus = createMessageBus();
-    testSdk = createExtensionSDK(
-      "browser",
-      "browser",
-      testDb,
-      undefined,
-      undefined,
-      undefined,
-      join(import.meta.dir, "../extensions/browser"),
-      testBus,
-    );
-
-    const dummyVec = new Array(4096).fill(0.01);
-    (testSdk as any).embed = async (input: string | string[]) => {
-      if (Array.isArray(input)) {
-        return input.map(() => [...dummyVec]);
-      }
-      return [...dummyVec];
-    };
+    testSdk = createExtensionSDK("browser", {
+      namespace: "browser",
+      database: testDb,
+      extensionDir: join(import.meta.dir, "../extensions/browser"),
+      messageBus: testBus,
+    });
 
     (testSdk as any).queryLLM = async (prompt: any) => {
       const text = typeof prompt === "string" ? prompt : prompt.prompt;
       if (text.includes("single browsing session")) {
         return JSON.stringify({
-          sessionTitle: "Researching SQLite Vector Extensions in Bun",
+          sessionTitle: "Researching SQLite Full-Text Search in Bun",
           summary:
-            "Explored sqlite-vec and Bun documentation to integrate vector search into SQLite.",
-          topics: ["SQLite", "Vector Search", "Bun"],
+            "Explored SQLite FTS5 and Bun documentation for full-text search.",
+          topics: ["SQLite", "FTS5", "Bun"],
           dominantDomains: ["bun.sh", "github.com"],
         });
       }
@@ -402,13 +343,13 @@ describe("Browser Ingestion Extension", () => {
 
     it("generates fallback analysis when LLM is unavailable or content is short", () => {
       const fb = buildFallbackPageAnalysis(
-        "SQLite Vector Guide",
+        "SQLite Full-Text Search Guide",
         "sqlite.org",
         "Short excerpt",
       );
       expect(fb.summary).toBe("Short excerpt");
       expect(fb.category).toBe("WebPage");
-      expect(fb.topics).toEqual(["SQLite Vector Guide"]);
+      expect(fb.topics).toEqual(["SQLite Full-Text Search Guide"]);
 
       const sfb = buildFallbackSessionAnalysis([
         {
@@ -453,8 +394,8 @@ describe("Browser Ingestion Extension", () => {
           transitionType: "typed",
         },
         {
-          url: "https://github.com/asg017/sqlite-vec",
-          title: "sqlite-vec Repository",
+          url: "https://sqlite.org/fts5.html",
+          title: "SQLite FTS5 Documentation",
           domain: "github.com",
           visitedAt: 2000,
           transitionType: "link",
@@ -462,9 +403,9 @@ describe("Browser Ingestion Extension", () => {
       ];
 
       const synthesis = await synthesizeSessionWithLLM(testSdk, visits, {});
-      expect(synthesis.sessionTitle).toContain("SQLite Vector");
-      expect(synthesis.summary).toContain("sqlite-vec");
-      expect(synthesis.topics).toContain("Vector Search");
+      expect(synthesis.sessionTitle).toContain("SQLite Full-Text Search");
+      expect(synthesis.summary).toContain("FTS5");
+      expect(synthesis.topics).toContain("FTS5");
       expect(synthesis.dominantDomains).toContain("bun.sh");
     });
   });
@@ -473,7 +414,7 @@ describe("Browser Ingestion Extension", () => {
     it("splits long text cleanly on paragraphs and sentence boundaries", () => {
       const text = [
         "Paragraph one is introducing the subject.",
-        "Paragraph two provides in-depth technical analysis of SQLite virtual tables and vector indexing.",
+        "Paragraph two provides in-depth technical analysis of SQLite FTS5 and text indexing.",
         "Paragraph three wraps up the findings with recommendations for production deployments.",
       ].join("\n\n");
 
@@ -529,12 +470,6 @@ describe("Browser Ingestion Extension", () => {
       if (chunks.length > 1) {
         expect(chunks[1].chunk_type).toBe("verbatim");
       }
-
-      // Verify vector index
-      const vecCount = testDb
-        .query<any, any>("SELECT count(*) as count FROM vector_index")
-        .get();
-      expect(vecCount.count).toBeGreaterThanOrEqual(1);
 
       // Verify FTS5 search
       const ftsRes = testDb
@@ -708,8 +643,8 @@ describe("Browser Ingestion Extension", () => {
       await recordSessionVisit(
         testSdk,
         {
-          url: "https://github.com/asg017/sqlite-vec",
-          title: "sqlite-vec",
+          url: "https://sqlite.org/fts5.html",
+          title: "SQLite FTS5 Documentation",
           domain: "github.com",
           visitedAt: 2000,
         },
@@ -790,7 +725,7 @@ describe("Browser Ingestion Extension", () => {
   });
 
   describe("7. Browser History & Bookmarks Batch Ingestion", () => {
-    it("fetches and parses history HTML before embedding, falling back for unavailable pages", async () => {
+    it("fetches and parses history HTML, falling back for unavailable pages", async () => {
       const requests: string[] = [];
       const fetchMock = spyOn(globalThis, "fetch").mockImplementation((async (url: URL | RequestInfo) => {
         const path = new URL(String(url)).pathname;
@@ -806,13 +741,6 @@ describe("Browser Ingestion Extension", () => {
       });
       parserSdk.messages.handle("web:parse", (request, context) =>
         parseWebPage(parserSdk, request, context.signal));
-      const embedded: string[] = [];
-      (testSdk as any).embed = async (input: string | string[]) => {
-        expect(requests.sort()).toEqual(["/article", "/missing"]);
-        const texts = typeof input === "string" ? [input] : input;
-        embedded.push(...texts);
-        return texts.map(() => new Array(4096).fill(0.01));
-      };
       try {
         const result = await processHistoryBatch(testSdk, {
           type: "history_batch",
@@ -823,8 +751,7 @@ describe("Browser Ingestion Extension", () => {
           ],
         }, { excludeDomains: ["reddit.com"], chunkSize: 200 });
         expect(result).toEqual({ ingestedCount: 2, skippedCount: 1 });
-        expect(embedded.some((text) => text.includes("Transactions make database updates"))).toBe(true);
-        expect(embedded.some((text) => text.includes("Content Origin: public-fetch"))).toBe(true);
+        expect(requests.sort()).toEqual(["/article", "/missing"]);
         const chunks = testDb.query<{ text_content: string }, []>(
           "SELECT text_content FROM chunks ORDER BY id",
         ).all();
@@ -836,7 +763,7 @@ describe("Browser Ingestion Extension", () => {
       }
     });
 
-    it("persists prepared history text for embedding retries and shares duplicate URL fetches", async () => {
+    it("persists prepared history text across commit failure and shares duplicate URL fetches", async () => {
       let parses = 0;
       testBus.handle("web:parse", async () => {
         parses++;
@@ -853,15 +780,15 @@ describe("Browser Ingestion Extension", () => {
           { id: "h2", collectorId: "test", url: "https://example.com/article", title: "Article", visitTime: 2000 },
         ],
       };
-      const prepared = JSON.parse(JSON.stringify(await testSdk.models.phase("chat", () =>
+      const prepared = JSON.parse(JSON.stringify(await testSdk.models.run( () =>
         prepareBrowserPayload(testSdk, payload, {}))));
       expect(parses).toBe(1);
-      const embed = testSdk.embed;
-      testSdk.embed = async () => { throw new Error("Embedding offline"); };
-      await expect(finalizeBrowserPayload(testSdk, prepared, {})).rejects.toThrow("Embedding offline");
+      testDb.run(`CREATE TEMP TRIGGER fail_source_commit BEFORE INSERT ON sources
+        BEGIN SELECT RAISE(ABORT, 'Injected commit failure'); END`);
+      await expect(finalizeBrowserPayload(testSdk, prepared, {})).rejects.toThrow();
       expect(testDb.query("SELECT id FROM sources WHERE type='browser_history'").all()).toHaveLength(0);
-      testSdk.embed = embed;
-      await testSdk.models.phase("embedding", () => finalizeBrowserPayload(testSdk, prepared, {}));
+      testDb.run("DROP TRIGGER fail_source_commit");
+      await finalizeBrowserPayload(testSdk, prepared, {});
       expect(parses).toBe(1);
       expect(testDb.query("SELECT id FROM sources WHERE type='browser_history'").all()).toHaveLength(2);
       expect(testDb.query("SELECT id FROM chunks WHERE text_content='Durable parsed article content.'").all()).toHaveLength(2);
@@ -993,7 +920,7 @@ describe("Browser Ingestion Extension", () => {
       );
     });
 
-    it("efficiently batch ingests large history streams with batch embeddings", async () => {
+    it("efficiently ingests large history streams", async () => {
       const items = Array.from({ length: 50 }, (_, i) => ({
         url: `https://docs.rs/crate-${i}/latest`,
         title: `Rust Crate ${i}`,
@@ -1155,10 +1082,10 @@ describe("Browser Ingestion Extension", () => {
     });
   });
 
-  describe("10. Strict Two-Phase Local GPU Optimization Pattern", () => {
-    it("synthesizes a closing session before the page batch starts embedding", async () => {
+  describe("10. Bounded Chat Batch Processing", () => {
+    it("synthesizes a closing session before committing the page batch", async () => {
       const calls: string[] = [];
-      const sdk = createExtensionSDK("session-phases", {
+      const sdk = createExtensionSDK("session-batch", {
         database: testDb,
         messageBus: testBus,
         models: {
@@ -1167,15 +1094,6 @@ describe("Browser Ingestion Extension", () => {
             maxRetries: 0,
             fetchFn: async (url: any, init: any) => {
               const body = JSON.parse(String(init?.body));
-              if (String(url).endsWith("/embeddings")) {
-                calls.push("embedding");
-                return Response.json({
-                  data: body.input.map((_: string, index: number) => ({
-                    index,
-                    embedding: new Array(4096).fill(0.01),
-                  })),
-                });
-              }
               calls.push("chat");
               return Response.json({
                 choices: [
@@ -1214,10 +1132,8 @@ describe("Browser Ingestion Extension", () => {
         },
         { enableLlmAnalysis: true, generateSessionSummaries: true },
       );
-      expect(calls.filter((call) => call === "chat").length).toBe(4);
-      expect(calls.lastIndexOf("chat")).toBeLessThan(
-        calls.indexOf("embedding"),
-      );
+      expect(calls).toHaveLength(4);
+      expect(calls.every((call) => call === "chat")).toBe(true);
       expect(
         testDb
           .query<{ title: string }, []>(
@@ -1226,8 +1142,8 @@ describe("Browser Ingestion Extension", () => {
           .get()?.title,
       ).toBe("Synthesized closed session");
     });
-    it("enforces strict two-phase execution: all chat model requests complete before any embedding request starts", async () => {
-      const callLog: Array<"chat" | "embedding"> = [];
+    it("uses chat analysis and makes no model calls during text commit", async () => {
+      const callLog: string[] = [];
 
       const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
         const urlStr = url.toString();
@@ -1250,26 +1166,12 @@ describe("Browser Ingestion Extension", () => {
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
-        } else if (urlStr.includes("/embeddings")) {
-          callLog.push("embedding");
-          return new Response(
-            JSON.stringify({
-              object: "list",
-              data: Array.from(
-                { length: JSON.parse(String(init?.body)).input.length },
-                (_, index) => ({
-                  index,
-                  embedding: new Array(4096).fill(0.01),
-                }),
-              ),
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
         }
+        callLog.push(`unexpected:${urlStr}`);
         return new Response("Not found", { status: 404 });
       };
 
-      const twoPhaseSdk = createExtensionSDK("browser two-phase", {
+      const batchSdk = createExtensionSDK("browser batch", {
         namespace: "browser",
         database: testDb,
         models: { connection: { fetchFn: mockFetch } },
@@ -1285,7 +1187,7 @@ describe("Browser Ingestion Extension", () => {
             url: "https://example.com/page1",
             title: "Page One",
             textContent:
-              "Comprehensive long content for page one to trigger full LLM analysis properly. It includes deep architectural details about graph databases, vector indexes, and semantic search paradigms.",
+              "Comprehensive long content for page one to trigger full LLM analysis properly. It includes deep architectural details about graph databases, full-text indexes, and search paradigms.",
           },
           {
             type: "page_visit",
@@ -1299,34 +1201,19 @@ describe("Browser Ingestion Extension", () => {
             url: "https://example.com/page3",
             title: "Page Three",
             textContent:
-              "Comprehensive long content for page three to trigger full LLM analysis properly. Covering neural embedding models, chunking strategies, and knowledge graph edge traversal optimizations.",
+              "Comprehensive long content for page three to trigger full LLM analysis properly. Covering graph extraction, chunking strategies, and knowledge graph edge traversal optimizations.",
           },
         ],
       };
 
-      const result = await processTabsBatch(twoPhaseSdk, tabsPayload, {
+      const result = await processTabsBatch(batchSdk, tabsPayload, {
         enableLlmAnalysis: true,
       });
 
       expect(result.ingestedCount).toBe(3);
 
-      // Verify that chat model requests and embedding requests occurred
-      const chatCalls = callLog.filter((c) => c === "chat");
-      const embedCalls = callLog.filter((c) => c === "embedding");
-      expect(chatCalls.length).toBe(3);
-      expect(embedCalls.length).toBeGreaterThanOrEqual(3);
-
-      // Crucial assertion: All chat calls must happen strictly before the first embedding call
-      const firstEmbedIndex = callLog.indexOf("embedding");
-      const lastChatIndex = callLog.lastIndexOf("chat");
-
-      expect(firstEmbedIndex).toBeGreaterThan(-1);
-      expect(lastChatIndex).toBeGreaterThan(-1);
-      expect(lastChatIndex).toBeLessThan(firstEmbedIndex);
-
-      // Verify zero interleaving: no chat calls after the first embedding call
-      const callsAfterFirstEmbed = callLog.slice(firstEmbedIndex);
-      expect(callsAfterFirstEmbed.every((c) => c === "embedding")).toBe(true);
+      expect(callLog).toHaveLength(3);
+      expect(callLog.every((call) => call === "chat")).toBe(true);
     });
 
     it("handles tabs_batch via push ingestion hook subscribe()", async () => {

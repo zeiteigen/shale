@@ -11,24 +11,17 @@ export async function obsidianDocumentFixture(register = true) {
   const directory = mkdtempSync(join(tmpdir(), "shale-obsidian-documents-"));
   const database = createTestDatabase();
   const messageBus = createMessageBus();
-  const events: Array<{ role: "chat" | "embedding"; body: any }> = [];
-  let embeddingFailure = false;
+  const events: Array<{ role: "chat"; body: any }> = [];
   const models: ModelProfiles = {
     connection: {
       baseUrl: "https://models.test.invalid/v1", resource: "obsidian-document-tests", maxRetries: 0,
       fetchFn: async (url: RequestInfo | URL | string, init?: RequestInit) => {
         const body = JSON.parse(String(init?.body));
-        if (String(url).includes("embeddings")) {
-          events.push({ role: "embedding", body });
-          if (embeddingFailure) return Response.json({ error: { message: "Document embedding unavailable" } }, { status: 503 });
-          return Response.json({ data: body.input.map((_: unknown, index: number) => ({ index, embedding: [1, 0, 0, 0] })) });
-        }
         events.push({ role: "chat", body });
         return Response.json({ id: "summary", object: "chat.completion", model: "test-summary", choices: [{ index: 0, message: { role: "assistant", content: "This document records evidence for local knowledge extraction." }, finish_reason: "stop" }] });
       },
     },
     chat: { model: "test-summary" },
-    embedding: { model: "test-embedding", dimensions: 4, padToDimensions: null },
   };
   const folder = (name: string) => { const path = join(directory, name); mkdirSync(path); return path; };
   const settingsDirectory = folder("settings");
@@ -54,7 +47,6 @@ export async function obsidianDocumentFixture(register = true) {
   if (register) { await setupDocument(documentSDK); await setupImage(imageSDK); }
   return {
     directory, database, sdk, documentSDK, imageSDK, settings, files, vaultA, vaultB, events,
-    failEmbeddings: (value: boolean) => { embeddingFailure = value; },
     close: () => { sdk.messages.clear(); documentSDK.messages.clear(); imageSDK.messages.clear(); database.close(); rmSync(directory, { recursive: true, force: true }); },
   };
 }

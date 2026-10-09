@@ -7,21 +7,15 @@ import { createExtensionSDK } from '../sdk';
 import { createKnowledgeGraphMcpServer } from '../mcp/server';
 import type { MutationName, MutationArgs } from '../sdk/knowledge/schemas';
 import { recordVersion } from '../sdk/knowledge/version';
-import { tagEmbedding } from '../lib/embedding-profile';
 import { commitNote } from '../extensions/obsidian/commit';
 import { finalizeHistoryBatch } from '../extensions/browser/history-ingest';
 import { processBookmarksBatch } from '../extensions/browser/catalog-ingest';
 
 const databases:Database[]=[];
 afterEach(()=>{for(const db of databases.splice(0)) db.close();});
-const vector=(text:string)=>[1,text.length%7+1,text.includes('corrected') ? 3 : 1,1];
-
 function setup() {
   const db=createTestDatabase();databases.push(db);
   const sdk=createExtensionSDK('editing-tests',{database:db,namespace:'knowledge'});
-  const batches:string[][]=[];
-  sdk.embedder.embedBatch=async texts=>{batches.push(texts);return texts.map(vector);};
-  sdk.embedder.embed=async text=>vector(text);
   const edit=async <N extends MutationName>(name:N,args:MutationArgs<N>)=>{
     const response=await sdk.knowledge.mutate(name,args,{actor:'test-agent',reason:'Correct knowledge from verified evidence'}) as any;
     return response.operations[0].result as any;
@@ -29,12 +23,12 @@ function setup() {
   const source=async(id='source',text='original evidence text')=>edit('add_source',{id,title:id,uri:`test://${id}`,text});
   const entity=(name:string,type='Concept')=>sdk.graph.entities.create({name,type});
   const claim=(subject:number,value:string,status:'accepted'|'proposed'='accepted')=>sdk.graph.claims.add({subject,predicate:'FACT',value,status});
-  return {db,sdk,edit,source,entity,claim,batches};
+  return {db,sdk,edit,source,entity,claim};
 }
 
 describe('Knowledge editing transactions',()=>{
   it('previews without writes or model calls, applies local refs, and retries exactly once',async()=>{
-    const {db,sdk,batches}=setup();
+    const {db,sdk}=setup();
     const input={actor:'curator',reason:'Add documented project ownership',requestId:'batch-once',operations:[
       {type:'append_graph',args:{entities:[{ref:'p',name:'Project',type:'Project'},{ref:'o',name:'Owner',type:'Person'}],
         claims:[{subject:'@o',object:'@p',predicate:'OWNS',status:'accepted'}]}},
@@ -44,7 +38,7 @@ describe('Knowledge editing transactions',()=>{
     const preview=await sdk.knowledge.preview(input) as any;
     expect(preview.preview).toBe(true);expect(preview.operations).toHaveLength(2);
     expect(db.query('SELECT * FROM entities').all()).toHaveLength(0);
-    expect(recordVersion(db,'database','*')).toBe(epoch);expect(batches).toHaveLength(0);
+    expect(recordVersion(db,'database','*')).toBe(epoch);
     const result=await sdk.knowledge.apply(input) as any;
     expect(result.entityRefs.p).toBeGreaterThan(0);
     expect(await sdk.knowledge.apply(input)).toEqual(result);
@@ -57,35 +51,30 @@ describe('Knowledge editing transactions',()=>{
     expect((sdk.knowledge.history(result.changeId) as any).result).toEqual(result);
   });
 
-  it('rolls back whole mixed batches and prepares ordered source edits in one embedding batch',async()=>{
-    const {db,sdk,batches}=setup();
+  it('rolls back whole mixed batches while applying ordered source edits',async()=>{
+    const {db,sdk}=setup();
     const operations=[{type:'add_source',args:{id:'new',title:'New',uri:'test://new',text:'one'}},
       {type:'add_chunk',args:{sourceId:'new',text:'two'}},
       {type:'remove_source',args:{sourceId:'new'}},
       {type:'restore_source',args:{sourceId:'new'}}];
     const preview=await sdk.knowledge.preview({reason:'review text',operations}) as any;
-    expect(preview.preview).toBe(true);expect(batches).toHaveLength(0);
+    expect(preview.preview).toBe(true);
     expect(db.query('SELECT * FROM graph_source_revisions').all()).toHaveLength(0);
     await sdk.knowledge.apply({reason:'commit text',operations});
-    expect(batches).toEqual([['one','two','one','two']]);
     expect(db.query('SELECT text_content FROM chunks ORDER BY chunk_index').all()).toEqual([{text_content:'one'},{text_content:'two'}]);
     const before=db.query('SELECT * FROM sources').all();
     await expect(sdk.knowledge.apply({reason:'invalid batch',operations:[
       {type:'update_source',args:{sourceId:'new',title:'Changed'}},
       {type:'connect_entities',args:{subject:9999,object:9998,predicate:'RELATED'}}]})).rejects.toThrow('Unknown graph entity');
     expect(db.query('SELECT * FROM sources').all()).toEqual(before);
-    expect(batches).toHaveLength(1);
   });
 
-  it('detects ingestion writes during embedding preparation and rejects stale explicit versions',async()=>{
+  it('rejects stale explicit versions after external writes',async()=>{
     const {db,sdk,entity,edit}=setup();const node=entity('Node');
     const version=recordVersion(db,'entity',node.id);
     sdk.graph.entities.addAlias(node.id,'external-write');
     await expect(edit('update_entity',{id:node.id,name:'Wrong',expectedVersion:version})).rejects.toThrow('Stale');
-    sdk.embedder.embedBatch=async texts=>{sdk.graph.entities.rename(node.id,'Changed concurrently');return texts.map(vector);};
-    await expect(edit('add_source',{title:'Race',uri:'test://race',text:'body'})).rejects.toThrow('during preparation');
-    expect(db.query('SELECT * FROM sources').all()).toHaveLength(0);
-    expect(sdk.graph.entities.get(node.id).name).toBe('Changed concurrently');
+    expect(sdk.graph.entities.get(node.id).name).toBe('Node');
     expect(db.query('SELECT * FROM graph_changes').all()).toHaveLength(0);
   });
 
@@ -194,23 +183,20 @@ describe('Knowledge editing transactions',()=>{
 });
 
 describe('Knowledge source and chunk editing',()=>{
-  it('adds, revises and removes chunks with stable surviving IDs, snapshots, FTS and vectors',async()=>{
+  it('adds, revises and removes chunks with stable surviving IDs, snapshots and FTS',async()=>{
     const {db,sdk,edit,source,entity,claim}=setup();const src=await source('text','original uniquealpha');
     const node=entity('Referenced'),fact=claim(node.id,'fact');
     const oldRevision=sdk.graph.evidence.list(sdk.graph.claims.list({subject:src.entityId,predicate:'HAS_CONTENT'})[0]!.id)[0]!.revisionId;
     const appended=await edit('add_chunk',{sourceId:src.sourceId,text:'append uniquebeta',entityIds:[node.id],claimIds:[fact.id]});
     expect((await sdk.knowledge.read('get_source_revision',{revisionId:oldRevision}) as any).chunks).toHaveLength(1);
-    const beforeVector=(db.query('SELECT vec_to_json(embedding) AS vector FROM vector_index WHERE rowid=?').get(src.chunkIds[0]) as any).vector;
     await edit('revise_chunk',{sourceId:src.sourceId,chunkId:src.chunkIds[0],text:'corrected uniquegamma',chunkType:'synthetic'});
     expect(db.query('SELECT id FROM chunks WHERE id=?').get(src.chunkIds[0])).not.toBeNull();
-    expect((db.query('SELECT vec_to_json(embedding) AS vector FROM vector_index WHERE rowid=?').get(src.chunkIds[0]) as any).vector).not.toBe(beforeVector);
     expect((await sdk.search.bm25({query:'uniquealpha'}))).toHaveLength(0);
     expect((await sdk.search.bm25({query:'uniquegamma'}))).toHaveLength(1);
     expect((await sdk.knowledge.read('get_source_revision',{revisionId:oldRevision}) as any).chunks[0].text_content).toBe('original uniquealpha');
     await edit('revise_chunk',{sourceId:src.sourceId,chunkId:appended.chunkId,entityIds:[node.id],claimIds:[]});
     expect(sdk.graph.evidence.list(fact.id).every(e=>e.withdrawnAt!==undefined)).toBe(true);
     await edit('remove_chunk',{sourceId:src.sourceId,chunkId:appended.chunkId});
-    expect(db.query('SELECT * FROM vector_index WHERE rowid=?').get(appended.chunkId)).toBeNull();
     expect(await sdk.search.bm25({query:'uniquebeta'})).toHaveLength(0);
     const another=await edit('add_chunk',{sourceId:src.sourceId,text:'next'});
     expect((db.query('SELECT chunk_index FROM chunks WHERE id=?').get(another.chunkId) as any).chunk_index).toBe(2);
@@ -241,11 +227,10 @@ describe('Knowledge source and chunk editing',()=>{
     const originalCitation=sdk.graph.evidence.list(fact.id)[0]!;
     await edit('remove_source',{sourceId:src.sourceId,blockReingestion:true});
     expect(await sdk.search.bm25({query:'uniquespam'})).toHaveLength(0);
-    expect(db.query('SELECT * FROM vector_index').all()).toHaveLength(0);
     expect(sdk.graph.entities.get(shared.id).name).toBe('Shared');expect(sdk.graph.claims.get(fact.id).status).toBe('stale');
     expect((await sdk.knowledge.read('list_sources',{status:'removed'}) as any).sources[0].id).toBe(src.sourceId);
     expect((await sdk.knowledge.read('list_chunks',{sourceId:src.sourceId,archived:true}) as any).chunks).toHaveLength(1);
-    const skipped=sdk.ingest.sourceAndChunks({source:{uri:'browser-public://test%3A%2F%2Fspam',title:'spam',type:'text',origin:'browser'},chunks:[{text_content:'spam',embedding:[1,1,1,1]}]});
+    const skipped=sdk.ingest.sourceAndChunks({source:{uri:'browser-public://test%3A%2F%2Fspam',title:'spam',type:'text',origin:'browser'},chunks:[{text_content:'spam'}]});
     expect(skipped.skipped).toBe('excluded');
     await expect(edit('restore_source',{sourceId:src.sourceId})).rejects.toThrow('excluded');
     await source('occupant','other'); // Occupies a deleted numeric chunk ID.
@@ -256,27 +241,18 @@ describe('Knowledge source and chunk editing',()=>{
     expect((await sdk.knowledge.read('inspect_source',{sourceId:src.sourceId}) as any).exclusions).toHaveLength(0);
   });
 
-  it('rejects restore conflicts, profile changes and incomplete embeddings without partial writes',async()=>{
+  it('rejects restore conflicts without partial writes',async()=>{
     const {db,sdk,edit,source}=setup();const src=await source();await edit('remove_source',{sourceId:src.sourceId});
-    sdk.ingest.sourceAndChunks({source:{id:'replacement',uri:'test://source',title:'replacement',type:'text',origin:'external'},chunks:[{text_content:'other',embedding:[1,1,1,1]}]});
+    sdk.ingest.sourceAndChunks({source:{id:'replacement',uri:'test://source',title:'replacement',type:'text',origin:'external'},chunks:[{text_content:'other'}]});
     await expect(edit('restore_source',{sourceId:src.sourceId})).rejects.toThrow('URI already');
     expect(db.query('SELECT * FROM graph_source_archives').all()).toHaveLength(1);
-    sdk.embedder.embedBatch=async()=>[];
-    await expect(edit('add_source',{title:'bad',uri:'test://bad',text:'body'})).rejects.toThrow('incomplete batch');
-    expect(db.query('SELECT * FROM sources WHERE uri=?').get('test://bad')).toBeNull();
-    const fresh=setup();const profile={model:'test',endpoint:'http://local',dimensions:4,storageDimensions:4,instruction:null};
-    fresh.sdk.embedder.embedBatch=async texts=>texts.map(t=>tagEmbedding(vector(t),profile));
-    const tracked=await fresh.source('tracked');
-    fresh.sdk.embedder.embedBatch=async texts=>texts.map(t=>tagEmbedding(vector(t),{...profile,model:'different'}));
-    await expect(fresh.edit('add_chunk',{sourceId:tracked.sourceId,text:'wrong profile'})).rejects.toThrow('profile differs');
-    expect(fresh.db.query('SELECT * FROM chunks').all()).toHaveLength(1);
   });
 
   it('allows unblocked connector reingestion to reuse source identity and be removed again',async()=>{
     const {db,sdk,edit,source}=setup();const src=await source('returning');
     await edit('remove_source',{sourceId:src.sourceId});
     const result=sdk.ingest.sourceAndChunks({source:{uri:'test://returning',title:'returned',type:'text',origin:'external'},
-      chunks:[{text_content:'returned content',embedding:[1,1,1,1]}]});
+      chunks:[{text_content:'returned content'}]});
     expect(result.sourceId).toBe(src.sourceId);expect(db.query('SELECT * FROM graph_source_archives').all()).toHaveLength(0);
     expect((await sdk.knowledge.read('list_sources',{status:'all'}) as any).total).toBe(1);
     await edit('remove_source',{sourceId:src.sourceId});
@@ -284,19 +260,18 @@ describe('Knowledge source and chunk editing',()=>{
   });
 
   it('skips excluded Obsidian commits and browser catalog items without aborting eligible records',async()=>{
-    const {db,sdk,edit,batches}=setup();
+    const {db,sdk,edit}=setup();
     const noteUri='file:///vault/spam.md';
     await edit('add_source',{id:'note-spam',title:'Spam',uri:noteUri,text:'spam'});
     await edit('remove_source',{sourceId:'note-spam',blockReingestion:true});
     const checkpoint=sdk.checkpoint.save({},{key:'spam'});
     const committed=commitNote(sdk,{filePath:'/vault/spam.md',noteTitle:'Spam',noteUri,updatedAt:1,
       parsed:{title:'Spam',body:'spam',rawContent:'spam',frontmatter:{},tags:[],wikilinks:[],images:[],references:[]},chunks:[],contextualChunks:[{chunk_index:0,text_content:'spam'}]},
-      [[1,1,1,1]],{name:'Vault',path:'/vault'},'obsidian',checkpoint.id);
+      {name:'Vault',path:'/vault'},'obsidian',checkpoint.id);
     expect(committed.skipped).toBe('excluded');expect(committed.edgesCreated).toBe(0);
     expect(sdk.checkpoint.getQueue()).toHaveLength(0);
     await edit('add_source',{id:'web-spam',title:'Spam',uri:'https://spam.example/',text:'spam'});
     await edit('remove_source',{sourceId:'web-spam',blockReingestion:true});
-    const batchCount=batches.length;
     const history=await finalizeHistoryBatch(sdk,{type:'history_batch',items:[
       {id:'spam',collectorId:'collector',url:'https://spam.example/',title:'Spam',visitTime:1},
       {id:'good',collectorId:'collector',url:'https://good.example/',title:'Good',visitTime:2},
@@ -307,7 +282,6 @@ describe('Knowledge source and chunk editing',()=>{
       {id:'good-bookmark',collectorId:'collector',url:'https://good.example/',title:'Good'},
     ]},{});
     expect(bookmarks).toEqual({ingestedCount:1,skippedCount:1});
-    expect(batches.slice(batchCount).flat().some(text=>text.includes('spam.example'))).toBe(false);
     expect(db.query("SELECT * FROM sources WHERE id IN ('note-spam','web-spam')").all()).toHaveLength(0);
   });
 });
@@ -323,7 +297,6 @@ describe('Knowledge discovery and MCP editing',()=>{
     const links=await sdk.knowledge.read('find_connection_candidates',{entity:a.id,limit:1}) as any;
     expect(links.candidates[0].entity.id).toBe(b.id);expect(links.candidates[0].claimIds).toContain(edge.id);
     expect(links.candidates[0].signals).toContain('shared graph neighbor');
-    expect((await sdk.knowledge.read('find_connection_candidates',{entity:a.id,limit:1,useVector:true}) as any).candidates[0].entity.id).toBe(b.id);
     expect((await sdk.knowledge.read('list_entities',{name:'Same',limit:1}) as any).total).toBe(2);
     expect((await sdk.knowledge.read('list_connections',{entity:middle.id,direction:'in'}) as any).connections[0].id).toBe(edge.id);
     expect(db.query('SELECT * FROM graph_changes').all()).toHaveLength(changes);

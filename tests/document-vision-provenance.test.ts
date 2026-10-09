@@ -18,7 +18,7 @@ it("retains page locations and proposed model provenance for vision text alongsi
     expect(knowledge[0]).toMatchObject({ method: "vision", model: "vision-test", status: "proposed", chunkIndex: 0,
       value: { pageNumber: 2, text: chunks[0].text_content } });
     commitDocument(sdk, { filePath: "/vault/lecture.pdf", documentTitle: "Lecture", documentUri: "file:///vault/lecture.pdf",
-      updatedAt: 100, metadata: {}, knowledge, contextualChunks: chunks }, [[1, 0, 0, 0], [1, 0, 0, 0]], { name: "Vault", path: "/vault" });
+      updatedAt: 100, metadata: {}, knowledge, contextualChunks: chunks }, { name: "Vault", path: "/vault" });
     const claim = sdk.graph.claims.list({ predicate: "VISION_TRANSCRIPTION" })[0];
     expect(claim).toMatchObject({ status: "proposed", model: "vision-test", method: "vision" });
     expect(sdk.graph.evidence.list(claim.id).some(e => e.chunkIndex === 0)).toBe(true);

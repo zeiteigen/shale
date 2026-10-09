@@ -6,12 +6,12 @@ import { commitImageGraph, commitNoteGraph, type VaultContext } from './graph';
 import { recordCommittedFile } from './file-progress';
 
 /** All durable source, evidence, graph, and checkpoint changes commit together. */
-export function commitNote(sdk: ShaleSDK, file: ParsedFile, embeddings: number[][],
+export function commitNote(sdk: ShaleSDK, file: ParsedFile,
   vault: VaultContext, namespace = 'obsidian', checkpointId?: string) {
   return sdk.database.transaction(() => {
     const result = sdk.ingest.sourceAndChunks({namespace,source:{type:'markdown_note',
       uri:file.noteUri,origin:'obsidian',title:file.noteTitle,updated_at:file.updatedAt},
-      chunks:file.contextualChunks.map((chunk,i) => ({...chunk,embedding:embeddings[i]}))});
+      chunks:file.contextualChunks});
     if (result.skipped) {
       if (checkpointId) sdk.checkpoint.delete(checkpointId);
       return {...result,edgesCreated:0};
@@ -23,7 +23,7 @@ export function commitNote(sdk: ShaleSDK, file: ParsedFile, embeddings: number[]
   })();
 }
 
-export function commitImage(sdk: ShaleSDK, image: ParsedImage, embeddings: number[][],
+export function commitImage(sdk: ShaleSDK, image: ParsedImage,
   vault: VaultContext, namespace = 'obsidian', checkpointId?: string) {
   return sdk.database.transaction(() => {
     const chunks = image.contextualChunks?.length ? image.contextualChunks : [image.contextualChunk];
@@ -31,7 +31,7 @@ export function commitImage(sdk: ShaleSDK, image: ParsedImage, embeddings: numbe
       uri:image.imageUri,origin:'obsidian',title:image.imageTitle,updated_at:image.updatedAt,
       hash:image.assetHash ? createHash('sha256').update(JSON.stringify([image.imageUri,image.assetHash,chunks.map(c=>c.text_content)])).digest('hex') : undefined},
       // Old checkpoints also contain vision-generated layout; it is always synthetic.
-      chunks:chunks.map((chunk,i) => ({...chunk,chunk_type:'synthetic',embedding:embeddings[i]}))});
+      chunks:chunks.map(chunk => ({...chunk,chunk_type:'synthetic'}))});
     if (result.skipped) {
       if (checkpointId) sdk.checkpoint.delete(checkpointId);
       return {...result,edgesCreated:0};

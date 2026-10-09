@@ -13,7 +13,7 @@ it("maps connector nodes to their own evidence despite duplicate and renamed tit
       sdk.ingest.sourceAndChunks({
         source: { id: sourceId, type: "note", origin: "obsidian", uri, title: "Same", updated_at: 100 },
         chunks: Array.from({ length: 7 }, (_, chunk_index) => ({ chunk_index,
-          text_content: `vault ${index} passage ${chunk_index}`, embedding: [1, 0, 0, 0] })),
+          text_content: `vault ${index} passage ${chunk_index}` })),
       });
       const graph = new SourceGraph(database, sdk.graph, sourceId, "obsidian");
       const node = graph.entity(uri, "Same", "Note");
@@ -42,7 +42,7 @@ it("links search results to connector identities after renames and with duplicat
     for(const index of [0,1]){
       const sourceId=`search-${index}`,uri=`file:///vault-${index}/Same.md`;
       sdk.ingest.sourceAndChunks({source:{id:sourceId,type:'note',origin:'obsidian',uri,title:'Same'},
-        chunks:[{text_content:`Shared term in vault ${index}`,embedding:[1,0,0,0]}]});
+        chunks:[{text_content:`Shared term in vault ${index}`} ]});
       const graph=new SourceGraph(database,sdk.graph,sourceId,'obsidian');
       const node=graph.entity(uri,'Same','Note');graph.claim(node,'SOURCE_URI',{value:uri});ids.push(node);
     }

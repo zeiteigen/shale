@@ -16,8 +16,8 @@
     "backupDir": {
       "type": "string",
       "description": "Directory path where backups will be stored (relative to project root or absolute).",
-      "default": "./backups",
-      "examples": ["./backups", "/var/backups/shale"]
+      "default": "./data/backups",
+      "examples": ["./data/backups", "/var/backups/shale"]
     },
     "filenamePrefix": {
       "type": "string",

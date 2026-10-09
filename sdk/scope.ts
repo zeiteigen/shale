@@ -140,7 +140,6 @@ export function getSDK(dirOrPath?: string): ShaleSDK {
       undefined,
       undefined,
       undefined,
-      undefined,
       discovered.dir,
     );
     manifestSdkCache.set(discovered.path, sdk);
@@ -152,7 +151,6 @@ export function getSDK(dirOrPath?: string): ShaleSDK {
     defaultSdkInstance = createExtensionSDK(
       "default",
       "default",
-      undefined,
       undefined,
       undefined,
       undefined,

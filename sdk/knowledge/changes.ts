@@ -1,10 +1,7 @@
 import { randomUUIDv7 } from 'bun';
 import type { Database } from 'bun:sqlite';
 import type { GraphIngestor } from '../graph';
-import type { EmbeddingClient } from '../embed';
 import type { ChunkSearcher } from '../search';
-import { getIndexDimension } from '../../lib/embedding-index';
-import { readEmbeddingProfile, tagEmbedding } from '../../lib/embedding-profile';
 import { ensureKnowledgeEditingSchema } from '../../lib/knowledge/schema';
 import { mutationSchemas, changeInput, type MutationName, type MutationArgs, readSchemas } from './schemas';
 import { KnowledgeGraphEdits } from './graph-edits';
@@ -23,9 +20,8 @@ export class KnowledgeEditor {
   private graphEdits:KnowledgeGraphEdits;
   private sources:KnowledgeSources;
   private reads:KnowledgeReads;
-  constructor(private db:Database,private graph:GraphIngestor,private embedder:EmbeddingClient,search:ChunkSearcher,namespace:string) {
+  constructor(private db:Database,private graph:GraphIngestor,search:ChunkSearcher,namespace:string) {
     ensureKnowledgeEditingSchema(db);
-    readEmbeddingProfile(db);
     this.graphEdits=new KnowledgeGraphEdits(db,graph);this.sources=new KnowledgeSources(db,graph,namespace);this.reads=new KnowledgeReads(db,graph,search);
   }
 
@@ -52,43 +48,24 @@ export class KnowledgeEditor {
     if(JSON.stringify(parsed).length>5_000_000) throw new Error('Change batch exceeds the 5 MB payload limit');
     const signature=fingerprint(parsed);
     if(!preview) {const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return previous;}
-    const expectedEpoch=recordVersion(this.db,'database','*');
-    // Simulate ordered writes first, so preparation observes sources created/removed earlier
-    // in the batch without exposing intermediate writes or holding a transaction over await.
-    const texts:Array<string[]|undefined>=[];
-    const simulated=this.execute(parsed,operations,(operation,index)=>{
-      const batch=sourceOperations.has(operation.type) ? this.sources.texts(operation.type,operation.args) : undefined;
-      texts[index]=batch;return batch===undefined ? undefined : this.previewVectors(batch.length);
-    },true);
-    if(preview) return simulated;
-    const allTexts=texts.flatMap(t=>t ?? []);
-    const embeddings=allTexts.length ? await this.embedder.embedBatch(allTexts) : [];
-    if(embeddings.length!==allTexts.length) throw new Error('Embedding service returned an incomplete batch');
-    let cursor=0;
-    const vectors=texts.map(batch=>{if(batch===undefined) return undefined;const slice=embeddings.slice(cursor,cursor+batch.length);cursor+=batch.length;return slice;});
-    const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return previous;
-    if(recordVersion(this.db,'database','*')!==expectedEpoch) throw new Error('Knowledge changed during preparation; inspect and retry the batch');
-    return this.execute(parsed,operations,(_operation,index)=>vectors[index],false);
+    return this.execute(parsed,operations,preview);
   }
 
   private execute(parsed:ReturnType<typeof changeInput.parse>,operations:Operation[],
-    prepared:(operation:Operation,index:number)=>number[][]|undefined,preview:boolean):unknown {
-    const expectedEpoch=recordVersion(this.db,'database','*');
+    preview:boolean):unknown {
     const signature=fingerprint(parsed);
     try {
       return this.db.transaction(()=>{
         if(!preview) {const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return previous;}
-        if(recordVersion(this.db,'database','*')!==expectedEpoch) throw new Error('Knowledge changed during preparation; inspect and retry the batch');
         const changeId=randomUUIDv7(),refs:Record<string,number>={};
         const details=[];
         // A TEMP journal records exactly the records changed, including trigger invalidation.
         this.db.run('DELETE FROM knowledge_edit_journal');
         this.db.run('UPDATE knowledge_edit_session SET active=1 WHERE id=1');
-        for(const [index,operation] of operations.entries()) {
+        for(const operation of operations) {
           const args=mutationSchemas[operation.type].parse(operation.args) as Record<string,unknown>;
           const before=this.snapshot(args);
-          const vectors=prepared(operation,index);
-          const result=sourceOperations.has(operation.type) ? this.sources.execute(operation.type,args,vectors,parsed.actor,parsed.reason) :
+          const result=sourceOperations.has(operation.type) ? this.sources.execute(operation.type,args,parsed.actor,parsed.reason) :
             this.graphEdits.execute(operation.type,args,parsed.actor,parsed.reason,refs);
           details.push({type:operation.type,args,before,result,after:this.snapshot(args)});
         }
@@ -99,7 +76,7 @@ export class KnowledgeEditor {
         const result={changeId,preview,operations:details,entityRefs:refs,
           affectedRecords:changed.map(r=>({...r,version:recordVersion(this.db,r.kind,r.record_id)})),
           requiresReview:invalidatedClaims.map(c=>c.id),affectedClaimCount:claimIds.length};
-        if(preview) throw new PreviewRollback({...result,embeddingValidation:'Embeddings are simulated; model availability and real profile compatibility are checked on apply.'});
+        if(preview) throw new PreviewRollback(result);
         saveChange(this.db,parsed,parsed,result,changeId);
         this.db.run('DELETE FROM knowledge_edit_journal');
         this.db.run('UPDATE knowledge_edit_session SET active=0 WHERE id=1');
@@ -155,10 +132,4 @@ export class KnowledgeEditor {
     return records;
   }
 
-  private previewVectors(n:number):number[][] {
-    return Array.from({length:n},()=>{
-      const vector=Array.from({length:getIndexDimension(this.db)},(_,i)=>i===0 ? 1 : 0);
-      const profile=readEmbeddingProfile(this.db);return profile ? tagEmbedding(vector,profile) : vector;
-    });
-  }
 }

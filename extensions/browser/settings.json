@@ -42,7 +42,6 @@
   "maxSessionsPerRun": 3,
   "maxSessionEvents": 200,
   "collectionWindowMs": 3000,
-  "maxEmbeddingTexts": 64,
   "fetchHistoryPages": true,
   "allowPublicPageEnrichment": false,
   "maxPublicPagesPerRun": 2

@@ -6,7 +6,6 @@ export interface DirectorySettings {
   fileExtensions?: string[];
   maxFileSizeMB?: number;
   processingTimeoutMs?: number;
-  embeddingBatchSize?: number;
   forceAll?: boolean;
   namespace?: string;
 }

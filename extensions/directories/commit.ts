@@ -6,7 +6,7 @@ import { fileStateKey } from "./file-state";
 import type { PreparedDirectoryFile } from "./types";
 
 /** Source, graph evidence, file watermark, and checkpoint removal commit together. */
-export function commitFile(sdk: ShaleSDK, id: string, file: PreparedDirectoryFile, embeddings: number[][]) {
+export function commitFile(sdk: ShaleSDK, id: string, file: PreparedDirectoryFile) {
   return sdk.database.transaction(() => {
     const { parsed, namespace } = file;
     const uri = pathToFileURL(file.filePath).href;
@@ -15,7 +15,7 @@ export function commitFile(sdk: ShaleSDK, id: string, file: PreparedDirectoryFil
         hash: createHash("sha256").update(JSON.stringify([uri, parsed.metadata?.assetHash ?? null,
           parsed.chunks.map(chunk => chunk.text_content)])).digest("hex") },
       chunks: parsed.chunks.map((chunk, index) => ({ text_content: chunk.text_content, chunk_index: index,
-        chunk_type: chunk.chunk_type ?? "verbatim", embedding: embeddings[index] })),
+        chunk_type: chunk.chunk_type ?? "verbatim" })),
     });
     if (result.skipped) {
       sdk.checkpoint.delete(id);

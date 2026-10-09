@@ -62,7 +62,6 @@ export async function parseDocumentFile(
       chunk_index, chunk_type: chunk.metadata.extractionMethod === "vision-transcription" ? "synthetic" : "verbatim", text_content: chunk.text,
       metadata: { ...chunk.metadata, sourceType: format, format,
         origin: chunk.metadata.extractionMethod === "vision-transcription" ? "vision-transcription" : "document-parser" },
-      embedding: chunk_index === 0 ? options.precomputedEmbedding : undefined,
     })),
     entities: [{ name: title, type: settings.defaultEntityType ?? "Document", namespace: options.namespace ?? sdk.namespace, identityKey: identity.uri }],
     edges: [],

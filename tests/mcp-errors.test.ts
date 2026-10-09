@@ -10,7 +10,6 @@ it('provides distinct machine-readable editing errors while preserving error tex
     ['Source is excluded from ingestion: spam', 'SOURCE_EXCLUDED'],
     ['Request ID already used for a different change', 'REQUEST_ID_CONFLICT'],
     ['Source URI already belongs to another source: test://other', 'IDENTITY_CONFLICT'],
-    ['Embedding service returned an incomplete batch', 'EMBEDDING_ERROR'],
     ['Dependency would create a cycle', 'VALIDATION_ERROR'],
   ];
   for (const [message, code] of cases) {

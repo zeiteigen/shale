@@ -97,10 +97,10 @@ export class KnowledgeReads {
       FROM chunk_entities seed JOIN chunk_entities other ON other.chunk_id=seed.chunk_id
       WHERE seed.entity_id=? AND other.entity_id<>seed.entity_id LIMIT 501`).all(entity.id);
     for(const row of cooccurrences.slice(0,500)) add(row.entity_id,'appears in the same source chunk',0.8,[],[row.chunk_id]);
-    const passages=a.useVector ? await this.search.hybrid({query:entity.name,limit:20}) : await this.search.bm25({query:entity.name,limit:20});
+    const passages=await this.search.bm25({query:entity.name,limit:20});
     for(const passage of passages) {
       const linked=this.db.query<{entity_id:number},[number]>('SELECT entity_id FROM chunk_entities WHERE chunk_id=? LIMIT 100').all(passage.id);
-      for(const row of linked) add(row.entity_id,a.useVector ? 'related source text (hybrid retrieval)' : 'title appears in source text',0.5,[],[passage.id]);
+      for(const row of linked) add(row.entity_id,'title appears in source text',0.5,[],[passage.id]);
     }
     const sorted=[...candidates.values()].sort((a,b)=>b.score-a.score || a.entityId-b.entityId);
     return {entity,candidates:sorted.slice(0,a.limit).map(c=>({entity:this.graph.entities.get(c.entityId),score:c.score,signals:[...c.signals],

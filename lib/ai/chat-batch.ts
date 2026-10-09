@@ -17,13 +17,13 @@ export function fetchOpenAIChatCompletions(
     ? resolveBatchEndpoint("chat", options) : resolveChatEndpoint(options);
   const concurrency = resolveChatBatchWidth(options);
   return modelCoordinator.exclusive(resolveModelResource(endpoint, options?.resource), () =>
-    modelCoordinator.phase("chat", () => collectBatchRequests(() => {
+    collectBatchRequests(() => {
       const work = (input: string | LLMQueryInput) => {
         options?.signal?.throwIfAborted();
         return fetchOpenAIChatCompletion(input, options);
       };
       return batchAPI ? boundedMap(inputs, concurrency, work)
         : mapWithBatchProgress("chat", inputs, concurrency, work);
-    })),
+    }),
   );
 }

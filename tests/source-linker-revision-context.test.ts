@@ -10,7 +10,7 @@ it("analyzes and cites the candidate revision after a source changes", async () 
   const sdk = createExtensionSDK("source-linker", { database });
   const ingest = (id: string, text: string) => sdk.ingest.sourceAndChunks({
     source: { id, uri: `test:${id}`, type: "test", origin: "test", title: id },
-    chunks: [{ text_content: text, embedding: [1, 0, 0, 0] }],
+    chunks: [{ text_content: text }],
   });
   try {
     ingest("a", "Original source wording.");
@@ -23,7 +23,7 @@ it("analyzes and cites the candidate revision after a source changes", async () 
       expect(options).toMatchObject({ reasoningEffort: "none", maxThinkingTokens: null, maxTokens: 8192 });
       return JSON.stringify({ shouldLink: true, relation: "RELATES_TO", reason: "Related", weight: 0.9 });
     }) as any;
-    const link = await analyzeSourcePairWithLLM({ sourceA, sourceB, knnSimilarity: 1, matchedChunkIds: [] }, sdk);
+    const link = await analyzeSourcePairWithLLM({ sourceA, sourceB, textScore: 1, matchedChunkIds: [] }, sdk);
     expect(prompt).toContain("Original source wording.");
     expect(prompt).not.toContain("Replacement text");
     expect(link?.evidenceA?.[0]?.quote).toBe("Original source wording.");

@@ -4,38 +4,24 @@ export * from "./ai/config";
 export * from "./ai/client";
 export * from "./ai/chat";
 export * from "./ai/chat-batch";
-export * from "./ai/embeddings";
 export * from "./ai/images";
-export { normalizeVectorDimensions } from "./embedding-index";
 
-import {
-  getEmbedding,
-  getEmbeddings,
-  fetchOpenAIEmbeddings,
-} from "./ai/embeddings";
 import { queryLLM, fetchOpenAIChatCompletion } from "./ai/chat";
 import { fetchOpenAIChatCompletions } from "./ai/chat-batch";
 import {
-  resolveEmbeddingEndpoint,
   resolveChatEndpoint,
   isLocalEndpoint,
   resolveTimeout,
 } from "./ai/config";
 import { createOpenAIClient } from "./ai/client";
 import { normalizeImageContentPart } from "./ai/images";
-import { normalizeVectorDimensions } from "./embedding-index";
 export default {
-  getEmbedding,
-  getEmbeddings,
-  fetchOpenAIEmbeddings,
   queryLLM,
   fetchOpenAIChatCompletion,
   fetchOpenAIChatCompletions,
-  resolveEmbeddingEndpoint,
   resolveChatEndpoint,
   isLocalEndpoint,
   resolveTimeout,
   createOpenAIClient,
   normalizeImageContentPart,
-  normalizeVectorDimensions,
 };

@@ -13,7 +13,7 @@ const fixtures: Awaited<ReturnType<typeof obsidianDocumentFixture>>[] = [];
 afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.close(); });
 async function fixture(register = true) { const result = await obsidianDocumentFixture(register); fixtures.push(result); return result; }
 
-it("processes documents across all configured vaults before any embeddings, with isolated graph identities", async () => {
+it("processes documents across configured vaults with isolated graph identities", async () => {
   const { sdk, database, vaultA, vaultB, files, settings, events } = await fixture();
   settings({ includeImages: true, expandAtomicNotes: true });
   for (const vault of [vaultA, vaultB]) {
@@ -26,9 +26,7 @@ it("processes documents across all configured vaults before any embeddings, with
   expect(results.map(result => result.documentsProcessed)).toEqual([2, 2]);
   expect(results.map(result => result.notesProcessed)).toEqual([1, 1]);
   expect(results.map(result => result.imagesProcessed)).toEqual([1, 1]);
-  const firstEmbedding = events.findIndex(event => event.role === "embedding");
-  expect(events.slice(0, firstEmbedding).filter(event => event.role === "chat")).toHaveLength(6);
-  expect(events.slice(firstEmbedding).every(event => event.role === "embedding")).toBe(true);
+  expect(events.filter(event => event.role === "chat")).toHaveLength(6);
   expect(sdk.getCheckpoints()).toHaveLength(0);
   expect(database.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sources WHERE type='document' AND origin='obsidian'").get()!.count).toBe(4);
   const reports = sdk.graph.entities.resolve("Research report", undefined, "knowledge");
@@ -145,23 +143,17 @@ it("retries only unfinished files, then detects edits and honors forced reproces
   expect(forced.parsedDocuments).toHaveLength(1);
 });
 
-it("reuses prepared document checkpoints and recovers failed embeddings without another parser or chat call", async () => {
-  const { sdk, documentSDK, vaultA, files, database, failEmbeddings, events, settings } = await fixture();
+it("reuses prepared document checkpoints and recovers commits without another parser or chat call", async () => {
+  const { sdk, documentSDK, vaultA, files, database, events, settings } = await fixture();
   const path = join(vaultA.path, "paper.pdf");
   copyFileSync(files.pdf, path);
   const prepared = await prepareVault(vaultA, sdk);
   const chats = events.filter(event => event.role === "chat").length;
   await prepareVault(vaultA, sdk);
   expect(events.filter(event => event.role === "chat")).toHaveLength(chats);
-  failEmbeddings(true);
-  await expect(finalizeVault(prepared, sdk)).rejects.toThrow("watermark retained");
   expect(sdk.checkpoint.get(documentCheckpointId(path))).toBeTruthy();
-  await expect(recover(sdk)).rejects.toThrow("recovery failed");
-  expect(database.query("SELECT id FROM sources WHERE uri=?").get(pathToFileURL(path).href)).toBeNull();
-  expect(sdk.state.getWatermark(documentWatermarkKey(vaultA.path))).toBeNull();
   documentSDK.messages.clear();
   settings({ namespace: "changed-after-crash" });
-  failEmbeddings(false);
   const recovered = await recover(sdk);
   expect(recovered.recoveredDocuments).toBe(1);
   expect(events.filter(event => event.role === "chat")).toHaveLength(chats);
@@ -235,15 +227,11 @@ it("invalidates prior document knowledge on binary changes even when extracted t
   expect(current.value).toBe(previous.value);
 });
 
-it("embeds long documents in bounded groups and commits every chunk", async () => {
+it("commits every text chunk from a long document", async () => {
   const { sdk, documentSDK, vaultA, events, database } = await fixture();
   writeFileSync(join(documentSDK.extensionDir!, "settings.json"), JSON.stringify({ chunkSize: 100, summarizeDocuments: false }));
   writeFileSync(join(vaultA.path, "long.txt"), "Evidence about local retrieval. ".repeat(500));
   const result = await processVault(vaultA, sdk);
-  const groups = events.filter(event => event.role === "embedding");
-  expect(groups.length).toBeGreaterThan(1);
-  expect(groups.every(event => event.body.input.length <= 64)).toBe(true);
-  expect(groups.reduce((sum, event) => sum + event.body.input.length, 0)).toBe(result.chunksCreated);
   expect(database.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM chunks").get()!.count).toBe(result.chunksCreated);
   expect(result.documentsProcessed).toBe(1);
 });

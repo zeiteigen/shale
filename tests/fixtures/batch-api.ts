@@ -39,9 +39,8 @@ export function batchTransport() {
       const id = path.split("/").at(-2)!.replace("output-", "");
       const lines = files.get(batches.get(id).input_file_id)!;
       const output = lines.map(line => ({ custom_id: line.custom_id, error: null,
-        response: { status_code: 200, body: line.body.input
-          ? { data: line.body.input.map((text: string, index: number) => ({ index, embedding: [Number(text) || 1, 2] })) }
-          : { model: line.body.model, choices: [{ message: { content: line.body.messages.at(-1).content }, finish_reason: "stop" }] } },
+        response: { status_code: 200, body: { model: line.body.model,
+          choices: [{ message: { content: line.body.messages.at(-1).content }, finish_reason: "stop" }] } },
       })).reverse().map(line => JSON.stringify(line)).join("\n");
       return new Response(controls.output ?? output);
     }

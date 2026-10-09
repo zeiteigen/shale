@@ -5,7 +5,6 @@ import {
   type CheckpointContext,
 } from "@shale/sdk";
 import { commitNote, commitImage } from "./commit";
-import { embedContextualChunks } from "./process-vaults";
 import { documentWatermarkKey, finalizeDocument } from "./document-vault";
 
 export interface RecoverResult {
@@ -17,9 +16,9 @@ export interface RecoverResult {
  * Checkpoint recovery script for the Obsidian extension.
  * Invoked automatically by Shale when queued checkpoints are detected.
  *
- * Finalizes cached note, image, and document preparation from before a crash:
+ * Commits cached note, image, and document preparation from before a crash:
  * 1. Retrieves queued checkpoints via SDK context.
- * 2. Embeds contextual chunks (including the AI summary).
+ * 2. Commits parsed chunks and their graph evidence.
  * 3. Commits sources, chunks, and graph evidence to SQLite.
  * 4. Advances each vault's cursors only when its discovery batch completed.
  * 5. Resolves each processed checkpoint.
@@ -77,17 +76,10 @@ export async function run(
         `[Recovery] Finalizing note "${parsed.noteTitle ?? parsed.imageTitle}" with cached AI summary...`,
       );
 
-      // Embed the contextual chunks (which include the AI summary expansion)
-      const embeddings = await embedContextualChunks(
-        sdk,
-        parsed.contextualChunks,
-        parsed.noteTitle ?? parsed.imageTitle,
-      );
-
       const vaultContext = vault ?? {name:"Vault",path:parsed.filePath.substring(0,parsed.filePath.lastIndexOf("/"))};
       const namespace = data.namespace ?? sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian";
-      if (parsedFile) commitNote(sdk,parsedFile,embeddings,vaultContext,namespace,cp.id);
-      else commitImage(sdk,data.parsedImage,embeddings,vaultContext,namespace,cp.id);
+      if (parsedFile) commitNote(sdk,parsedFile,vaultContext,namespace,cp.id);
+      else commitImage(sdk,data.parsedImage,vaultContext,namespace,cp.id);
 
       // Track watermark advancement for this vault
 

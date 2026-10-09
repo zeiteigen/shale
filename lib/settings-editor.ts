@@ -1,3 +1,4 @@
+import "./environment";
 import path from "node:path";
 import fs from "node:fs";
 import { omitRemovedRootSettings } from "./removed-settings";
@@ -45,7 +46,7 @@ export function findProjectRoot(): string {
  * Find extension directory for a given extension name.
  */
 export function getExtensionDir(extensionName: string, rootDir = findProjectRoot()): string {
-  if (extensionName === "root") return rootDir;
+  if (extensionName === "root") return path.join(rootDir, "data");
   if (!extensionName || extensionName === "." || extensionName === ".." || /[\\/]/.test(extensionName))
     throw new Error("Settings target must be root or an extension name");
   return path.join(rootDir, "extensions", extensionName);
@@ -101,9 +102,10 @@ export function discoverExtensions(rootDir = findProjectRoot()): ExtensionInfo[]
 /** The root configuration participates in CLI/TUI discovery without becoming an extension. */
 export function discoverSettingsTargets(rootDir = findProjectRoot()): ExtensionInfo[] {
   const extensions = discoverExtensions(rootDir);
-  const hasSettings = fs.existsSync(path.join(rootDir, "settings.json"));
-  const hasHelp = fs.existsSync(path.join(rootDir, "settings.help.json"));
-  return hasSettings || hasHelp ? [{ name: "root", dir: rootDir, hasSettings, hasHelp,
+  const dir = getExtensionDir("root", rootDir);
+  const hasSettings = fs.existsSync(settingsPath("root", rootDir));
+  const hasHelp = fs.existsSync(path.join(dir, "settings.help.json"));
+  return hasSettings || hasHelp ? [{ name: "root", dir, hasSettings, hasHelp,
     manifest: { name: "Shale host", description: "Root model, batching, storage, and server settings." } }, ...extensions] : extensions;
 }
 
@@ -342,8 +344,8 @@ export function setSettingValue(
 
   const current = loadSettings(extensionName, rootDir);
   const oldValue = current[key];
-  if (extensionName === "root" && ["OPENAI_CHAT_ENDPOINT", "EMBEDDING_ENDPOINT"].includes(key)) {
-    modelEndpointUrl(key === "OPENAI_CHAT_ENDPOINT" ? "chat" : "embedding", parsedValue, parsedValue);
+  if (extensionName === "root" && key === "OPENAI_CHAT_ENDPOINT") {
+    modelEndpointUrl(parsedValue, parsedValue);
   }
   current[key] = parsedValue;
 

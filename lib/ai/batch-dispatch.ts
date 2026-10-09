@@ -30,7 +30,7 @@ export function dispatchBatchRequest<T>(role: ModelRole, body: { model: string }
   const endpoint = resolveBatchEndpoint(role, options);
   const transportOptions = { ...options, endpoint };
   // Direct chat batches share generation parameters across all conversations.
-  const parameters = role === "chat" && new URL(endpoint).pathname.endsWith("/chat/completions/batch")
+  const parameters = new URL(endpoint).pathname.endsWith("/chat/completions/batch")
     ? Object.fromEntries(Object.entries(body).filter(([key]) => key !== "messages").sort(([a], [b]) => a.localeCompare(b)))
     : null;
   const key = JSON.stringify([role, body.model, endpoint, resolveApiKey(options, role),

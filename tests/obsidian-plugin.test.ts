@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import * as sqliteVec from "sqlite-vec";
 import {
   mkdtempSync,
   writeFileSync,
@@ -34,7 +33,6 @@ function createTestDb(): Database {
   const db = new Database(":memory:");
   db.run("PRAGMA journal_mode = WAL;");
   db.run("PRAGMA foreign_keys = ON;");
-  sqliteVec.load(db);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS sources (
@@ -61,12 +59,6 @@ function createTestDb(): Database {
   `);
 
   db.run(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS vector_index USING vec0(
-      embedding float[4096]
-    );
-  `);
-
-  db.run(`
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
       text_content, 
       content='chunks', 
@@ -84,12 +76,6 @@ function createTestDb(): Database {
   db.run(`
     CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
       INSERT INTO chunks_fts(chunks_fts, rowid, text_content) VALUES ('delete', old.id, old.text_content);
-    END;
-  `);
-
-  db.run(`
-    CREATE TRIGGER IF NOT EXISTS chunks_vector_ad AFTER DELETE ON chunks BEGIN
-      DELETE FROM vector_index WHERE rowid = old.id;
     END;
   `);
 
@@ -279,22 +265,9 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       const db = createTestDb();
       const mockFetch: import("../lib/ai").FetchFn = async (_url, init) => {
         const body = JSON.parse(String(init?.body));
-        if (!body.input) {
-          const vision = body.messages.some((message: any) => Array.isArray(message.content)
-            && message.content.some((part: any) => part.type === "image_url"));
-          return Response.json({ choices: [{ message: { content: vision ? "A diagram of connected components." : "" } }] });
-        }
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from(
-              { length: JSON.parse(String(init?.body)).input.length },
-              (_, index) => ({ index, embedding: new Array(1536).fill(0.01) }),
-            ),
-            model: "mock-model",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        const vision = body.messages.some((message: any) => Array.isArray(message.content)
+          && message.content.some((part: any) => part.type === "image_url"));
+        return Response.json({ choices: [{ message: { content: vision ? "A diagram of connected components." : "" } }] });
       };
 
       const sdk = createExtensionSDK("obsidian parser", {
@@ -407,19 +380,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
     it("processes vault using ambient SDK scope without passing sdk parameter", async () => {
       const db = createTestDb();
       const mockFetch: import("../lib/ai").FetchFn = async (_url, init) => {
-        if (!JSON.parse(String(init?.body)).input)
-          return Response.json({ choices: [{ message: { content: "" } }] });
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from(
-              { length: JSON.parse(String(init?.body)).input.length },
-              (_, index) => ({ index, embedding: new Array(1536).fill(0.05) }),
-            ),
-            model: "mock-model",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return Response.json({ choices: [{ message: { content: "" } }] });
       };
 
       const sdk = createExtensionSDK("obsidian parser", {
@@ -492,19 +453,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
     it("ingestFile invokes parseFile and performs SDK ingestion", async () => {
       const db = createTestDb();
       const mockFetch: import("../lib/ai").FetchFn = async (_url, init) => {
-        if (!JSON.parse(String(init?.body)).input)
-          return Response.json({ choices: [{ message: { content: "" } }] });
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from(
-              { length: JSON.parse(String(init?.body)).input.length },
-              (_, index) => ({ index, embedding: new Array(1536).fill(0.01) }),
-            ),
-            model: "mock-model",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return Response.json({ choices: [{ message: { content: "" } }] });
       };
 
       const sdk = createExtensionSDK("obsidian parser", {
@@ -594,19 +543,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
     it("handles stub notes with only frontmatter or empty body cleanly without throwing", async () => {
       const db = createTestDb();
       const mockFetch: import("../lib/ai").FetchFn = async (_url, init) => {
-        if (!JSON.parse(String(init?.body)).input)
-          return Response.json({ choices: [{ message: { content: "" } }] });
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from(
-              { length: JSON.parse(String(init?.body)).input.length },
-              (_, index) => ({ index, embedding: new Array(1536).fill(0.01) }),
-            ),
-            model: "mock-model",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return Response.json({ choices: [{ message: { content: "" } }] });
       };
 
       const sdk = createExtensionSDK("obsidian parser", {
@@ -702,7 +639,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
   });
 
   describe("7. Multimodal Image Text Descriptions & Graph Edges (Requirement 2)", () => {
-    it("generates detailed layout and conceptual descriptions using Chat model and embeds image", async () => {
+    it("generates detailed layout and conceptual image descriptions using the Chat model", async () => {
       const db = createTestDb();
       let capturedChatPrompt = "";
       let capturedImageInput: any = null;
@@ -744,19 +681,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
           );
         }
 
-        // Embeddings endpoint
-        const inputCount = Array.isArray(body.input) ? body.input.length : 1;
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from({ length: inputCount }, (_, i) => ({
-              object: "embedding",
-              index: i,
-              embedding: new Array(1536).fill(0.04),
-            })),
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return new Response("Unexpected request", { status: 404 });
       };
 
       const sdk = createExtensionSDK("obsidian parser", {
@@ -834,19 +759,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
     it("connects notes to images with FEATURES_IMAGE edge when referenced in notes", async () => {
       const db = createTestDb();
       const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
-        const body = init?.body ? JSON.parse(init.body) : {};
-        const inputCount = Array.isArray(body.input) ? body.input.length : 1;
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from({ length: inputCount }, (_, i) => ({
-              object: "embedding",
-              index: i,
-              embedding: new Array(1536).fill(0.01),
-            })),
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return Response.json({ choices: [{ message: { content: "A diagram description." } }] });
       };
 
       const sdk = createExtensionSDK("obsidian parser", {
@@ -913,18 +826,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
           );
         }
 
-        const inputCount = Array.isArray(body.input) ? body.input.length : 1;
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from({ length: inputCount }, (_, i) => ({
-              object: "embedding",
-              index: i,
-              embedding: new Array(1536).fill(0.02),
-            })),
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return new Response("Unexpected request", { status: 404 });
       };
 
       const sdk = createExtensionSDK("obsidian parser", {
@@ -959,7 +861,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
         "Max Weber's authority types",
       );
 
-      // Ingest note and check both chunks are embedded
+      // Ingest note and check both text chunks are stored
       const ingestRes = await ingestFile(notePath, "Vault: PolSci", sdk, {
         expandAtomicNotes: true,
       });
@@ -1012,16 +914,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from(
-              { length: JSON.parse(String(init?.body)).input.length },
-              (_, index) => ({ index, embedding: new Array(1536).fill(0.01) }),
-            ),
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return new Response("Unexpected request", { status: 404 });
       };
 
       const sdk = createExtensionSDK("obsidian parser", {
@@ -1149,172 +1042,4 @@ Vector clocks and conflict-free replicated data types track causality across asy
     });
   });
 
-  describe("9. Decoupled Embedding Architecture (Requirement 4)", () => {
-    it("allows note chunking/parsing to execute with zero embedding calls", async () => {
-      let embeddingCallsMade = 0;
-
-      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
-        if (String(url).includes("/embeddings")) {
-          embeddingCallsMade++;
-        }
-        return new Response(JSON.stringify({ object: "list", data: [] }), {
-          status: 200,
-        });
-      };
-
-      const tempDir = mkdtempSync(join(tmpdir(), "decouple-test-"));
-      const notePath = join(tempDir, "DecoupledNote.md");
-      const noteContent = `# Decoupled Note
-This note is parsed and chunked without any embedding calls during the note chunking/parsing phase.
-This architecture guarantees that note chunking and parsing remains completely decoupled from embedding.
-When running embedding models locally, separating text preparation from model execution is critical.
-
-# Subtopic
-The local embedding model is executed in a dedicated phase outside of note chunking and parsing.
-This avoids constant model swapping between chat models and embedding models on local GPU memory.
-Furthermore, batches of chunks can be embedded together rather than one note at a time.`;
-
-      writeFileSync(notePath, noteContent);
-
-      // parseFile performs parsing and chunking with ZERO embedding calls
-      const parsed = await parseFile(notePath);
-      // Chunk 0 is the whole note, Chunk 1 is Section 1, Chunk 2 is Section 2
-      expect(parsed.chunks.length).toBe(3);
-      expect(parsed.contextualChunks.length).toBe(3);
-      expect(embeddingCallsMade).toBe(0);
-    });
-
-    it("supports passing precomputed embeddings into ingestFile to bypass embedder", async () => {
-      const db = createTestDb();
-      let embeddingCalls = 0;
-
-      const mockFetch: import("../lib/ai").FetchFn = async () => {
-        embeddingCalls++;
-        return new Response(JSON.stringify({ object: "list", data: [] }), {
-          status: 200,
-        });
-      };
-
-      const sdk = createExtensionSDK("obsidian parser", {
-        namespace: "obsidian",
-        database: db,
-        models: {
-          connection: {
-            fetchFn: mockFetch,
-          },
-        },
-      });
-
-      const tempDir = mkdtempSync(join(tmpdir(), "precomputed-test-"));
-      const notePath = join(tempDir, "Precomputed.md");
-      writeFileSync(notePath, `# Precomputed Note\nUsing precomputed vectors.`);
-
-      const customEmbedding = [new Array(4096).fill(0.123)];
-      const result = await ingestFile(notePath, "Vault: TestVault", sdk, {
-        embeddings: customEmbedding,
-        expandAtomicNotes: false,
-      });
-
-      expect(result.chunksCreated).toBe(1);
-      // No calls should have hit the mock embedding endpoint because precomputed embeddings were supplied
-      expect(embeddingCalls).toBe(0);
-    });
-
-    it("enforces strict two-phase execution: all chat model requests complete before any embedding request starts", async () => {
-      const db = createTestDb();
-      const callLog: Array<"chat" | "embedding"> = [];
-
-      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
-        const urlStr = url.toString();
-        if (urlStr.includes("/chat/completions")) {
-          callLog.push("chat");
-          return new Response(
-            JSON.stringify({
-              choices: [
-                {
-                  message: {
-                    role: "assistant",
-                    content: "Expanded content or description from chat model.",
-                  },
-                },
-              ],
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        } else if (urlStr.includes("/embeddings")) {
-          callLog.push("embedding");
-          return new Response(
-            JSON.stringify({
-              object: "list",
-              data: Array.from(
-                { length: JSON.parse(String(init?.body)).input.length },
-                (_, index) => ({
-                  index,
-                  embedding: new Array(4096).fill(0.01),
-                }),
-              ),
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        return new Response("Not found", { status: 404 });
-      };
-
-      const sdk = createExtensionSDK("obsidian parser", {
-        namespace: "obsidian",
-        database: db,
-        models: {
-          connection: {
-            fetchFn: mockFetch,
-          },
-        },
-      });
-
-      const tempDir = mkdtempSync(join(tmpdir(), "twophase-vault-"));
-      const vaultInfo = {
-        id: "twophase-vault",
-        path: tempDir,
-        name: "twophase-vault",
-      };
-
-      // Create 2 atomic notes (triggering Chat model expansion)
-      writeFileSync(
-        join(tempDir, "Atomic1.md"),
-        "# Atomic Note 1\nConcise definition.",
-      );
-      writeFileSync(
-        join(tempDir, "Atomic2.md"),
-        "# Atomic Note 2\nAnother concise definition.",
-      );
-
-      // Create 1 image (triggering Chat model image description)
-      writeFileSync(
-        join(tempDir, "diagram.png"),
-        Buffer.from("fake-png-binary-content"),
-      );
-
-      const result = await processVault(vaultInfo, sdk);
-
-      expect(result.notesProcessed).toBe(2);
-      expect(result.imagesProcessed).toBe(1);
-
-      // Verify that chat model requests happened
-      const chatCalls = callLog.filter((c) => c === "chat");
-      const embedCalls = callLog.filter((c) => c === "embedding");
-      expect(chatCalls.length).toBeGreaterThanOrEqual(3); // 2 note expansions + 1 image description
-      expect(embedCalls.length).toBeGreaterThanOrEqual(2); // note and image embeddings
-
-      // Crucial assertion: All chat calls must happen strictly before the first embedding call
-      const firstEmbedIndex = callLog.indexOf("embedding");
-      const lastChatIndex = callLog.lastIndexOf("chat");
-
-      expect(firstEmbedIndex).toBeGreaterThan(-1);
-      expect(lastChatIndex).toBeGreaterThan(-1);
-      expect(lastChatIndex).toBeLessThan(firstEmbedIndex);
-
-      // Verify no interleaving (no chat calls after the first embedding call)
-      const callsAfterFirstEmbed = callLog.slice(firstEmbedIndex);
-      expect(callsAfterFirstEmbed.every((c) => c === "embedding")).toBe(true);
-    });
-  });
 });

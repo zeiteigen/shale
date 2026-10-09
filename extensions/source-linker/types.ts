@@ -3,7 +3,7 @@ import type { Source, EvidenceInput } from "@shale/sdk";
 export interface SourceCandidatePair {
   sourceA: Source;
   sourceB: Source;
-  knnSimilarity: number;
+  textScore: number;
   matchedChunkIds: number[];
 }
 
@@ -36,7 +36,7 @@ export interface DiscoveredLink {
   relation: string;
   reason: string;
   weight: number;
-  knnSimilarity: number;
+  textScore: number;
   entityResolutions: EntityResolution[];
 }
 
@@ -51,7 +51,6 @@ export interface ProcessLinksResult {
 
 export interface RunOptions {
   forceAll?: boolean;
-  knnK?: number;
-  minKnnSimilarity?: number;
+  candidatesPerChunk?: number;
   maxPairsPerRun?: number;
 }

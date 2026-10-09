@@ -31,7 +31,7 @@ The MCP editing surface adds 32 tools to the existing graph tools. Mutations sha
 | `list_entities` | Find entities with pagination and optional name, type, and namespace filters. |
 | `list_connections` | Inspect an entity's incoming, outgoing, or all connections. |
 | `get_source_revision` | Read an immutable historical revision and its archived content. |
-| `find_connection_candidates` | Discover possible connections from evidence and optional vector similarity. |
+| `find_connection_candidates` | Discover possible connections from graph structure and evidence. |
 | `find_duplicate_entities` | Discover possible duplicate identities for review. |
 | `list_sources` | Find live, removed, or all sources using metadata filters. |
 | `inspect_source` | Inspect source lifecycle state, versions, and reingestion block. |
@@ -72,10 +72,10 @@ The [shared schemas](../sdk/knowledge/schemas.ts) define all input fields, types
 | `retract_evidence` | `evidenceId`, `expectedVersion` | Withdrawn evidence ID, claim, review notice. |
 | `get_source_revision` | `revisionId` | Immutable revision metadata and archived chunks. |
 | `revise_event` | `id`, optional name/kind/context/dates/participants, `expectedVersion` | Updated event and participant claims. Supplying participants replaces the complete list. |
-| `find_connection_candidates` | `entity`, `namespace`, `limit`, `useVector` | Ranked candidates, signals, supporting claim/chunk IDs, truncation flag. |
+| `find_connection_candidates` | `entity`, `namespace`, `limit` | Ranked candidates, signals, supporting claim/chunk IDs, truncation flag. |
 | `find_duplicate_entities` | Optional `entity`, `namespace`, `limit` | Candidate pairs, entities, matching identity signals, scan limits. |
 | `append_graph` | `entities[]` with `ref`, `claims[]` using IDs or `@ref` | Created entities and claims; local references resolve within the batch. |
-| `preview_graph_changes` | `operations[]`, audit context | Simulated change envelope; no writes or real embeddings. |
+| `preview_graph_changes` | `operations[]`, audit context | Simulated change envelope; no writes. |
 | `apply_graph_changes` | Same payload as preview | Committed change envelope. |
 | `list_sources` | Title/URI/origin/type/namespace filters, `status`, pagination | Live/removed sources, metadata, versions, removal context, total. |
 | `inspect_source` | `sourceId` | Source, metadata, lifecycle, related entities/evidence, revision references, exclusions, counts. |
@@ -94,7 +94,7 @@ Omitted patch fields inherit existing values. Nullable patch fields can be clear
 
 ### Errors
 
-Handler errors retain readable text and expose `structuredContent.error` with `code`, `message`, and `retryable`. Codes include `NOT_FOUND`, `AMBIGUOUS_REFERENCE`, `VERSION_CONFLICT`, `REQUEST_ID_CONFLICT`, `IDENTITY_CONFLICT`, `SOURCE_EXCLUDED`, `EMBEDDING_ERROR`, `VALIDATION_ERROR`, `DATABASE_ERROR`, and `INTERNAL_ERROR`. MCP rejects malformed schema inputs before handler execution. For version conflicts, reread and reassess the edit before resubmitting; retrying the stale payload cannot resolve the conflict.
+Handler errors retain readable text and expose `structuredContent.error` with `code`, `message`, and `retryable`. Codes include `NOT_FOUND`, `AMBIGUOUS_REFERENCE`, `VERSION_CONFLICT`, `REQUEST_ID_CONFLICT`, `IDENTITY_CONFLICT`, `SOURCE_EXCLUDED`, `VALIDATION_ERROR`, `DATABASE_ERROR`, and `INTERNAL_ERROR`. MCP rejects malformed schema inputs before handler execution. For version conflicts, reread and reassess the edit before resubmitting; retrying the stale payload cannot resolve the conflict.
 
 ## Evidence and source lifecycle
 
@@ -104,13 +104,13 @@ Claims and connections remain inspectable after revision or retraction. Evidence
 
 Chunk corrections produce new current source content while preserving historical revision content. Use the source ID plus chunk ID for chunk operations and inspect both versions before making a concurrent edit.
 
-Source content changes conservatively mark claims supported by that source stale, including claims whose cited chunk was not changed. Review those claims explicitly. Restoration does not automatically accept them. Preview uses simulated vectors, so embedding service availability and actual embedding profile compatibility are checked during application. Embedding failure leaves no committed partial edit.
+Source content changes conservatively mark claims supported by that source stale, including claims whose cited chunk was not changed. Review those claims explicitly. Restoration does not automatically accept them. Preview validates and simulates graph changes without writing; applying a valid batch commits its operations atomically.
 
 ## Discover, inspect, and connect
 
 Start with `list_entities`, `resolve_entities`, or `search_graph`. Inspect an exact identity and its existing connections before adding another. `find_connection_candidates` ranks possible connections; `find_duplicate_entities` identifies possible identity overlaps. These outputs are suggestions. Review shared evidence, exact source text, and identity details before authorizing any connection, merge, or split.
 
-For a supported relationship, use `connect_entities` with the predicate and source evidence. For an incorrect relationship, use `revise_connection` or `retract_connection`. For claims that depend on earlier claims, use explicit dependencies. Do not infer factual support solely from vector proximity.
+For a supported relationship, use `connect_entities` with the predicate and source evidence. For an incorrect relationship, use `revise_connection` or `retract_connection`. For claims that depend on earlier claims, use explicit dependencies. Search results are discovery aids; establish factual support from source evidence.
 
 ## Individual examples
 
@@ -218,4 +218,4 @@ bun run test:mcp
 bun test
 ```
 
-`tests/knowledge-editing.test.ts` covers all 32 tool registrations and the SDK editing workflows: rollback, previews, retries, concurrent writes, entity splits, dependency review, exact historical citations, event projections, source lifecycle, exclusions in connector commits, and chunk vector/full-text consistency. `tests/mcp-errors.test.ts` covers error categories. `tests/mcp-server.test.ts` exercises the HTTP MCP surface and existing graph tools. The complete suite also covers SDK and connector regressions. Chrome and web UI end-to-end tests remain opt-in through their existing package scripts.
+`tests/knowledge-editing.test.ts` covers all 32 tool registrations and the SDK editing workflows: rollback, previews, retries, concurrent writes, entity splits, dependency review, exact historical citations, event projections, source lifecycle, exclusions in connector commits, and chunk/full-text consistency. `tests/mcp-errors.test.ts` covers error categories. `tests/mcp-server.test.ts` exercises the HTTP MCP surface and existing graph tools. The complete suite also covers SDK and connector regressions. Chrome and web UI end-to-end tests remain opt-in through their existing package scripts.

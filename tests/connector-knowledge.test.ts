@@ -1,6 +1,5 @@
 import { afterEach, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import * as sqliteVec from 'sqlite-vec';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,8 +27,6 @@ function fixture(namespace = 'browser') {
   sdk.settings.get = ((key: string) => ({namespace,expandAtomicNotes:false,includeImages:false,
     includeMarkdown:true,enableLlmAnalysis:false} as Record<string,unknown>)[key]) as typeof sdk.settings.get;
   sdk.settings.getAll = (() => ({namespace,enableLlmAnalysis:false})) as typeof sdk.settings.getAll;
-  sdk.embed = (async (texts: string | string[]) => typeof texts === 'string'
-    ? [1,0,0,0] : texts.map(() => [1,0,0,0])) as typeof sdk.embed;
   return {db,sdk};
 }
 function vault() {
@@ -74,7 +71,7 @@ it('retains ambiguous note references and refreshes chunk linkage without duplic
   const reference = sdk.graph.claims.list({predicate:'REFERENCES'})[0];
   expect(sdk.graph.entities.get(reference.object!).type).toBe('NoteReference');
   const count = sdk.graph.claims.list().length;
-  commitNote(sdk,file,file.contextualChunks.map(()=>[1,0,0,0]),v);
+  commitNote(sdk,file,v);
   expect(sdk.graph.claims.list()).toHaveLength(count);
   expect(db.query('SELECT 1 FROM chunk_entities ce JOIN chunks c ON c.id=ce.chunk_id WHERE c.source_id=?').get(sourceId)).toBeTruthy();
   const oldProperty = sdk.graph.claims.list({predicate:'PROPERTY:score'})[0];
@@ -155,7 +152,7 @@ it('connects cross-source linker nodes to the connector records they represent',
   await processHistoryBatch(sdk,{type:'history_batch',items:['a','b'].map(name=>({url:`https://example.com/${name}`,title:name,visitTime:1000}))},{});
   const sources = db.query<{id:string;title:string}, []>('SELECT id,title FROM sources ORDER BY title').all();
   commitLinksToGraph([{sourceIdA:sources[0].id,sourceIdB:sources[1].id,sourceTitleA:'a',sourceTitleB:'b',
-    relation:'RELATES_TO',reason:'Related content',weight:0.8,knnSimilarity:0.9,entityResolutions:[]}],sdk);
+    relation:'RELATES_TO',reason:'Related content',weight:0.8,textScore:0.9,entityResolutions:[]}],sdk);
   const bindings = sdk.graph.claims.list({predicate:'REPRESENTS'});
   expect(bindings).toHaveLength(2);
   expect(bindings.every(claim=>claim.status==='accepted' && sdk.graph.entities.get(claim.object!).type==='HistoryRecord')).toBe(true);
@@ -178,12 +175,12 @@ it('invalidates image interpretations on binary changes and excludes vision text
   const path = join(v.path,'diagram.png');writeFileSync(path,'first image bytes');
   sdk.queryLLM = (async () => '1. Physical layout and visual elements: Two boxes.\n2. Underlying meaning: A data pipeline.') as unknown as typeof sdk.queryLLM;
   const first = await parseImageFile(path,sdk);
-  const original = commitImage(sdk,first,first.contextualChunks.map(()=>[1,0,0,0]),v);
+  const original = commitImage(sdk,first,v);
   const layout = sdk.graph.claims.list({predicate:'VISUAL_LAYOUT'})[0];
   writeFileSync(path,'different image bytes');
   const second = await parseImageFile(path,sdk);
   expect(second.assetHash).not.toBe(first.assetHash);
-  const refreshed = commitImage(sdk,second,second.contextualChunks.map(()=>[1,0,0,0]),v);
+  const refreshed = commitImage(sdk,second,v);
   expect(refreshed.sourceId).toBe(original.sourceId);
   expect(sdk.graph.claims.get(layout.id).status).toBe('stale');
   const extractor = createExtensionSDK('knowledge-extractor',{database:sdk.database,namespace:'knowledge'});
@@ -196,7 +193,7 @@ it('scopes coreference candidates to source pairs instead of merging equal perso
   const {sdk} = fixture();
   for (const pair of [['a','b'],['c','d']]) commitLinksToGraph([{
     sourceIdA:pair[0],sourceIdB:pair[1],sourceTitleA:pair[0],sourceTitleB:pair[1],
-    relation:'RELATES_TO',reason:'Compared sources',weight:0.9,knnSimilarity:0.9,
+    relation:'RELATES_TO',reason:'Compared sources',weight:0.9,textScore:0.9,
     entityResolutions:[{canonicalName:'Alice',entityType:'Person',mentionsA:['Alice'],mentionsB:['A.'],
       confidence:0.8,reason:'Possible alias in these sources'}],
   }],sdk);
@@ -231,7 +228,6 @@ it('backs up connector claims, evidence, revisions, events, and identity aliases
   expect(result.success).toBe(true);
   const snapshot = new Database(result.backupPath!,{readonly:true});
   try {
-    sqliteVec.load(snapshot);
     expect(snapshot.query('PRAGMA integrity_check').get()).toEqual({integrity_check:'ok'});
     expect(snapshot.query('PRAGMA foreign_key_check').all()).toEqual([]);
     for (const table of ['graph_claims','graph_evidence','graph_source_revisions','graph_revision_chunks','graph_events','graph_participants','graph_aliases']) {

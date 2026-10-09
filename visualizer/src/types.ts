@@ -1,4 +1,4 @@
-export type SearchMode = "hybrid" | "vector" | "bm25";
+export type SearchMode = "bm25";
 
 export interface GraphNode {
   id: number;
@@ -49,6 +49,5 @@ export interface SearchResult {
   preview?: string;
   score?: number;
   distance?: number;
-  cosineSimilarity?: number;
   entity_id?: number;
 }

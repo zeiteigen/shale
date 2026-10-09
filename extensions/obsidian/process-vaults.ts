@@ -26,7 +26,6 @@ import {
 import {
   ingestFile,
   ingestImageFile,
-  embedContextualChunks,
   buildNoteGraphElements,
   type IngestFileResult,
   type IngestImageResult,
@@ -63,7 +62,6 @@ export { parseDocumentFile, type ParsedDocument } from "./parse-document";
 export {
   ingestFile,
   ingestImageFile,
-  embedContextualChunks,
   buildNoteGraphElements,
   type IngestFileResult,
   type IngestImageResult,
@@ -229,9 +227,7 @@ export interface PreparedVault {
 }
 
 /**
- * Phase 1: Discovers modified notes, images, and documents and executes all Chat work
- * (summaries, note content expansion, multimodal image descriptions).
- * Zero embedding calls happen in this phase, keeping the Chat model loaded in GPU memory.
+ * Discover and prepare modified notes, images, and documents, including chat work.
  */
 export async function prepareVault(
   vault: VaultInfo,
@@ -251,7 +247,7 @@ export async function prepareVault(
     : Number(sdk.state.getWatermark(watermarkKey) ?? "0");
 
   sdk.logger.log(
-    `[Phase 1: Chat Model] Inspecting vault "${vault.name}" (last watermark: ${lastWatermark})`,
+    `Inspecting vault "${vault.name}" (last watermark: ${lastWatermark})`,
   );
 
   const includeMarkdown =
@@ -311,16 +307,16 @@ export async function prepareVault(
   }
 
   sdk.logger.log(
-    `[Phase 1: Chat Model] Processing ${modifiedNotes.length} note(s), ${modifiedImages.length} image(s), and ${modifiedDocuments.length} document(s) in "${vault.name}"...`,
+    `Processing ${modifiedNotes.length} note(s), ${modifiedImages.length} image(s), and ${modifiedDocuments.length} document(s) in "${vault.name}"...`,
   );
 
   const noteIndex = createNoteIndex([...allMdFiles,...allImageFiles,...allDocumentFiles]);
 
-  // 1. Process modified notes via ingestFile with deferEmbedding: true (calls parseFile & Chat model expansion)
+  // Prepare notes and save them for recovery before committing the vault batch.
   await sdk.models.mapChat(modifiedNotes, async (filePath) => {
     try {
       const fileResult = await ingestFile(filePath, vaultEntityName, sdk, {
-        deferEmbedding: true,
+        prepareOnly: true,
         vaultPath: vault.path,
         noteIndex,
       });
@@ -356,7 +352,7 @@ export async function prepareVault(
     }
   });
 
-  // 2. Process modified images via bulk parsing with deferEmbedding: true
+  // Process modified images in one chat batch.
   if (modifiedImages.length > 0) {
     try {
       const parsedBatch = await parseImageFilesBatch(modifiedImages, sdk);
@@ -421,16 +417,14 @@ export async function prepareVault(
   );
 
   sdk.logger.log(
-    `[Phase 1: Chat Model] Finished preparation for "${vault.name}" (${prepared.parsedNotes.length} note(s), ${prepared.parsedImages.length} image(s), ${prepared.parsedDocuments.length} document(s)).`,
+    `Finished preparation for "${vault.name}" (${prepared.parsedNotes.length} note(s), ${prepared.parsedImages.length} image(s), ${prepared.parsedDocuments.length} document(s)).`,
   );
 
   return prepared;
 }
 
 /**
- * Phase 2: Embeds all prepared chunks using the Embedding model and commits sources,
- * chunks, and graph edges to SQLite. Zero Chat model calls happen in this phase,
- * keeping the Embedding model loaded in GPU memory without switching back and forth.
+ * Commit prepared chunks and graph evidence to SQLite.
  */
 export async function finalizeVault(
   prepared: PreparedVault,
@@ -455,7 +449,7 @@ export async function finalizeVault(
   }
 
   sdk.logger.log(
-    `[Phase 2: Embedding Model] Embedding and ingesting ${prepared.parsedNotes.length} note(s), ${prepared.parsedImages.length} image(s), and ${documents.length} document(s) for "${prepared.vault.name}"...`,
+    `Ingesting ${prepared.parsedNotes.length} note(s), ${prepared.parsedImages.length} image(s), and ${documents.length} document(s) for "${prepared.vault.name}"...`,
   );
 
   let totalChunksCreated = 0;
@@ -466,51 +460,33 @@ export async function finalizeVault(
   let edgesCreated = 0;
   const namespace = prepared.namespace ?? sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian";
 
-  // 1. Embed and ingest all parsed notes
+  // Ingest all parsed notes.
   for (const note of prepared.parsedNotes) {
     try {
-      const embeddings = await embedContextualChunks(
-        sdk,
-        note.parsedFile.contextualChunks,
-        note.parsedFile.noteTitle,
-      );
-
-      const ingestResult = commitNote(sdk,note.parsedFile,embeddings,prepared.vault,namespace,`ai_summary:${note.filePath}`);
+      const ingestResult = commitNote(sdk,note.parsedFile,prepared.vault,namespace,`ai_summary:${note.filePath}`);
       totalChunksCreated += ingestResult.chunksCount;
       edgesCreated += ingestResult.edgesCreated;
       notesProcessed++;
     } catch (err) {
       failures++;
       sdk.logger.error(
-        `Failed to embed and ingest note at ${note.filePath}:`,
+        `Failed to ingest note at ${note.filePath}:`,
         err,
       );
     }
   }
 
-  // 2. Embed and ingest all parsed images
+  // Ingest all parsed images.
   for (const img of prepared.parsedImages) {
     try {
-      const targetChunks =
-        img.parsedImage.contextualChunks &&
-        img.parsedImage.contextualChunks.length > 0
-          ? img.parsedImage.contextualChunks
-          : [img.parsedImage.contextualChunk];
-
-      const embeddings = await embedContextualChunks(
-        sdk,
-        targetChunks,
-        img.parsedImage.imageTitle,
-      );
-
-      const ingestResult = commitImage(sdk,img.parsedImage,embeddings,prepared.vault,namespace,`image_analysis:${img.filePath}`);
+      const ingestResult = commitImage(sdk,img.parsedImage,prepared.vault,namespace,`image_analysis:${img.filePath}`);
       totalChunksCreated += ingestResult.chunksCount;
       edgesCreated += ingestResult.edgesCreated;
       imagesProcessed++;
     } catch (err) {
       failures++;
       sdk.logger.error(
-        `Failed to embed and ingest image at ${img.filePath}:`,
+        `Failed to ingest image at ${img.filePath}:`,
         err,
       );
     }
@@ -524,7 +500,7 @@ export async function finalizeVault(
       documentsProcessed++;
     } catch (error) {
       failures++;
-      sdk.logger.error(`Failed to embed and ingest document at ${document.filePath}:`, error);
+      sdk.logger.error(`Failed to ingest document at ${document.filePath}:`, error);
     }
   }
 
@@ -561,9 +537,7 @@ export async function finalizeVault(
 }
 
 /**
- * Processes an individual Obsidian vault using the two-phase pipeline:
- * Phase 1: All parsing and Chat model work (content expansion, image/document descriptions).
- * Phase 2: All Embedding model work (embeddings, DB chunk ingestion, graph edges).
+ * Processes an individual Obsidian vault with prepared checkpoints and a transactional commit.
  */
 export async function processVault(
   vault: VaultInfo,

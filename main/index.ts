@@ -54,7 +54,7 @@ export async function runCheckpointRecover(
     return;
   }
 
-  await sdk.models.phase("embedding", () =>
+  await sdk.models.run( () =>
     sdkStorage.run(sdk, async () => {
       let mod: any;
       try {

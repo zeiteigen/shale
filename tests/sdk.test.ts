@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import * as sqliteVec from "sqlite-vec";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -51,7 +50,6 @@ function createTestDb(): Database {
   const db = new Database(":memory:");
   db.run("PRAGMA journal_mode = WAL;");
   db.run("PRAGMA foreign_keys = ON;");
-  sqliteVec.load(db);
 
   // Sources
   db.run(`
@@ -77,13 +75,6 @@ function createTestDb(): Database {
       chunk_type TEXT NOT NULL DEFAULT 'verbatim' CHECK(chunk_type IN ('verbatim', 'synthetic')),
       FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
     ) STRICT;
-  `);
-
-  // Vector virtual table
-  db.run(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS vector_index USING vec0(
-      embedding float[4]
-    );
   `);
 
   // FTS5 virtual table
@@ -113,18 +104,6 @@ function createTestDb(): Database {
     CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
       INSERT INTO chunks_fts(chunks_fts, rowid, text_content) VALUES ('delete', old.id, old.text_content);
       INSERT INTO chunks_fts(rowid, text_content) VALUES (new.id, new.text_content);
-    END;
-  `);
-
-  db.run(`
-    CREATE TRIGGER IF NOT EXISTS chunks_vector_ad AFTER DELETE ON chunks BEGIN
-      DELETE FROM vector_index WHERE rowid = old.id;
-    END;
-  `);
-
-  db.run(`
-    CREATE TRIGGER IF NOT EXISTS chunks_vector_au AFTER UPDATE ON chunks BEGIN
-      DELETE FROM vector_index WHERE rowid = old.id AND old.id != new.id;
     END;
   `);
 
@@ -376,11 +355,8 @@ describe("Shale SDK Architecture", () => {
   });
 
   describe("4. Unified Source & Chunk Ingestion Module", () => {
-    it("atomically inserts source, chunks, and vector embeddings in one transaction", () => {
+    it("atomically inserts source, text chunks, and entity links in one transaction", () => {
       const ingestor = new UnifiedIngestor("docs", db);
-
-      const embedding1 = [0.1, 0.2, 0.3, 0.4];
-      const embedding2 = [0.5, 0.6, 0.7, 0.8];
 
       const res = ingestor.sourceAndChunks({
         source: {
@@ -393,12 +369,10 @@ describe("Shale SDK Architecture", () => {
         chunks: [
           {
             text_content: "Section 1: High level architecture overview",
-            embedding: embedding1,
             entity_names: ["Architecture"],
           },
           {
             text_content: "Section 2: Database schemas and triggers",
-            embedding: embedding2,
             entity_names: ["Database", "Trigger"],
           },
         ],
@@ -425,12 +399,6 @@ describe("Shale SDK Architecture", () => {
         .all();
       expect(chunks.length).toBe(2);
 
-      // Verify vector index
-      const vecCount = db
-        .query<{ c: number }, []>("SELECT count(*) as c FROM vector_index")
-        .get()!.c;
-      expect(vecCount).toBe(2);
-
       // Verify FTS5
       const ftsResults = db
         .query("SELECT * FROM chunks_fts WHERE chunks_fts MATCH 'architecture'")
@@ -449,6 +417,7 @@ describe("Shale SDK Architecture", () => {
 
     it("rolls back all changes if chunk insertion fails", () => {
       const ingestor = new UnifiedIngestor("docs", db);
+      db.run("CREATE TRIGGER fail_chunk BEFORE INSERT ON chunks BEGIN SELECT RAISE(FAIL, 'injected chunk failure'); END");
 
       expect(() => {
         ingestor.sourceAndChunks({
@@ -459,17 +428,7 @@ describe("Shale SDK Architecture", () => {
             origin: "test",
             title: "Bad Doc",
           },
-          chunks: [
-            {
-              text_content: "Valid chunk",
-              embedding: [0.1, 0.2, 0.3, 0.4],
-            },
-            {
-              text_content: "Invalid chunk with invalid vector dimension",
-              // vec0 float[4] expects 4 floats (16 bytes), passing wrong size will fail in sqlite-vec
-              embedding: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-            },
-          ],
+          chunks: [{ text_content: "Valid chunk" }],
         });
       }).toThrow();
 
@@ -525,7 +484,6 @@ describe("Shale SDK Architecture", () => {
         chunks: mockExternalMessages.map((msg, idx) => ({
           chunk_index: idx,
           text_content: msg.text,
-          embedding: [0.1, 0.2, 0.3, 0.4],
         })),
       });
       expect(ingestRes.chunksCount).toBe(2);
@@ -686,11 +644,9 @@ describe("Shale SDK Architecture", () => {
           chunks: [
             {
               text_content: "Chunk one discussing convenience APIs.",
-              embedding: [0.1, 0.2, 0.3, 0.4],
             },
             {
               text_content: "Chunk two discussing ambient async local storage.",
-              embedding: [0.5, 0.6, 0.7, 0.8],
             },
           ],
         });
@@ -964,4 +920,3 @@ describe("Shale SDK Architecture", () => {
     });
   });
 });
-

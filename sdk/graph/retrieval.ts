@@ -1,11 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { retrievalSeeds } from "./retrieval-seeds";
-import type { ChunkSearchResult, HybridSearchOptions } from "../types";
+import type { ChunkSearchResult, BM25SearchOptions } from "../types";
 import type { GraphIngestor } from "../graph";
 import type { Evidence, GraphTraversal, TraversalOptions } from "./types";
 
-export interface GraphSearchOptions extends HybridSearchOptions {
-  mode?: 'hybrid'|'bm25'|'vector'; maxSeeds?: number; minScore?: number;
+export interface GraphSearchOptions extends BM25SearchOptions {
+  mode?: 'bm25'; maxSeeds?: number; minScore?: number;
   graph?: Omit<TraversalOptions,'start'>;
 }
 export interface GraphSearchResult {

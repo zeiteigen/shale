@@ -1,6 +1,5 @@
 import { contentVersion, copyIndexedContent } from "./content-version";
 import { rememberCapture } from "./capture-store";
-import { embedBounded } from "./embed-bounded";
 import type { ShaleSDK } from "@shale/sdk";
 import type { WebPageParseResponse } from "../../lib/messages/web-contracts";
 import type {
@@ -22,8 +21,7 @@ import { commitPageGraph } from "./page-graph";
 import { isSourceExcluded } from "../../lib/knowledge/exclusions";
 
 /**
- * Phase 1: Discovers and prepares a web page using Chat model analysis and checkpoints.
- * Zero embedding calls happen in this phase, keeping the Chat model loaded in GPU memory.
+ * Prepare a web page using chat analysis and checkpoints.
  */
 export async function preparePageVisit(
   sdk: ShaleSDK,
@@ -41,7 +39,7 @@ export async function preparePageVisit(
 
   const title = (payload.title || filter.domain || "Untitled Page").trim();
   sdk.logger.info(
-    `[browser] [Phase 1: Chat Model] Preparing "${title}" (${filter.domain})`,
+    `[browser] Preparing "${title}" (${filter.domain})`,
   );
   ensureBrowserSchema(sdk.database);
   const contentKey = fingerprint([
@@ -65,7 +63,6 @@ export async function preparePageVisit(
     settings.namespace,
     payload.captureOrigin,
     sdk.llm.options?.().model,
-    sdk.embedder.options?.().model,
   ]);
   const checkpointId =
     options.jobId ??
@@ -153,7 +150,7 @@ export async function preparePageVisit(
     sessionId: payload.sessionId,
   };
 
-  // Phase 1 Chat Model Call: generate summary, topics, and category
+  // Chat model request: generate summary, topics, and category
   const analysis = cached
     ? (JSON.parse(cached.prepared) as PreparedPageData).analysis
     : await analyzePageWithLLM(sdk, pageData, settings);
@@ -253,8 +250,7 @@ export async function preparePageVisit(
 }
 
 /**
- * Phase 2: Embeds prepared page chunks with the Embedding model and commits
- * sources, chunks, and graph edges to SQLite. Zero Chat model calls happen in this phase.
+ * Commit prepared page chunks and graph evidence to SQLite.
  */
 export async function finalizePageVisit(
   sdk: ShaleSDK,
@@ -388,10 +384,10 @@ export async function finalizePageVisit(
   const visitedAt = pageData.visitedAt;
 
   sdk.logger.info(
-    `[browser] [Phase 2: Embedding Model] Embedding and ingesting "${title}" (${domain})`,
+    `[browser] Ingesting "${title}" (${domain})`,
   );
 
-  // Phase 2 Chunking & Embeddings
+  // Build stored text chunks.
   const chunkSize = settings.chunkSize ?? 1000;
   const rawChunks = (
     prepared.parsedChunks?.length
@@ -461,21 +457,11 @@ export async function finalizePageVisit(
       chunk_type: "synthetic" as const,
     })),
   ];
-  const chunksToEmbed = chunkRecords.map((chunk) => chunk.text_content);
-
-  const embeddings = await embedBounded(
-    sdk,
-    chunksToEmbed,
-    settings,
-    assertOwned,
-  );
-
   assertOwned();
   const { sourceRes, graphRes } = sdk.database.transaction(() => {
     const chunks = chunkRecords.map((chunk, i) => ({
       ...chunk,
       chunk_index: i,
-      embedding: embeddings[i],
     }));
     const immutable = version
       ? sdk.ingest.sourceAndChunks({

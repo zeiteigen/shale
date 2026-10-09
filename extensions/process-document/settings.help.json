@@ -24,13 +24,13 @@
       "type": "string", "description": "Installed Tesseract language codes, such as eng or eng+fra. No language data is downloaded.", "default": "eng"
     },
     "enablePdfVision": {
-      "type": "boolean", "description": "Use the chat vision model to transcribe uncertain OCR pages, including handwriting. Completed page outputs are cached before embedding; their chunks are synthetic.", "default": false, "possibleValues": [true, false]
+      "type": "boolean", "description": "Use the chat vision model to transcribe uncertain OCR pages, including handwriting. Completed page outputs are cached; their chunks are synthetic.", "default": false, "possibleValues": [true, false]
     },
     "pdfVisionMinConfidence": {
       "type": "number", "description": "OCR word confidence below which an enabled vision fallback transcribes the page.", "default": 60, "range": { "min": 0, "max": 100 }
     },
     "summarizeDocuments": {
-      "type": "boolean", "description": "Generate an additional synthetic summary with the chat model before any embeddings.", "default": false, "possibleValues": [true, false]
+      "type": "boolean", "description": "Generate an additional synthetic summary with the chat model.", "default": false, "possibleValues": [true, false]
     },
     "summaryPrompt": {
       "type": "string", "description": "Instruction for optional document summaries; options.customPrompt overrides this per request.", "default": "Summarize the main subjects, findings, and key details of this document."
@@ -40,9 +40,6 @@
     },
     "summaryTimeoutMs": {
       "type": "number", "description": "Timeout for each optional chat summary in milliseconds.", "default": 60000, "range": { "min": 1000, "max": 300000 }
-    },
-    "embeddingBatchSize": {
-      "type": "number", "description": "Maximum chunks per embedding request in Phase 2.", "default": 64, "range": { "min": 1, "max": 512 }
     },
     "defaultEntityType": {
       "type": "string", "description": "Graph entity type returned for the document.", "default": "Document"

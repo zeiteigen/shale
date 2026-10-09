@@ -8,6 +8,6 @@ then
 fi
 
 
-rm production.db
-rm production.db-shm
-rm production.db-wal
+rm "$(dirname "$0")/data/production.db"
+rm "$(dirname "$0")/data/production.db-shm"
+rm "$(dirname "$0")/data/production.db-wal"

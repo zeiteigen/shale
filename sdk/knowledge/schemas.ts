@@ -79,7 +79,7 @@ export const readSchemas = {
     predicates:z.array(text).max(100).optional(),statuses:z.array(claimStatus).optional(),context:z.string().optional()}),
   get_source_revision:z.object({revisionId:id}),
   find_connection_candidates:z.object({entity:entityReference,limit:z.number().int().min(1).max(100).default(20),
-    namespace:text.optional(),useVector:z.boolean().default(false)}),
+    namespace:text.optional()}),
   find_duplicate_entities:z.object({entity:entityReference.optional(),namespace:text.optional(),limit:z.number().int().min(1).max(100).default(20)}),
   list_sources:z.object({...page,title:z.string().max(1000).optional(),uri:z.string().max(1000).optional(),origin:text.optional(),type:text.optional(),namespace:text.optional(),
     status:z.enum(['live','removed','all']).default('live')}),

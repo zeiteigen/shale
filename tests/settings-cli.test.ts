@@ -259,15 +259,7 @@ describe("Settings CLI & Management Utilities", () => {
     it("reflects CLI setting updates immediately in ShaleSDK without restart", () => {
       const { rootDir, extDir } = createMockProject();
 
-      const sdk = createExtensionSDK(
-        "test-plugin",
-        "test-plugin",
-        undefined,
-        undefined,
-        undefined,
-        "test-plugin",
-        extDir
-      );
+      const sdk = createExtensionSDK("test-plugin", { namespace: "test-plugin", extensionName: "test-plugin", extensionDir: extDir });
 
       // Initial read through SDK
       expect(sdk.settings.get<number>("maxItems")).toBe(50);

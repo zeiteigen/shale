@@ -134,7 +134,7 @@ Traversal defaults to accepted, positive claims and follows merged identities. I
 
 `at` filters real-world validity using half-open intervals `[validFrom, validTo)`. `knownAt` filters recorded knowledge and reconstructs claim status at that time. Entity labels and merges are resolved in their current state. `claims.list` supports predicate, entity, namespace, context, status, polarity, limit, and offset filters; each page is capped at 1,000 claims.
 
-Graph search seeds neighborhoods from BM25/vector/hybrid results and entity-to-chunk links. It returns source hits, graph paths, evidence, and related saved passages separately. Accepted claims are used by default; opt into `graph.statuses: ["accepted", "proposed"]` to explore unreviewed output. Expansion is bounded per seed, with at most 20 seeds. Inference and conflict discovery also report truncation when their budgets are reached.
+Graph search seeds neighborhoods from BM25 results and entity-to-chunk links. It returns source hits, graph paths, evidence, and related saved passages separately. Accepted claims are used by default; opt into `graph.statuses: ["accepted", "proposed"]` to explore unreviewed output. Expansion is bounded per seed, with at most 20 seeds. Inference and conflict discovery also report truncation when their budgets are reached.
 
 ## Extension messaging and migration
 

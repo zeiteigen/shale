@@ -12,12 +12,8 @@ import { executeDirectChatBatch } from "./direct-chat-batch";
 export async function executeAPIBatch<T>(role: ModelRole, bodies: unknown[], options?: AIClientOptions): Promise<T[]> {
   if (!bodies.length) return [];
   if (bodies.length > 50_000) throw new Error("Batch API supports at most 50,000 requests per batch");
-  if (role === "embedding" && bodies.reduce<number>((count, body) => {
-    const input = (body as { input: string | string[] }).input;
-    return count + (Array.isArray(input) ? input.length : 1);
-  }, 0) > 50_000) throw new Error("Embedding Batch API supports at most 50,000 inputs per batch");
   const endpoint = resolveBatchEndpoint(role, options);
-  if (role === "chat" && new URL(endpoint).pathname.endsWith("/chat/completions/batch"))
+  if (new URL(endpoint).pathname.endsWith("/chat/completions/batch"))
     return executeDirectChatBatch<T>(endpoint, bodies, options);
   const root = new URL(endpoint);
   root.pathname = root.pathname.slice(0, -"/batches".length);
@@ -31,7 +27,7 @@ export async function executeAPIBatch<T>(role: ModelRole, bodies: unknown[], opt
     url.pathname += `/files${id ? `/${encodeURIComponent(id)}/content` : ""}`;
     return url.toString();
   };
-  const requestPath = role === "chat" ? "/v1/chat/completions" : "/v1/embeddings";
+  const requestPath = "/v1/chat/completions";
   const jsonl = bodies.map((body, index) => JSON.stringify({ custom_id: `request-${index}`, method: "POST", url: requestPath, body })).join("\n") + "\n";
   const file = new File([jsonl], "shale-batch.jsonl", { type: "application/jsonl" });
   if (file.size > 200_000_000) throw new Error("Batch input exceeds the 200 MB limit");

@@ -1,6 +1,6 @@
 # Browser connector
 
-Durable browser ingestion for Shale's local SQLite, search, and evidence graph. The companion [Chrome extension](../../scripts/browser-chrome-extension/README.md) collects structured page captures and immutable activity observations. Catalog records, page content, activity, observed sessions, and inferred research threads have separate identities.
+Durable browser ingestion for Shale's local SQLite and evidence graph. The companion [Chrome extension](../../scripts/browser-chrome-extension/README.md) collects structured page captures and immutable activity observations. Catalog records, page content, activity, observed sessions, and inferred research threads have separate identities.
 
 ## Admission and processing
 
@@ -24,13 +24,13 @@ The receipt contains `protocolVersion`, `collectorId`, `batchId`, and `records` 
 
 `storage-schema.ts` creates browser-owned tables additively. The legacy `pending-ingest` and `active_session_state` are migrated transactionally and removed only after durable rows exist. Queue capacity uses an indexed byte counter, avoiding scans of retained page bodies. Previously coalesced visits cannot be reconstructed.
 
-Admission wakes a coalescing background worker, with a one-minute cron and startup run as recovery fallbacks. Bounded jobs run inside `sdk.models.batch`: all chat/vision preparation and checkpoints finish before embeddings begin. Compatible text arrays are embedded with explicit request limits. A renewable SQLite lease prevents concurrent owners, and ownership is checked around long calls and before commits. Sources, chunks, graph claims, job outcomes, and checkpoint completion commit transactionally. Failures retain prepared output and use backoff; exhausted jobs require explicit retry. A session preparation checkpoint preserves generated synthesis even before context preparation has finished.
+Admission wakes a coalescing background worker, with a one-minute cron and startup run as recovery fallbacks. Bounded jobs run inside `sdk.models.batch`: chat/vision preparation and checkpoints finish before text and graph data commit. A renewable SQLite lease prevents concurrent owners, and ownership is checked around long calls and before commits. Sources, chunks, graph claims, job outcomes, and checkpoint completion commit transactionally. Failures retain prepared output and use backoff; exhausted jobs require explicit retry. A session preparation checkpoint preserves generated synthesis even before context preparation has finished.
 
 ## Content, activity, and context
 
 The shared Readability/semantic-root extractor produces typed blocks and section locators. The parser owns chunking; browser finalization consumes those chunks directly. A useful HTML candidate can repair weak supplied text. The Chrome collector bounds the complete encoded capture, including escaped HTML and references, and marks reductions as partial/truncated. Extraction quality and provenance distinguish live DOM, tab metadata, and explicitly fetched public pages.
 
-Each managed capture links its requesting activity to an immutable, indexed content version. Session/date/goal queries use that version; generic queries use the newest capture, so a late older upload cannot overwrite current content. Returning unchanged content restores existing vectors without another model request. Completed receipts retain input hashes and compact diagnostics while releasing duplicate raw payloads.
+Each managed capture links its requesting activity to an immutable content version. Session/date/goal queries use that version; generic queries use the newest capture, so a late older upload cannot overwrite current content. Returning unchanged content restores its existing text chunks. Completed receipts retain input hashes and compact diagnostics while releasing duplicate raw payloads.
 
 Unchanged content reuses cached parsing and analysis. Reuse verifies the indexed source hash; observations retain their own event IDs. Images are opt-in. Browser parsing suppresses the parser's extra text contextualization so the browser's structured page analysis supplies the summary/topics/category.
 
@@ -81,19 +81,19 @@ bun run settings set browser enableImageAnalysis false
 bun run settings set browser refineResearchContexts false
 ```
 
-New limits: `maxPendingJobs`, `maxPendingBytes`, `maxJobsPerRun`, `maxBatchBytes`, `maxJobAttempts`, `maxSessionsPerRun`, `maxSessionEvents`, `collectionWindowMs`, `maxEmbeddingTexts`, and `maxPublicPagesPerRun`. Their defaults/ranges are defined in `settings.help.json`. Existing privacy, session, namespace, and analysis settings remain available. The current repository keeps text analysis disabled and image/context refinement opt-in.
+New limits: `maxPendingJobs`, `maxPendingBytes`, `maxJobsPerRun`, `maxBatchBytes`, `maxJobAttempts`, `maxSessionsPerRun`, `maxSessionEvents`, `collectionWindowMs`, and `maxPublicPagesPerRun`. Their defaults/ranges are defined in `settings.help.json`. Existing privacy, session, namespace, and analysis settings remain available. The current repository keeps text analysis disabled and image/context refinement opt-in.
 
 To request public catalog enrichment, enable **both** `browser.allowPublicPageEnrichment` and `web-page-parser.allowFetch`, then submit a record `{ "type":"public_page_capture", "recordId":"enrich-1", "url":"https://example.com/docs" }` in a versioned batch. These jobs have count/time/response/redirect limits, fetch no browser credentials, carry `public-fetch` provenance, never create visits, and use a separate source URI so catalog enrichment cannot overwrite captured DOM. They do not provide authenticated fetching, archive lookup, or PDF/site adapters.
 
 History ingestion fetches eligible URLs through `web:parse` during preparation,
-then embeds readable page chunks alongside visit metadata. `fetchHistoryPages`
+then stores readable page chunks alongside visit metadata. `fetchHistoryPages`
 defaults to true; the parser's `allowFetch` must also be enabled (it is enabled
 in the current repository settings). Excluded and stale records are skipped,
 duplicate URLs share a fetch within a batch, and failed or empty fetches log a
 warning and retain metadata. Fetching uses the parser's existing timeout,
 response-size, and redirect limits, without browser credentials or image/LLM
-analysis. Prepared chunks are persisted with the browser job so embedding retries
-and recovery reuse the fetched content. Content is labelled `public-fetch` with
+analysis. Prepared chunks are persisted with the browser job so retries and
+recovery reuse the fetched content. Content is labelled `public-fetch` with
 its retrieval time: it represents the current page, rather than a snapshot of the
 historical visit. Live page captures retain separate source identities.
 
@@ -101,7 +101,7 @@ Bookmarks use collector-scoped IDs and real folder ancestry. Newer sequences win
 
 ## Verification
 
-`bun run test:browser` covers durable admission, atomic overload/migration, immutable replay conflicts, phases, bounded embeddings, lease exclusion, preparation/recovery, graph rollback, late sessions, SPA attention, contexts/corrections, catalog lifecycle, extraction, and outbox/import recovery. `browser-relevance.test.ts` establishes a small deterministic baseline with two interleaved goals and a returning goal across sessions.
+`bun run test:browser` covers durable admission, atomic overload/migration, immutable replay conflicts, preparation/recovery, graph rollback, late sessions, SPA attention, contexts/corrections, catalog lifecycle, extraction, and outbox/import recovery. `browser-relevance.test.ts` establishes a small deterministic baseline with two interleaved goals and a returning goal across sessions.
 
 `bun run test:browser:chrome` runs actual unpacked Chromium against temporary fixtures/database/profile, including service-worker termination and offline/profile recovery. Model endpoints are mocked. `bun run browser:check` verifies generated protocol and content artifacts; `bun run typecheck` checks the repository.
 

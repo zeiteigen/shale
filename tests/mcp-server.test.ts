@@ -178,7 +178,6 @@ describe("MCP Knowledge Graph HTTP Server", () => {
       chunks: [
         {
           text_content: "Alice leads the Atlas project as principal engineer.",
-          embedding: [1, 0, 0, 0],
         },
       ],
     });

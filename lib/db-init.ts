@@ -1,21 +1,20 @@
 import { Database } from "bun:sqlite";
-import * as sqliteVec from "sqlite-vec";
 
-import { join, resolve } from "node:path";
-import { ensureCosineIndex } from "./cosine-index";
+import { mkdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { ensureGraphSchema } from "./graph/schema";
-import { ensureVectorIndex } from "./embedding-storage";
 import { getRootSetting } from "./settings";
 import { configureDatabaseConnection } from "./database-connection";
 
 const configuredPath = getRootSetting("SHALE_DB_PATH");
-const db = new Database(process.env.SHALE_DB_PATH || (configuredPath
+const databasePath = process.env.SHALE_DB_PATH || (configuredPath
   ? resolve(import.meta.dir, "..", configuredPath)
-  : join(import.meta.dir, "../production.db")));
+  : join(import.meta.dir, "../data/production.db"));
+if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
+const db = new Database(databasePath);
 
 configureDatabaseConnection(db);
 
-sqliteVec.load(db);
 
 // Create Sources table
 db.run(`
@@ -58,12 +57,6 @@ try {
 } catch {}
 
 
-// Initialize the Vector Embeddings virtual table
-// Note: Virtual tables do not use 'STRICT' mode
-ensureVectorIndex(db);
-
-ensureCosineIndex(db);
-
 // Initialize BM25 virtual table with stopword and porter
 db.run(`
   CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -91,19 +84,6 @@ db.run(`
   CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
     INSERT INTO chunks_fts(chunks_fts, rowid, text_content) VALUES ('delete', old.id, old.text_content);
     INSERT INTO chunks_fts(rowid, text_content) VALUES (new.id, new.text_content);
-  END;
-`);
-
-// Vector virtual table triggers to prevent orphan embeddings on chunk delete or ID change
-db.run(`
-  CREATE TRIGGER IF NOT EXISTS chunks_vector_ad AFTER DELETE ON chunks BEGIN
-    DELETE FROM vector_index WHERE rowid = old.id;
-  END;
-`);
-
-db.run(`
-  CREATE TRIGGER IF NOT EXISTS chunks_vector_au AFTER UPDATE ON chunks BEGIN
-    DELETE FROM vector_index WHERE rowid = old.id AND old.id != new.id;
   END;
 `);
 

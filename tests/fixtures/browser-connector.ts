@@ -2,9 +2,8 @@ import { createExtensionSDK, createMessageBus } from "../../sdk";
 import { createTestDatabase } from "./database";
 import { parseWebPage } from "../../extensions/web-page-parser/parser";
 export function browserFixture() {
-  const database = createTestDatabase(4096),
-    trace: string[] = [],
-    controls = { failEmbeddings: false };
+  const database = createTestDatabase(),
+    trace: string[] = [];
   const policy: any = {
     enableLlmAnalysis: true,
     generateSessionSummaries: true,
@@ -17,7 +16,6 @@ export function browserFixture() {
     maxSessionEvents: 200,
     minContentLength: 20,
     chunkSize: 200,
-    maxEmbeddingTexts: 3,
     maxJobAttempts: 2,
     maxJobsPerRun: 20,
     maxSessionsPerRun: 3,
@@ -30,19 +28,7 @@ export function browserFixture() {
       connection: {
         baseUrl: "http://localhost:11434/v1",
         maxRetries: 0,
-        fetchFn: async (url: any, init: any) => {
-          const body = JSON.parse(String(init?.body));
-          if (String(url).endsWith("/embeddings")) {
-            trace.push(`embed:${body.input.length}`);
-            if (controls.failEmbeddings)
-              throw new Error("Injected embedding outage");
-            return Response.json({
-              data: body.input.map((_: string, index: number) => ({
-                index,
-                embedding: new Array(4096).fill(0.01),
-              })),
-            });
-          }
+        fetchFn: async () => {
           trace.push("chat");
           return Response.json({
             choices: [
@@ -72,7 +58,7 @@ export function browserFixture() {
   bus.handle("web:parse", (request) => parseWebPage(parser, request), {
     name: "web-page-parser",
   });
-  return { sdk, database, trace, controls, policy };
+  return { sdk, database, trace, policy };
 }
 const captureTime = Date.now() - 120000;
 export const capture = (

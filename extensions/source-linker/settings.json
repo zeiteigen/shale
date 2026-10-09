@@ -1,6 +1,4 @@
 {
-  "knnK": 5,
-  "minKnnSimilarity": 0.65,
   "maxPairsPerRun": 20,
   "bidirectional": true,
   "defaultRelation": "RELATES_TO",
@@ -13,5 +11,6 @@
   "namespace": "source-linker",
   "enableEntityResolution": true,
   "minEntityConfidence": 0.7,
-  "maxEntityResolutionsPerPair": 10
+  "maxEntityResolutionsPerPair": 10,
+  "candidatesPerChunk": 5
 }

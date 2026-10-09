@@ -112,7 +112,7 @@ describe("Browser durable processing", () => {
       f.database.close();
     }
   });
-  it("prepares all chats before bounded embeddings and reuses unchanged content", async () => {
+  it("prepares chats and reuses unchanged content", async () => {
     const f = browserFixture();
     try {
       admitBrowserPayload(
@@ -121,14 +121,6 @@ describe("Browser durable processing", () => {
       );
       await runWorker(f.sdk);
       expect(f.trace.filter((x) => x === "chat")).toHaveLength(2);
-      expect(f.trace.lastIndexOf("chat")).toBeLessThan(
-        f.trace.findIndex((x) => x.startsWith("embed")),
-      );
-      expect(
-        f.trace
-          .filter((x) => x.startsWith("embed"))
-          .every((x) => Number(x.split(":")[1]) <= 3),
-      ).toBe(true);
       expect(browserStatus(f.sdk).counts.indexed).toBe(2);
       f.trace.length = 0;
       admitBrowserPayload(f.sdk, batch([capture("new-capture")], "new"));
@@ -144,16 +136,17 @@ describe("Browser durable processing", () => {
       f.database.close();
     }
   });
-  it("recovers prepared jobs after embedding failure without repeating chat", async () => {
+  it("recovers prepared jobs after commit failure without repeating chat", async () => {
     const f = browserFixture();
     try {
       const receipt = admitBrowserPayload(f.sdk, batch([capture("a")]));
-      f.controls.failEmbeddings = true;
+      f.database.run(`CREATE TEMP TRIGGER fail_source_commit BEFORE INSERT ON sources
+        BEGIN SELECT RAISE(ABORT, 'Injected commit failure'); END`);
       await runWorker(f.sdk);
       expect(browserStatus(f.sdk).counts.prepared).toBe(1);
       expect(f.sdk.checkpoint.hasQueued()).toBe(true);
       f.trace.length = 0;
-      f.controls.failEmbeddings = false;
+      f.database.run("DROP TRIGGER fail_source_commit");
       await recover(f.sdk);
       expect(f.trace.some((x) => x === "chat")).toBe(false);
       expect(
@@ -168,7 +161,8 @@ describe("Browser durable processing", () => {
     const f = browserFixture();
     try {
       admitBrowserPayload(f.sdk, batch([capture("a")]));
-      f.controls.failEmbeddings = true;
+      f.database.run(`CREATE TEMP TRIGGER fail_source_commit BEFORE INSERT ON sources
+        BEGIN SELECT RAISE(ABORT, 'Injected commit failure'); END`);
       await runWorker(f.sdk);
       f.database.run("UPDATE browser_jobs SET next_attempt_at=0");
       await runWorker(f.sdk);
@@ -176,7 +170,7 @@ describe("Browser durable processing", () => {
       expect(f.sdk.checkpoint.hasQueued()).toBe(false);
       const id = browserStatus(f.sdk).records[0].jobId;
       retryBrowserJobs(f.sdk, [id]);
-      f.controls.failEmbeddings = false;
+      f.database.run("DROP TRIGGER fail_source_commit");
       f.trace.length = 0;
       await runWorker(f.sdk);
       expect(browserStatus(f.sdk).counts.indexed).toBe(1);
@@ -845,13 +839,14 @@ it("exhausts a managed job during startup recovery so it cannot block later cron
   const f = browserFixture();
   try {
     admitBrowserPayload(f.sdk, batch([capture("startup-failure")]));
-    f.controls.failEmbeddings = true;
+    f.database.run(`CREATE TEMP TRIGGER fail_source_commit BEFORE INSERT ON sources
+      BEGIN SELECT RAISE(ABORT, 'Injected commit failure'); END`);
     await runWorker(f.sdk);
     expect(browserStatus(f.sdk).counts.prepared).toBe(1);
     await expect(recover(f.sdk)).rejects.toThrow("recovery failed");
     expect(browserStatus(f.sdk).counts.failed).toBe(1);
     expect(f.sdk.checkpoint.hasQueued()).toBe(false);
-    f.controls.failEmbeddings = false;
+    f.database.run("DROP TRIGGER fail_source_commit");
     admitBrowserPayload(
       f.sdk,
       batch([capture("healthy", "https://example.com/healthy")], "healthy"),

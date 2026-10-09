@@ -112,15 +112,7 @@ describe("SDK Settings Management & Hot Reloading", () => {
       }),
     );
 
-    const sdk = createExtensionSDK(
-      "test-ext",
-      "test-ns",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      tempDir,
-    );
+    const sdk = createExtensionSDK("test-ext", { namespace: "test-ns", extensionDir: tempDir });
 
     expect(sdk.settings).toBeInstanceOf(SettingsManager);
     expect(sdk.settings.get("describeImages", true)).toBe(false);
@@ -173,15 +165,7 @@ describe("SDK Settings Management & Hot Reloading", () => {
       }),
     );
 
-    const sdk = createExtensionSDK(
-      "obsidian parser",
-      "obsidian",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      tempDir,
-    );
+    const sdk = createExtensionSDK("obsidian parser", { namespace: "obsidian", extensionDir: tempDir });
 
     runWithSDK(sdk, () => {
       // 1. Vault discovery respects customVaults in settings

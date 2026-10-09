@@ -85,7 +85,7 @@ export async function executeBackup(
   const settings: DbBackupSettings = {
     enabled: currentSettings.enabled ?? true,
     backupOnStartup: currentSettings.backupOnStartup ?? true,
-    backupDir: currentSettings.backupDir || "./backups",
+    backupDir: currentSettings.backupDir || "./data/backups",
     filenamePrefix: currentSettings.filenamePrefix || "production-backup-",
     maxBackups: currentSettings.maxBackups ?? 10,
     timestampFormat: currentSettings.timestampFormat || "iso",
@@ -103,7 +103,7 @@ export async function executeBackup(
 
   const targetDir = isAbsolute(settings.backupDir)
     ? settings.backupDir
-    : resolve(process.cwd(), settings.backupDir);
+    : resolve(import.meta.dir, "../..", settings.backupDir);
 
   if (!existsSync(targetDir)) {
     mkdirSync(targetDir, { recursive: true });

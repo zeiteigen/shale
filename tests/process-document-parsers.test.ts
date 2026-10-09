@@ -25,7 +25,7 @@ describe("document parsers", () => {
       const result = await parseDocumentFile(files[format], sdk);
       expect(result.success).toBe(true);
       expect(result.chunks.map(chunk => chunk.text_content).join("\n")).toContain(text);
-      expect(result.chunks.every(chunk => chunk.chunk_type === "verbatim" && !chunk.embedding)).toBe(true);
+      expect(result.chunks.every(chunk => chunk.chunk_type === "verbatim" && typeof chunk.text_content === "string")).toBe(true);
       expect(result.metadata?.format).toBe(format);
       expect(result.metadata?.assetHash).toMatch(/^[a-f\d]{64}$/);
       expect(result.metadata?.updatedAt).toBeGreaterThan(0);

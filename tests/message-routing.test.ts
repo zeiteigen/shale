@@ -306,7 +306,7 @@ describe("receiving SDK scope", () => {
     expect(seen.slice(6).sort()).toEqual(["b", "c"]);
   });
 
-  it("changes SDK identity without losing GPU reservation or phase guards", async () => {
+  it("changes SDK identity without losing chat reservation across message handlers", async () => {
     const bus = new MessageBus();
     const a = createExtensionSDK("a", { messageBus: bus });
     const b = createExtensionSDK("b", { messageBus: bus });
@@ -314,23 +314,17 @@ describe("receiving SDK scope", () => {
     const endpoint = "http://localhost:11434/v1";
     b.messages.handle("chat", async () => {
       expect(getSDK()).toBe(b);
-      await expect(
-        coordinator.request("embedding", endpoint, async () => "invalid"),
-      ).rejects.toThrow("chat phase");
-      return coordinator.request("chat", endpoint, async () => "described");
+      await expect(coordinator.request( endpoint, async () => "invalid", "other-gpu"))
+        .rejects.toThrow("second GPU resource");
+      return coordinator.request( endpoint, async () => "described");
     });
     const result = await runWithSDK(a, () =>
       coordinator.batch(
         "local-gpu",
         () => a.messages.request("chat", {}, { timeoutMs: 100 }),
-        (text) =>
-          coordinator.request(
-            "embedding",
-            endpoint,
-            async () => `${text} embedded`,
-          ),
+        (text) => coordinator.request( endpoint, async () => `${text} finalized`),
       ),
     );
-    expect(result).toBe("described embedded");
+    expect(result).toBe("described finalized");
   });
 });

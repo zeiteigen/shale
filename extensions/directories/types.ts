@@ -10,7 +10,7 @@ export interface DirectoryResult {
   errors: Array<{ filePath: string; error: string }>;
 }
 
-/** Portable Phase 1 output; vectors are always generated again during recovery. */
+/** Portable parsed output retained for recovery before commit. */
 export interface PreparedDirectoryFile {
   type: "directory_file";
   directory: DirectoryInfo;

@@ -10,7 +10,6 @@ const bounds: Record<string, [number, number, number]> = {
   maxSessionsPerRun: [3, 1, 20],
   maxSessionEvents: [200, 10, 500],
   collectionWindowMs: [3000, 100, 60000],
-  maxEmbeddingTexts: [64, 1, 256],
 };
 export function browserSettings(sdk: ShaleSDK): BrowserExtensionSettings {
   const settings = sdk.settings.getAll<BrowserExtensionSettings>();

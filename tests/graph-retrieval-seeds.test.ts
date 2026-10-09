@@ -10,7 +10,7 @@ it("prioritizes each retrieved source over crowded incidental chunk entities", (
   try {
     for (const id of ["a", "b"]) sdk.ingest.sourceAndChunks({
       source: { id, uri: `test:${id}`, title: id, type: "test", origin: "test" },
-      chunks: [{ text_content: id, embedding: [1, 0, 0, 0] }],
+      chunks: [{ text_content: id }],
     });
     const mentions = sdk.graph.ingest({ edges: [], entities: Array.from({length:25}, (_,i) => ({name:`mention${i}`,type:"Concept"})) });
     const chunk = db.query<{id:number}, []>("SELECT id FROM chunks WHERE source_id='a'").get()!;

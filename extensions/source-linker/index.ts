@@ -4,7 +4,7 @@ import {
   commitLinksToGraph,
   WATERMARK_KEY,
 } from "./process-links";
-import { findKnnCandidatePairs } from "./knn-finder";
+import { findCandidatePairs } from "./candidate-finder";
 import { analyzeSourcePairWithLLM } from "./llm-analyzer";
 import { run as recover, type RecoverResult } from "./recover";
 import type {
@@ -19,7 +19,7 @@ import type {
 export {
   processSourceLinks,
   commitLinksToGraph,
-  findKnnCandidatePairs,
+  findCandidatePairs,
   analyzeSourcePairWithLLM,
   recover,
   WATERMARK_KEY,
@@ -34,9 +34,7 @@ export {
 
 /**
  * Main extension runner invoked by cron or CLI.
- * Enforces the two-phase pipeline:
- * Phase 1: Chat model analysis & checkpointing.
- * Phase 2: Ingestion & knowledge graph edge commits.
+ * Prepares relationship analyses with checkpoints, then commits graph edges.
  *
  * @param sdkOverride Optional scoped SDK instance (ambient SDK discovered if omitted)
  * @param options Run options

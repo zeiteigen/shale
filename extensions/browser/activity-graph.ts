@@ -1,6 +1,5 @@
 import type { ActivityEventPayload } from "../../lib/browser-contract";
 import type { BrowserExtensionSettings } from "./settings.types";
-import { embedBounded } from "./embed-bounded";
 import { normalizeUrl } from "./filter";
 import { SourceGraph, type ShaleSDK } from "@shale/sdk";
 import type { PreparedSessionData, SessionVisitRecord } from "./types";
@@ -20,7 +19,6 @@ export function commitActivityGraph(
   sdk: ShaleSDK,
   visit: SessionVisitRecord,
   prepared: PreparedSessionData,
-  embedding: number[],
 ) {
   const identity = visitSource(visit);
   if (isSourceExcluded(sdk.database, identity.id, identity.uri)) return null;
@@ -42,7 +40,6 @@ export function commitActivityGraph(
         chunk_index: 0,
         chunk_type: "verbatim",
         text_content: observation,
-        embedding,
       },
     ],
   });
@@ -108,8 +105,7 @@ export async function finalizeActivity(
     sdk.database.transaction(afterCommit)();
     return;
   }
-  const text = visitObservation(sdk, visit),
-    embeddings = await embedBounded(sdk, [text], settings, assertOwned);
+  const text = visitObservation(sdk, visit);
   assertOwned();
   sdk.database.transaction(() => {
     const namespace = settings.namespace || sdk.namespace || "browser";
@@ -128,7 +124,6 @@ export async function finalizeActivity(
           chunk_index: 0,
           chunk_type: "verbatim",
           text_content: text,
-          embedding: embeddings[0],
         },
       ],
     });

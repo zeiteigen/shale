@@ -13,7 +13,7 @@ export interface ParsedDocument {
   contextualChunks: ContextualChunk[];
 }
 
-/** Call the document service in Phase 1; embedding belongs to the vault connector. */
+/** Call the document service and return extracted text and graph metadata. */
 export async function parseDocumentFile(
   filePath: string,
   sdkOverride?: ShaleSDK,
@@ -23,7 +23,7 @@ export async function parseDocumentFile(
   const response = await sdk.messages.request("file:process", {
     filePath,
     fileType: "document",
-    options: { deferEmbedding: true, namespace: namespace ?? sdk.namespace },
+    options: { namespace: namespace ?? sdk.namespace },
   }, {
     target: "process-document",
     timeoutMs: sdk.settings.get<number>("documentRequestTimeoutMs") ?? 180000,

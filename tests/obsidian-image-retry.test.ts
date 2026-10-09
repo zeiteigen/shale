@@ -89,7 +89,7 @@ it("reports failed vision work instead of accepting a placeholder description as
   const f = fixture();
   f.sdk.queryLLM = (async () => { throw new Error("Vision request timed out"); }) as any;
   try {
-    const batch = await processImageFilesBatch({ filePaths: [f.paths[0]], options: { deferEmbedding: true } }, f.sdk);
+    const batch = await processImageFilesBatch({ filePaths: [f.paths[0]] }, f.sdk);
     expect(batch.success).toBe(false);
     expect(batch.totalFailed).toBe(1);
     expect(batch.results[0].chunks).toEqual([]);

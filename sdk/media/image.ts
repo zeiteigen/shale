@@ -101,7 +101,7 @@ Your description must thoroughly cover two essential aspects:
   const system =
     sdk?.settings.get<string>("imageSystemPrompt") ??
     getSetting<string>("imageSystemPrompt") ??
-    "You are an expert multimodal analysis assistant. You analyze images to produce detailed, semantically rich descriptions capturing both visible layout elements and underlying conceptual meaning for semantic search and knowledge retrieval.";
+    "You are an expert multimodal analysis assistant. You analyze images to produce detailed, semantically rich descriptions capturing both visible layout elements and underlying conceptual meaning for full-text search and knowledge retrieval.";
 
   const effectiveTimeout =
     timeoutMs !== undefined
@@ -190,7 +190,6 @@ export interface ContextualChunk {
   chunk_index: number;
   chunk_type: ChunkType;
   text_content: string;
-  embedding?: number[];
   metadata?: Record<string, unknown>;
 }
 

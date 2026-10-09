@@ -9,7 +9,7 @@ Implemented 2026-10-01 in the working tree across all seven milestones:
 - Durable host admission, shared nested validation, immutable receipts, capacity controls, and transactional legacy inbox migration.
 - Chrome IndexedDB outbox, persisted destinations/retries/import cursors, preserved defaults, connection capability checks, and truthful popup states.
 - Independent navigation/capture identities, document-bound extraction, SPA events, attention intervals, privacy filtering, and browser-instance scoping.
-- Bounded worker wakeups, leases, strict chat-then-embedding batches, frozen checkpoints, atomic commits, and explicit retries for exhausted page/session failures.
+- Bounded worker wakeups, leases, chat preparation batches, frozen checkpoints, atomic commits, and explicit retries for exhausted page/session failures.
 - Shared Readability/semantic extraction, typed blocks/locators, bounded hydration, structural chunking, quality diagnostics, and optional vision/public fetching.
 - Immutable indexed content versions tied to captures/events, historical passage retrieval, observed sessions, proposed research threads, explicit goals and corrections, late-event recomputation, filtered retrieval, and a small relevance baseline.
 - Incremental catalog updates/removals, folder IDs/sequences, timestamp-tie diagnostics, optional labelled visit backfill, and separate opt-in public enrichment jobs.
@@ -26,7 +26,7 @@ History/backfill remains subject to Chrome enumeration limits, reported as incom
 
 Make delivery and the observed activity log reliable before adding richer inference. Preserve three independent concepts: page content, individual browsing events, and inferred research context. Repeated visits can reuse unchanged content, but must remain distinct events. A time-based browsing session can contain several goals, and a goal can continue across sessions.
 
-Keep the existing local SQLite, typed message bus, evidence-backed graph, dynamic settings, and strict chat-then-embedding model scheduler. The current foundation supports incremental improvements; a connector rewrite is unnecessary.
+Keep the existing local SQLite, typed message bus, evidence-backed graph, and dynamic settings. The model coordinator batches chat work while finalization commits prepared text and graph data. The current foundation supports incremental improvements; a connector rewrite is unnecessary.
 
 ## Current data flow
 
@@ -34,7 +34,7 @@ Keep the existing local SQLite, typed message bus, evidence-backed graph, dynami
 2. Chrome posts an `IngestMaterial` envelope containing a JSON string to `/ingest`. A successful HTTP response increments “items sent”; the popup's connection test only checks `/health`.
 3. [ingest-http.ts](../../main/ingest-http.ts) validates the outer envelope and routing target, then returns `202` after adding to the in-memory host queue. [subscribe.ts](../../extensions/browser/subscribe.ts) subsequently parses the inner payload and writes to the browser's durable inbox.
 4. [ingest-queue.ts](../../extensions/browser/ingest-queue.ts) stores the entire inbox as a JSON array in one `extension_state` value, replacing pending single-page captures with the same normalized URL.
-5. [index.ts](../../extensions/browser/index.ts) drains the inbox on the browser cron, groups single pages by URL again, prepares chat/vision work, and then embeds/commits. The [manifest](../../extensions/browser/manifest.json) schedules this every six hours and at host startup.
+5. [index.ts](../../extensions/browser/index.ts) drains the inbox on the browser cron, groups single pages by URL again, prepares chat/vision work, and then commits text and graph records. The [manifest](../../extensions/browser/manifest.json) schedules this every six hours and at host startup.
 6. [page-ingest.ts](../../extensions/browser/page-ingest.ts) calls `web:parse`, analyzes the page, mutates active-session state during preparation, and saves a URL-keyed checkpoint. Finalization commits chunks and graph claims transactionally.
 7. [session-manager.ts](../../extensions/browser/session-manager.ts) maintains one active session; [session-ingest.ts](../../extensions/browser/session-ingest.ts) summarizes visits and commits a session document. History and bookmarks have separate sources linked to canonical page entities.
 
@@ -85,10 +85,10 @@ These findings identify structural failure paths. They do not establish the caus
 | Priority | Finding | Code / consequence |
 | --- | --- | --- |
 | P1 | Capture-to-index delay can approach six hours before model time. | Inbox processing shares the session aggregator cron; accepting new work does not wake a worker. |
-| P1 | Processing has no batch budget or browser task lease. | Whole-inbox preparation and a JSON-array inbox grow without limits. The model coordinator protects GPU phases, but is not durable job ownership, particularly with remote profiles or multiple processes. Existing `lib/task-lease.ts` can be reused. |
+| P1 | Processing has no batch budget or browser task lease. | Whole-inbox preparation and a JSON-array inbox grow without limits. The model coordinator serializes local GPU requests, but is not durable job ownership, particularly with remote profiles or multiple processes. Existing `lib/task-lease.ts` can be reused. |
 | P1 | Recovery lacks inbox-job linkage. | Page checkpoints use only URL; preparation mutates sessions before commit; recovery commits checkpoints without acknowledging the originating inbox jobs. The next drain can analyze the same job again. Partial batch failures retain already-prepared work. |
 | P1 | Failed session preparation can discard active-session state. | `session-manager.ts:109–115` logs a closing-session error and still clears/replaces the active session. |
-| P2 | Unchanged captures still repeat inference and embedding. | Source IDs are stable, but capture timestamps and generated text participate in indexed source hashes. There is no separate content fingerprint and analysis-version cache. |
+| P2 | Unchanged captures still repeat inference. | Source IDs are stable, but capture timestamps and generated text participate in indexed source hashes. There is no separate content fingerprint and analysis-version cache. |
 
 The graph already preserves evidence revisions and marks inferred summaries/topics as proposals. Preserve this behavior. Existing page/history/bookmark source separation is also correct and should remain.
 
@@ -102,7 +102,7 @@ bun test tests/browser-extension.test.ts tests/browser-inbox.test.ts \
   tests/connector-knowledge.test.ts
 ```
 
-Result: **46 passed, 0 failed**. These tests validate important server behavior, including transactional graph writes, provenance, separate catalog sources, and model-phase ordering. They do not execute the shipped Chrome scripts. The HTTP integration test invokes the subscriber directly and does not test the host's actual in-memory queue boundary.
+Result: **46 passed, 0 failed**. These tests validate important server behavior, including transactional graph writes, provenance, separate catalog sources, and preparation and commit ordering. They do not execute the shipped Chrome scripts. The HTTP integration test invokes the subscriber directly and does not test the host's actual in-memory queue boundary.
 
 Six additional isolated review probes reproduced:
 
@@ -125,7 +125,7 @@ flowchart LR
   D --> E[SQLite activity log and capture jobs]
   E --> F[Bounded chat and vision preparation]
   F --> G[Persist prepared checkpoints]
-  G --> H[Batch embeddings and transactional commit]
+  G --> H[Commit prepared text and graph data]
   H --> I[Page and session search]
   E --> J[Session and goal context jobs]
   J --> F
@@ -192,11 +192,11 @@ Separate prompt indexing from infrequent session maintenance. Register a browser
 
 Use `acquireTaskLease()` for browser worker ownership, renewal, and expired-job reclamation. Recheck settings and cancellation between jobs; avoid mutable session state during chat preparation. Make session membership an idempotent reduction over durable events, with multiple sessions keyed by collector rather than one global active object. Finalization failures retain the closing session.
 
-Keep `sdk.models.batch()` as the execution boundary. Complete all chat/vision preparation for the selected batch and save versioned prepared output before any embedding call. Batch compatible chunk embeddings with explicit input limits, then commit each recoverable job transactionally. Checkpoints must be keyed by job/content version and record input IDs, phase, analysis settings, and generated output.
+Keep `sdk.models.batch()` as the execution boundary. Complete chat/vision preparation for the selected batch and save versioned prepared output before finalization. Commit each recoverable job transactionally. Checkpoints must be keyed by job/content version and record input IDs, phase, analysis settings, and generated output.
 
 Commit sources, graph claims, job completion, and receipt outcome in the same SQLite transaction. Recovery reuses prepared output and completes the original job, so replay cannot call the LLM again. Isolate permanent failures; keep successful siblings; limit retry attempts and expose exhausted jobs. Renew leases around long model calls and verify ownership before committing.
 
-**Acceptance:** inject failure after each durable boundary, including session reduction, preparation, embedding, graph commit, and acknowledgement. No successful work repeats inference; no job disappears. Overlapping workers cannot own the same job. Model traces prove zero embeddings during preparation and zero chat/vision calls during finalization.
+**Acceptance:** inject failure after each durable boundary, including session reduction, preparation, graph commit, and acknowledgement. No successful work repeats inference; no job disappears. Overlapping workers cannot own the same job. Model traces prove all chat/vision calls finish during preparation and finalization makes no model calls.
 
 ### 5. Structured extraction and parser ownership — P1
 
@@ -218,9 +218,9 @@ Define observed sessions from attention/inactivity and explicit boundaries. Choo
 
 Build topic threads using observed tab groups, opener trails, attended intervals, bookmark folders, and cached page summaries/topics. Begin with deterministic grouping and a bounded LLM refinement. A session may contain multiple threads; a returning thread may span multiple sessions. Classify goals as tentative, with evidence event/capture IDs, confidence, and version. Do not claim the user reached a conclusion solely because pages were loaded.
 
-Add an optional popup goal annotation (“Researching X”) and allow rename/merge/split corrections. Explicit user context has precedence over inferred context. Store inferred `HAS_TOPIC`, `HAS_GOAL`, `PART_OF_THREAD`, and thread summaries as proposals using the existing claim/evidence layer; store actual activity as observations. Use committed page analyses or prepared batch analyses as context inputs, without calling chat during the embedding phase.
+Add an optional popup goal annotation (“Researching X”) and allow rename/merge/split corrections. Explicit user context has precedence over inferred context. Store inferred `HAS_TOPIC`, `HAS_GOAL`, `PART_OF_THREAD`, and thread summaries as proposals using the existing claim/evidence layer; store actual activity as observations. Use committed page analyses or prepared batch analyses as context inputs, without calling chat during finalization.
 
-Add bounded session/thread retrieval documents and a browser query interface for sessions, topic, goal, date range, collector, domain, and capture quality. Extend search only where required for filtering and ranking. Favor substantive captured passages over title-only catalog records and return source URL, section locator, session/goal explanation, and the distinction between quoted evidence and inferred context.
+Add bounded session/thread retrieval documents and a browser query interface for sessions, topic, goal, date range, collector, domain, and capture quality. Extend full-text search only where required for filtering and ranking. Favor substantive captured passages over title-only catalog records and return source URL, section locator, session/goal explanation, and the distinction between quoted evidence and inferred context.
 
 **Acceptance:** a fixture containing two interleaved research goals remains separable, and a later session can resume an existing goal. Queries such as “What was I investigating about SQLite last week?” return the relevant trail and passages. User corrections persist across recomputation; raw events do not change when labels change. Establish a small relevance benchmark before tuning ranking.
 

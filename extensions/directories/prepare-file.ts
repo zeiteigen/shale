@@ -4,7 +4,7 @@ import type { DirectoryInfo, DirectoryResult, PendingDirectoryFile, PreparedDire
 import { fileVersion } from "./scan";
 import { checkpointId, fileStateKey } from "./file-state";
 
-/** Prepare and checkpoint one file; embedding belongs exclusively to finalization. */
+/** Prepare and checkpoint one file before its transactional commit. */
 export async function prepareDirectoryFile(
   sdk: ShaleSDK, settings: DirectorySettings, force: boolean, namespace: string,
   directory: DirectoryInfo, result: DirectoryResult, filePath: string,
@@ -30,7 +30,7 @@ export async function prepareDirectoryFile(
     }
     const parsed = await sdk.messages.request("file:process", {
       filePath,
-      options: { deferEmbedding: true, namespace, timeoutMs: settings.processingTimeoutMs ?? 120000 },
+      options: { namespace, timeoutMs: settings.processingTimeoutMs ?? 120000 },
     }, { target: capability.supportedBy, timeoutMs: settings.processingTimeoutMs ?? 120000 });
     if (!parsed.success || !parsed.chunks.length) throw new Error(parsed.error ?? "Processor returned no chunks");
     if ((await fileVersion(filePath)).fingerprint !== version.fingerprint) {
@@ -39,7 +39,7 @@ export async function prepareDirectoryFile(
     // Keep canonical local identity regardless of processor URI formatting.
     const data: PreparedDirectoryFile = { type: "directory_file", directory, filePath, namespace,
       fingerprint: version.fingerprint, updatedAt: version.updatedAt,
-      parsed: { ...parsed, chunks: parsed.chunks.map((chunk, chunk_index) => ({ ...chunk, chunk_index, embedding: undefined })) } };
+      parsed: { ...parsed, chunks: parsed.chunks.map((chunk, chunk_index) => ({ ...chunk, chunk_index })) } };
     sdk.saveCheckpoint(data, { id, key: id });
     return { id, data, result };
   } catch (error) {

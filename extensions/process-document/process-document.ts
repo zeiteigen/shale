@@ -3,9 +3,8 @@ import type { ProcessFileRequest, ProcessFileResponse, ProcessFilesBatchRequest,
 import { documentBatchItems } from "./batch-items";
 import { documentIdentity } from "./document-format";
 import { prepareDocument } from "./parse-document";
-import { positiveInteger } from "./settings.types";
 
-/** Extract and summarize the whole batch before making any embedding requests. */
+/** Extract and summarize documents in a chat batch. */
 export async function processDocumentFilesBatch(
   request: ProcessFilesBatchRequest,
   sdkOverride?: ShaleSDK,
@@ -31,38 +30,8 @@ export async function processDocumentFilesBatch(
       }
     });
   };
-  const finalize = async () => {
-    signal?.throwIfAborted();
-    const pending = results.flatMap((result, index) => result.success && !items[index].options?.deferEmbedding
-      ? result.chunks.filter(chunk => !chunk.embedding).map(chunk => ({ result, chunk })) : []);
-    const batchSize = positiveInteger(sdk.settings.get("embeddingBatchSize"), 64);
-    for (let start = 0; start < pending.length; start += batchSize) {
-      signal?.throwIfAborted();
-      const group = pending.slice(start, start + batchSize).filter(entry => entry.result.success);
-      if (!group.length) continue;
-      try {
-        const embeddings = await sdk.embed(group.map(entry => entry.chunk.text_content), { signal });
-        signal?.throwIfAborted();
-        if (embeddings.length !== group.length || embeddings.some(vector => !vector?.length || vector.some(value => !Number.isFinite(value)))) {
-          throw new Error("Embedding response did not contain a valid vector for every document chunk");
-        }
-        group.forEach((entry, index) => { entry.chunk.embedding = embeddings[index]; });
-      } catch (error) {
-        signal?.throwIfAborted();
-        // Preserve parsed chunks for inspection/retry, but never report a partially embedded file as successful.
-        for (const { result } of group) {
-          result.success = false;
-          result.error = error instanceof Error ? error.message : String(error);
-        }
-      }
-    }
-    return response();
-  };
   if (!items.length) return response();
-  if (items.every(item => item.options?.deferEmbedding)) {
-    return sdk.models.phase("chat", async () => { await prepare(); return response(); });
-  }
-  return sdk.models.batch(prepare, finalize);
+  return sdk.models.batch(prepare, async () => { signal?.throwIfAborted(); return response(); });
 }
 
 export async function processDocumentFile(

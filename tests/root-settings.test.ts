@@ -5,7 +5,6 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { getRootSetting, readRootSettings } from "../lib/settings";
 import { LLMClient } from "../sdk/llm";
-import { EmbedderClient } from "../sdk/embed";
 import { SettingsManager } from "../sdk/settings";
 import { batchTransport } from "./fixtures/batch-api";
 import { discoverSettingsTargets, discoverExtensions, getSettingValue, setSettingValue,
@@ -17,12 +16,13 @@ let directory: string;
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "shale-root-settings-"));
   mkdirSync(join(directory, "extensions"));
+  mkdirSync(join(directory, "data"));
   writeFileSync(join(directory, "package.json"), '{"name":"root-settings-test"}');
-  writeFileSync(join(directory, "settings.json"), "{}\n");
-  writeFileSync(join(directory, "settings.help.json"), readFileSync(join(project, "settings.help.json")));
-  process.env = { ...originalEnv, SHALE_SETTINGS_PATH: join(directory, "settings.json") };
+  writeFileSync(join(directory, "data/settings.json"), "{}\n");
+  writeFileSync(join(directory, "data/settings.help.json"), readFileSync(join(project, "data/settings.help.json")));
+  process.env = { ...originalEnv, SHALE_SETTINGS_PATH: join(directory, "data/settings.json") };
   for (const key of Object.keys(process.env))
-    if (/^(OPENAI_|EMBEDDING_|MODEL_BATCH_)/.test(key)) delete process.env[key];
+    if (/^(OPENAI_|MODEL_BATCH_)/.test(key)) delete process.env[key];
 });
 afterEach(() => {
   process.env = { ...originalEnv };
@@ -66,25 +66,6 @@ it("hot-reloads model settings, keeps explicit overrides, and reads API keys fro
   expect(readRootSettings()).not.toHaveProperty("OPENAI_API_KEY");
 });
 
-it("applies root embedding model, storage size, and batch limits without recreating clients", async () => {
-  saveSettings("root", { EMBEDDING_ENDPOINT: "https://embeddings.invalid/v1/embeddings",
-    OPENAI_EMBEDDING_MODEL: "file-embedding", EMBEDDING_DIMENSIONS: 4, EMBEDDING_BATCH_SIZE: 2 }, directory);
-  const sizes: number[] = [];
-  const models: string[] = [];
-  const client = new EmbedderClient({ fetchFn: async (_url: unknown, init: any) => {
-    const body = JSON.parse(init.body);
-    sizes.push(body.input.length);
-    models.push(body.model);
-    return Response.json({ data: body.input.map((_: string, index: number) => ({ index, embedding: [1, 2] })) });
-  } });
-  const vectors = await client.embedBatch(["a", "b", "c"]);
-  expect(vectors.map(vector => vector.length)).toEqual([4, 4, 4]);
-  setSettingValue("root", "EMBEDDING_BATCH_SIZE", 1, directory);
-  await client.embedBatch(["d", "e"]);
-  expect(sizes).toEqual([2, 1, 1, 1]);
-  expect(models.every(model => model === "file-embedding")).toBe(true);
-});
-
 it("reads dedicated Batch API mode and endpoint from root settings", async () => {
   saveSettings("root", { OPENAI_CHAT_BATCH_MODE: "api", OPENAI_CHAT_BATCH_ENDPOINT: "https://batch.invalid/v1/batches",
     MODEL_BATCH_POLL_INTERVAL_MS: 1 }, directory);
@@ -97,7 +78,6 @@ it("reads dedicated Batch API mode and endpoint from root settings", async () =>
 
 it("validates root edits, rejects secrets and unknown keys, and resets optional values", () => {
   expect(() => setSettingValue("root", "OPENAI_API_KEY", "secret", directory)).toThrow("API keys belong in .env");
-  expect(() => saveSettings("root", { EMBEDDING_API_KEY: "secret" }, directory)).toThrow("API keys belong in .env");
   expect(() => setSettingValue("root", "unknown", "value", directory)).toThrow("Unknown root setting");
   expect(() => setSettingValue("root", "OPENAI_CHAT_CONCURRENCY", "1.5", directory)).toThrow("safe integer");
   expect(() => setSettingValue("root", "OPENAI_CHAT_CONCURRENCY", 0, directory)).toThrow("minimum");
@@ -111,11 +91,11 @@ it("validates root edits, rejects secrets and unknown keys, and resets optional 
 });
 
 it("fails clearly on malformed root settings and excludes host settings from extension fallback", () => {
-  writeFileSync(join(directory, "settings.json"), "[]");
+  writeFileSync(join(directory, "data/settings.json"), "[]");
   expect(() => readRootSettings()).toThrow("JSON object");
-  writeFileSync(join(directory, "settings.json"), '{"OPENAI_API_KEY":"dummy"}');
+  writeFileSync(join(directory, "data/settings.json"), '{"OPENAI_API_KEY":"dummy"}');
   expect(() => readRootSettings()).toThrow("API keys belong in .env");
-  writeFileSync(join(directory, "settings.json"), '{"OPENAI_CHAT_MODEL":"host"}');
+  writeFileSync(join(directory, "data/settings.json"), '{"OPENAI_CHAT_MODEL":"host"}');
   const previous = process.cwd();
   try {
     process.chdir(directory);

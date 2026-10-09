@@ -18,10 +18,7 @@ let database: ReturnType<typeof createTestDatabase>;
 let sdk: ShaleSDK;
 let calls: string[];
 let failFiles: Set<string>;
-let failEmbedding: boolean;
-let embeddings: number[];
 let onParse: ((filePath: string) => void) | undefined;
-let onEmbed: (() => void) | undefined;
 let parserGate: Promise<void> | undefined;
 
 function configure(settings: Record<string, unknown>) {
@@ -38,24 +35,14 @@ beforeEach(() => {
   sdk = createExtensionSDK("directories", { database, messageBus: createMessageBus(), extensionDir: directory });
   calls = [];
   failFiles = new Set();
-  failEmbedding = false;
-  embeddings = [1, 0, 0, 0];
   onParse = undefined;
-  onEmbed = undefined;
   parserGate = undefined;
   sdk.logger.log = () => {};
   sdk.logger.error = () => {};
-  sdk.embed = (async (texts: string[]) => {
-    calls.push(`embed:${texts.length}`);
-    if (failEmbedding) throw new Error("Embedding unavailable");
-    onEmbed?.();
-    return texts.map(() => embeddings.slice());
-  }) as typeof sdk.embed;
   sdk.messages.handle("file:can-process", async ({ filePath }) => ({
     canProcess: /\.(md|txt|png)$/i.test(filePath), supportedBy: "fixture-processor",
   }), { name: "fixture-processor" });
   sdk.messages.handle("file:process", async ({ filePath, options }) => {
-    expect(options?.deferEmbedding).toBe(true);
     calls.push(`chat:${filePath}`);
     onParse?.(filePath!);
     await parserGate;
@@ -85,16 +72,16 @@ describe("directory ingestion", () => {
     expect(calls).toEqual([]);
   });
 
-  it("prepares every selected root before bounded embedding and commits graph evidence", async () => {
+  it("prepares every selected root and commits graph evidence", async () => {
     const roots = [join(directory, "first"), join(directory, "second")];
     roots.forEach(root => { mkdirSync(root); writeFileSync(join(root, "shared # note.md"), "Notes"); });
-    configure({ directories: roots, embeddingBatchSize: 1, namespace: "research" });
+    configure({ directories: roots, namespace: "research" });
     const events: string[] = [];
     sdk.messages.on("source:ingested", event => { events.push(event.uri); });
     const results = await run(sdk);
     expect(results.map(result => result.filesProcessed)).toEqual([1, 1]);
     expect(calls.slice(0, 2).every(call => call.startsWith("chat:"))).toBe(true);
-    expect(calls.slice(2)).toEqual(["embed:1", "embed:1", "embed:1", "embed:1"]);
+    expect(calls).toHaveLength(2);
     expect(sourceCount()).toBe(2);
     expect(events.sort()).toEqual(roots.map(root => pathToFileURL(join(root, "shared # note.md")).href).sort());
     expect(database.query("SELECT 1 FROM sources WHERE origin='directories'").get()).toBeTruthy();
@@ -163,47 +150,59 @@ describe("directory ingestion", () => {
     expect(sourceCount()).toBe(2);
   });
 
-  it("keeps prepared checkpoints after embedding failure and recovers without chat calls", async () => {
+  it("keeps prepared checkpoints after a commit failure and recovers without chat calls", async () => {
     const root = join(directory, "notes"); mkdirSync(root);
     const file = join(root, "recover.md"); writeFileSync(file, "Recovery");
-    configure({ directories: [root], embeddingBatchSize: 1 });
-    failEmbedding = true;
+    configure({ directories: [root] });
+    const ingest = sdk.ingest.sourceAndChunks.bind(sdk.ingest);
+    let failed = false;
+    sdk.ingest.sourceAndChunks = ((...args: Parameters<typeof sdk.ingest.sourceAndChunks>) => {
+      if (!failed) { failed = true; throw new Error("Storage unavailable"); }
+      return ingest(...args);
+    }) as typeof sdk.ingest.sourceAndChunks;
     expect((await run(sdk))[0].errors).toHaveLength(1);
     expect(sdk.hasCheckpoints()).toBe(true);
     expect(sourceCount()).toBe(0);
     expect(sdk.state.getWatermark(fileStateKey("directories", file))).toBeNull();
-    await expect(recover(sdk)).rejects.toThrow("Directory recovery failed");
-    failEmbedding = false; calls.length = 0;
+    calls.length = 0;
     expect(await recover(sdk)).toEqual({ recoveredFiles: 1, discardedFiles: 0 });
-    expect(calls).toEqual(["embed:1", "embed:1"]);
+    expect(calls).toEqual([]);
     expect(sourceCount()).toBe(1);
     expect(sdk.hasCheckpoints()).toBe(false);
     expect(sdk.state.getWatermark(fileStateKey("directories", file))).toBeTruthy();
   });
 
-  it("reuses checkpoints on a manual scan and rolls back graph and state on invalid vectors", async () => {
+  it("reuses checkpoints on a manual scan after a failed transactional commit", async () => {
     const root = join(directory, "notes"); mkdirSync(root);
     const file = join(root, "retry.md"); writeFileSync(file, "Retry");
     configure({ directories: [root] });
-    embeddings = [1, 0];
+    const ingest = sdk.ingest.sourceAndChunks.bind(sdk.ingest);
+    let failed = false;
+    sdk.ingest.sourceAndChunks = ((...args: Parameters<typeof sdk.ingest.sourceAndChunks>) => {
+      if (!failed) { failed = true; throw new Error("Storage unavailable"); }
+      return ingest(...args);
+    }) as typeof sdk.ingest.sourceAndChunks;
     expect((await run(sdk))[0].errors).toHaveLength(1);
     expect(sourceCount()).toBe(0);
     expect(database.query("SELECT 1 FROM entities").get()).toBeNull();
     expect(sdk.state.getWatermark(fileStateKey("directories", file))).toBeNull();
     expect(sdk.getCheckpoints()).toHaveLength(1);
-    embeddings = [1, 0, 0, 0]; calls.length = 0;
+    calls.length = 0;
     expect((await run(sdk))[0].filesProcessed).toBe(1);
-    expect(calls).toEqual(["embed:2"]);
+    expect(calls).toEqual([]);
   });
 
   it("discards stale and removed-file checkpoints and rescans modified files", async () => {
     const root = join(directory, "notes"); mkdirSync(root);
     const changed = join(root, "changed.md"); const removed = join(root, "removed.md");
     writeFileSync(changed, "Old"); writeFileSync(removed, "Removed");
-    configure({ directories: [root] }); failEmbedding = true;
+    configure({ directories: [root] });
+    const ingest = sdk.ingest.sourceAndChunks.bind(sdk.ingest);
+    sdk.ingest.sourceAndChunks = (() => { throw new Error("Storage unavailable"); }) as typeof sdk.ingest.sourceAndChunks;
     await run(sdk);
     writeFileSync(changed, "New material"); rmSync(removed);
-    failEmbedding = false; calls.length = 0;
+    sdk.ingest.sourceAndChunks = ingest;
+    calls.length = 0;
     expect(await recover(sdk)).toEqual({ recoveredFiles: 0, discardedFiles: 2 });
     expect(calls).toEqual([]);
     expect((await run(sdk))[0].filesProcessed).toBe(1);
@@ -223,7 +222,7 @@ describe("directory ingestion", () => {
     expect(retried.filesSkipped).toBe(1);
   });
 
-  it("does not advance a watermark when a file changes during parsing or embedding", async () => {
+  it("does not advance a watermark when a file changes during parsing", async () => {
     const root = join(directory, "notes"); mkdirSync(root);
     const file = join(root, "changing.md"); writeFileSync(file, "Original");
     configure({ directories: [root] });
@@ -232,13 +231,6 @@ describe("directory ingestion", () => {
     expect(sdk.hasCheckpoints()).toBe(false);
     expect(sourceCount()).toBe(0);
     onParse = undefined;
-    onEmbed = () => writeFileSync(file, "Changed during embedding");
-    expect((await run(sdk))[0].errors[0].error).toContain("changed during embedding");
-    expect(sdk.hasCheckpoints()).toBe(true);
-    expect(sourceCount()).toBe(0);
-    expect(sdk.state.getWatermark(fileStateKey("directories", file))).toBeNull();
-    onEmbed = undefined;
-    expect(await recover(sdk)).toEqual({ recoveredFiles: 0, discardedFiles: 1 });
     expect((await run(sdk))[0].filesProcessed).toBe(1);
   });
 

@@ -55,10 +55,7 @@ export {
 
 /**
  * Main extension runner invoked on cron schedule or standalone.
- * Enforces a strict two-phase pipeline across all vaults:
- * Phase 1: All Chat model work (summaries, expansions, multimodal image descriptions).
- * Phase 2: All Embedding model work (batch embeddings, chunk storage, graph edges).
- * This prevents local model servers from repeatedly swapping chat and embedding models in VRAM.
+ * Prepares vault content with chat work, then commits parsed chunks and graph evidence.
  */
 export async function run(
   sdkOverride?: ShaleSDK,

@@ -39,8 +39,8 @@ describe("Cross-Extension Messaging System", () => {
 
   describe("1. Arbitrary Request / Response Messaging", () => {
     it("routes arbitrary request to registered handler and returns response", async () => {
-      const extA = createExtensionSDK("ext-caller", "ns-a", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("ext-provider", "ns-b", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("ext-caller", { namespace: "ns-a", messageBus: bus });
+      const extB = createExtensionSDK("ext-provider", { namespace: "ns-b", messageBus: bus });
 
       extB.messages.handle("math:square", async (payload: { n: number }, ctx) => {
         expect(ctx.senderId).toBe("ext-caller");
@@ -59,8 +59,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("supports send() alias for request()", async () => {
-      const extA = createExtensionSDK("ext-a", "ns-a", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("ext-b", "ns-b", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("ext-a", { namespace: "ns-a", messageBus: bus });
+      const extB = createExtensionSDK("ext-b", { namespace: "ns-b", messageBus: bus });
 
       extB.messages.handle("ping", async (payload: { msg: string }) => {
         return { pong: payload.msg };
@@ -71,7 +71,7 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("throws a descriptive error if no handler is registered for the channel", async () => {
-      const ext = createExtensionSDK("ext-caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const ext = createExtensionSDK("ext-caller", { namespace: "ns", messageBus: bus });
 
       expect(
         ext.messages.request("unhandled:channel", { foo: "bar" }),
@@ -79,8 +79,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("throws a timeout error if handler takes longer than timeoutMs", async () => {
-      const extA = createExtensionSDK("ext-caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("ext-slow", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("ext-caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("ext-slow", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("slow:channel", async () => {
         await new Promise((r) => setTimeout(r, 100));
@@ -93,8 +93,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("allows unsubscribing a request handler", async () => {
-      const extA = createExtensionSDK("ext-caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("ext-provider", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("ext-caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("ext-provider", { namespace: "ns", messageBus: bus });
 
       const unsubscribe = extB.messages.handle("temp:channel", () => "ok");
       expect(extA.messages.hasHandler("temp:channel")).toBe(true);
@@ -108,9 +108,9 @@ describe("Cross-Extension Messaging System", () => {
 
   describe("2. Predicate Matchers, Priority Ordering & Target Routing", () => {
     it("evaluates canHandle predicate to select the appropriate handler", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("image-handler", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extC = createExtensionSDK("text-handler", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("image-handler", { namespace: "ns", messageBus: bus });
+      const extC = createExtensionSDK("text-handler", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle(
         "file:test",
@@ -138,9 +138,9 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("routes by priority descending when multiple handlers accept request", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("low-priority", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extC = createExtensionSDK("high-priority", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("low-priority", { namespace: "ns", messageBus: bus });
+      const extC = createExtensionSDK("high-priority", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("priority:test", () => "low", { priority: 1 });
       extC.messages.handle("priority:test", () => "high", { priority: 100 });
@@ -150,9 +150,9 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("routes explicitly to target extension when target option is specified", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("worker-alpha", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extC = createExtensionSDK("worker-beta", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("worker-alpha", { namespace: "ns", messageBus: bus });
+      const extC = createExtensionSDK("worker-beta", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("work:execute", () => ({ worker: "alpha" }), { name: "worker-alpha" });
       extC.messages.handle("work:execute", () => ({ worker: "beta" }), { name: "worker-beta" });
@@ -167,9 +167,9 @@ describe("Cross-Extension Messaging System", () => {
 
   describe("3. Publish / Subscribe Event Broadcasting", () => {
     it("broadcasts events to all registered listeners concurrently", async () => {
-      const extA = createExtensionSDK("publisher", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("sub-1", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extC = createExtensionSDK("sub-2", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("publisher", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("sub-1", { namespace: "ns", messageBus: bus });
+      const extC = createExtensionSDK("sub-2", { namespace: "ns", messageBus: bus });
 
       let sub1Received: any = null;
       let sub2Received: any = null;
@@ -190,8 +190,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("supports once() for single event consumption", async () => {
-      const extA = createExtensionSDK("pub", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("sub", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("pub", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("sub", { namespace: "ns", messageBus: bus });
 
       let count = 0;
       extB.messages.once("one-time:event", () => {
@@ -205,9 +205,9 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("isolates errors in event listeners so failing listeners do not break others", async () => {
-      const extA = createExtensionSDK("pub", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("bad-sub", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extC = createExtensionSDK("good-sub", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("pub", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("bad-sub", { namespace: "ns", messageBus: bus });
+      const extC = createExtensionSDK("good-sub", { namespace: "ns", messageBus: bus });
 
       let goodReceived = false;
 
@@ -226,8 +226,8 @@ describe("Cross-Extension Messaging System", () => {
 
   describe("4. Built-in Type-Safe Channels", () => {
     it("implements file:process channel with type safety", async () => {
-      const extA = createExtensionSDK("obsidian", "obsidian", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("file-proc", "proc", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("obsidian", { namespace: "obsidian", messageBus: bus });
+      const extB = createExtensionSDK("file-proc", { namespace: "proc", messageBus: bus });
 
       extB.messages.handle("file:process", async (req: ProcessFileRequest): Promise<ProcessFileResponse> => {
         return {
@@ -241,7 +241,6 @@ describe("Cross-Extension Messaging System", () => {
             {
               chunk_index: 0,
               text_content: "System diagram showing microservices",
-              embedding: [0.1, 0.2, 0.3],
             },
           ],
           entities: [{ name: "diagram.png", type: "Image" }],
@@ -265,14 +264,13 @@ describe("Cross-Extension Messaging System", () => {
       expect(response.success).toBe(true);
       expect(response.title).toBe("diagram.png");
       expect(response.chunks.length).toBe(1);
-      expect(response.chunks[0].embedding).toEqual([0.1, 0.2, 0.3]);
       expect(response.entities[0].name).toBe("diagram.png");
       expect(response.edges[0].relation).toBe("IN_SAME_VAULT");
     });
 
     it("implements file:can-process channel", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("pdf-proc", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("pdf-proc", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("file:can-process", async (req) => {
         return {
@@ -290,8 +288,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("implements files:process bulk channel with type safety", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("batch-processor", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("batch-processor", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("files:process", async (req: ProcessFilesBatchRequest): Promise<ProcessFilesBatchResponse> => {
         const filePaths = req.filePaths || [];
@@ -320,7 +318,6 @@ describe("Cross-Extension Messaging System", () => {
 
       const response = await extA.messages.request("files:process", {
         filePaths: ["/vault/doc1.md", "/vault/doc2.md"],
-        options: { deferEmbedding: true },
       });
 
       expect(response.success).toBe(true);
@@ -332,8 +329,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("implements files:can-process bulk capability channel", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("pdf-proc", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("pdf-proc", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("files:can-process", async (req: CanProcessFilesRequest): Promise<CanProcessFilesResponse> => {
         const results: Record<string, any> = {};
@@ -356,8 +353,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("implements source:ingested event channel", async () => {
-      const extA = createExtensionSDK("ingestor", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("listener", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("ingestor", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("listener", { namespace: "ns", messageBus: bus });
 
       const ingestedEvents: SourceIngestedEvent[] = [];
       extB.messages.on("source:ingested", (evt) => {
@@ -380,8 +377,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("implements graph:link-entities request channel", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("graph-service", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("graph-service", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("graph:link-entities", async (req: LinkEntitiesRequest) => {
         return {
@@ -401,8 +398,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("implements content:summarize request channel", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("ai-summarizer", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("ai-summarizer", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("content:summarize", async (req: SummarizeContentRequest) => {
         return {
@@ -423,8 +420,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("implements content:summarize-batch bulk request channel", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("ai-summarizer", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("ai-summarizer", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("content:summarize-batch", async (req: SummarizeContentBatchRequest): Promise<SummarizeContentBatchResponse> => {
         const contents = req.contents || req.items?.map((i) => i.content) || [];
@@ -455,8 +452,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("implements system:backup request channel", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("db-backup", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("db-backup", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("system:backup", async (req: SystemBackupRequest) => {
         return {
@@ -472,8 +469,8 @@ describe("Cross-Extension Messaging System", () => {
     });
 
     it("implements search:query request channel", async () => {
-      const extA = createExtensionSDK("caller", "ns", undefined, undefined, undefined, undefined, undefined, bus);
-      const extB = createExtensionSDK("search-service", "ns", undefined, undefined, undefined, undefined, undefined, bus);
+      const extA = createExtensionSDK("caller", { namespace: "ns", messageBus: bus });
+      const extB = createExtensionSDK("search-service", { namespace: "ns", messageBus: bus });
 
       extB.messages.handle("search:query", async (req: SearchQueryRequest) => {
         return {
@@ -489,7 +486,7 @@ describe("Cross-Extension Messaging System", () => {
         };
       });
 
-      const res = await extA.messages.request("search:query", { query: "vector search" });
+      const res = await extA.messages.request("search:query", { query: "graph search" });
       expect(res.results.length).toBe(1);
       expect(res.results[0].score).toBe(0.95);
     });

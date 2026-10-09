@@ -1,5 +1,5 @@
 import type { ModelRole } from "./config";
-import { resolveChatEndpoint, resolveEmbeddingEndpoint } from "./config";
+import { resolveChatEndpoint } from "./config";
 import type { AIClientOptions, LLMOptions } from "./types";
 import { getRootSetting } from "../settings";
 
@@ -12,18 +12,8 @@ function positiveInteger(value: number | string | undefined, fallback: number, n
 }
 
 /** Resolve per call so environment updates never become sticky client defaults. */
-export function resolveConcurrency(role: ModelRole, value?: number): number {
-  return positiveInteger(value ?? (role === "chat"
-    ? getRootSetting("OPENAI_CHAT_CONCURRENCY") : getRootSetting("EMBEDDING_CONCURRENCY")),
-  role === "chat" ? 4 : 1, `${role} concurrency`);
-}
-
-export function resolveEmbeddingBatchSize(value?: number): number {
-  return positiveInteger(value ?? getRootSetting("EMBEDDING_BATCH_SIZE"), 64, "Embedding batch size");
-}
-
-export function resolveEmbeddingBatchChars(value?: number): number {
-  return positiveInteger(value ?? getRootSetting("EMBEDDING_BATCH_MAX_CHARS"), 16_384, "Embedding batch character budget");
+export function resolveConcurrency(_role: ModelRole, value?: number): number {
+  return positiveInteger(value ?? getRootSetting("OPENAI_CHAT_CONCURRENCY"), 4, "chat concurrency");
 }
 
 export function resolveChatBatchWidth(options?: LLMOptions): number {
@@ -32,23 +22,21 @@ export function resolveChatBatchWidth(options?: LLMOptions): number {
     : resolveConcurrency("chat", options?.concurrency);
 }
 
-export function resolveBatchMode(role: ModelRole, options?: AIClientOptions): "concurrent" | "api" {
-  const mode = options?.batchMode ?? (role === "chat"
-    ? getRootSetting("OPENAI_CHAT_BATCH_MODE") : getRootSetting("EMBEDDING_BATCH_MODE")) ?? "concurrent";
-  if (mode !== "concurrent" && mode !== "api") throw new Error(`${role} batch mode must be concurrent or api`);
+export function resolveBatchMode(_role: ModelRole, options?: AIClientOptions): "concurrent" | "api" {
+  const mode = options?.batchMode ?? getRootSetting("OPENAI_CHAT_BATCH_MODE") ?? "concurrent";
+  if (mode !== "concurrent" && mode !== "api") throw new Error(`chat batch mode must be concurrent or api`);
   return mode;
 }
 
 export function resolveBatchEndpoint(role: ModelRole, options?: AIClientOptions): string {
   const hasConnection = options?.baseUrl !== undefined || options?.endpoint !== undefined || options?.client !== undefined;
-  const configured = options?.batchEndpoint ?? (!hasConnection ? (role === "chat"
-    ? getRootSetting("OPENAI_CHAT_BATCH_ENDPOINT") : getRootSetting("EMBEDDING_BATCH_ENDPOINT")) : undefined);
-  const url = new URL(configured ?? (role === "chat" ? resolveChatEndpoint(options) : resolveEmbeddingEndpoint(options)));
-  if (!configured) url.pathname = url.pathname.replace(/\/(chat\/completions|embeddings)\/?$/, "/batches");
+  const configured = options?.batchEndpoint ?? (!hasConnection ? getRootSetting("OPENAI_CHAT_BATCH_ENDPOINT") : undefined);
+  const url = new URL(configured ?? resolveChatEndpoint(options));
+  if (!configured) url.pathname = url.pathname.replace(/\/chat\/completions\/?$/, "/batches");
   const path = url.pathname.replace(/\/$/, "");
   if (!["http:", "https:"].includes(url.protocol) ||
-      !(path.endsWith("/batches") || (role === "chat" && path.endsWith("/chat/completions/batch"))))
-    throw new Error("Batch endpoints must be HTTP(S) URLs ending in /batches or, for chat, /chat/completions/batch");
+      !(path.endsWith("/batches") || path.endsWith("/chat/completions/batch")))
+    throw new Error("Chat batch endpoints must be HTTP(S) URLs ending in /batches or /chat/completions/batch");
   url.pathname = url.pathname.replace(/\/$/, "");
   return url.toString();
 }

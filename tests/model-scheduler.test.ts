@@ -12,32 +12,13 @@ function deferred() {
 const endpoint = "http://localhost:11434/v1";
 
 describe("Shared GPU scheduling", () => {
-  it("rejects chat continuations that wake up after embedding has begun", async () => {
-    const coordinator = new ModelCoordinator();
-    const wake = deferred();
-    let late!: Promise<void>;
-    let called = false;
-    await coordinator.batch("local-gpu", async () => {
-      late = (async () => {
-        await wake.promise;
-        await expect(coordinator.request("chat", endpoint, async () => {
-          called = true;
-        })).rejects.toThrow("phase completed");
-      })();
-    }, async () => {
-      wake.resolve();
-      await late;
-    });
-    expect(called).toBe(false);
-  });
-
-  it("drains timed-out message requests before starting the embedding phase", async () => {
+  it("drains timed-out message requests before finalizing a chat batch", async () => {
     const coordinator = new ModelCoordinator();
     const bus = new MessageBus();
     const network = deferred();
     const timedOut = deferred();
     const calls: string[] = [];
-    bus.handle("slow-vision", () => coordinator.request("chat", endpoint, async () => {
+    bus.handle("slow-vision", () => coordinator.request( endpoint, async () => {
       calls.push("chat started");
       await network.promise;
       calls.push("chat finished");
@@ -45,28 +26,25 @@ describe("Shared GPU scheduling", () => {
     const batch = coordinator.batch("local-gpu", async () => {
       await expect(bus.request("slow-vision", {}, { timeoutMs: 5 })).rejects.toThrow("timed out");
       timedOut.resolve();
-    }, () => coordinator.request("embedding", endpoint, async () => {
-      calls.push("embedding started");
+    }, () => coordinator.request( endpoint, async () => {
+      calls.push("finalize started");
     }));
     await timedOut.promise;
     await Promise.resolve();
     expect(calls).toEqual(["chat started"]);
     network.resolve();
     await batch;
-    expect(calls).toEqual(["chat started", "chat finished", "embedding started"]);
+    expect(calls).toEqual(["chat started", "chat finished", "finalize started"]);
   });
 
-  it("rejects unreserved local overrides inside a cloud-only batch", async () => {
+  it("schedules a local override inside a cloud-only batch", async () => {
     const coordinator = new ModelCoordinator();
-    await expect(
-      coordinator.batch(
-        null,
-        () => coordinator.request("chat", endpoint, async () => 1),
-        async () => 2,
-      ),
-    ).rejects.toThrow("batch profiles");
+    const result = await coordinator.batch(null,
+      () => coordinator.request( endpoint, async () => 1),
+      async prepared => prepared + 1);
+    expect(result).toBe(2);
   });
-  it("holds a batch across both phases while unrelated embedding requests wait", async () => {
+  it("holds a chat batch reservation through finalization while unrelated local requests wait", async () => {
     const coordinator = new ModelCoordinator();
     const started = deferred();
     const proceed = deferred();
@@ -74,36 +52,34 @@ describe("Shared GPU scheduling", () => {
     const batch = coordinator.batch(
       "local-gpu",
       async () => {
-        await coordinator.request("chat", endpoint, async () => {
+        await coordinator.request( endpoint, async () => {
           calls.push("chat 1");
         });
         started.resolve();
         await proceed.promise;
-        await coordinator.request("chat", endpoint, async () => {
-          calls.push("chat 2");
-        });
+        await coordinator.request( endpoint, async () => { calls.push("chat 2"); });
       },
       async () =>
-        coordinator.request("embedding", endpoint, async () => {
-          calls.push("batch embedding");
+        coordinator.request( endpoint, async () => {
+          calls.push("batch finalize");
         }),
     );
     await started.promise;
-    const search = coordinator.request("embedding", endpoint, async () => {
-      calls.push("search embedding");
+    const nextLocal = coordinator.request( endpoint, async () => {
+      calls.push("next local request");
     });
-    await coordinator.request("chat", "https://cloud.invalid/v1", async () => {
+    await coordinator.request( "https://cloud.invalid/v1", async () => {
       calls.push("remote chat");
     });
     expect(calls).toEqual(["chat 1", "remote chat"]);
     proceed.resolve();
-    await Promise.all([batch, search]);
+    await Promise.all([batch, nextLocal]);
     expect(calls).toEqual([
       "chat 1",
       "remote chat",
       "chat 2",
-      "batch embedding",
-      "search embedding",
+      "batch finalize",
+      "next local request",
     ]);
   });
 
@@ -111,40 +87,14 @@ describe("Shared GPU scheduling", () => {
     const coordinator = new ModelCoordinator();
     const bus = new MessageBus();
     bus.handle("describe", () =>
-      coordinator.phase("chat", () =>
-        coordinator.request("chat", endpoint, async () => "description"),
-      ),
+      coordinator.request( endpoint, async () => "description"),
     );
     const result = await coordinator.batch(
       "local-gpu",
       () => bus.request<string>("describe", {}),
-      (description) =>
-        coordinator.request(
-          "embedding",
-          endpoint,
-          async () => `${description} embedded`,
-        ),
+      (description) => coordinator.request( endpoint, async () => `${description} finalized`),
     );
-    expect(result).toBe("description embedded");
-  });
-
-  it("rejects phase violations and releases the reservation after failure", async () => {
-    const coordinator = new ModelCoordinator();
-    await expect(
-      coordinator.batch(
-        "local-gpu",
-        () => coordinator.request("embedding", endpoint, async () => 1),
-        async () => 2,
-      ),
-    ).rejects.toThrow("chat phase");
-    expect(await coordinator.request("chat", endpoint, async () => 3)).toBe(3);
-    await expect(
-      coordinator.batch(
-        "local-gpu",
-        async () => 1,
-        () => coordinator.request("chat", endpoint, async () => 2),
-      ),
-    ).rejects.toThrow("embedding phase");
+    expect(result).toBe("description finalized");
   });
 
   it("keeps reservations until a detached in-flight request finishes", async () => {
@@ -154,7 +104,7 @@ describe("Shared GPU scheduling", () => {
     let request!: Promise<void>;
     const calls: string[] = [];
     const batch = coordinator.exclusive("local-gpu", async () => {
-      request = coordinator.request("chat", endpoint, async () => {
+      request = coordinator.request( endpoint, async () => {
         started.resolve();
         await network.promise;
         calls.push("request finished");
@@ -162,7 +112,7 @@ describe("Shared GPU scheduling", () => {
       await started.promise;
     });
     await started.promise;
-    const queued = coordinator.request("embedding", endpoint, async () => {
+    const queued = coordinator.request( endpoint, async () => {
       calls.push("next request");
     });
     await Promise.resolve();

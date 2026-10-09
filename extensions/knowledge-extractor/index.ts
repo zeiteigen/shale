@@ -32,7 +32,7 @@ export async function run(sdkOverride?: ShaleSDK) {
       LEFT JOIN extension_state rejected ON rejected.extension_id=? AND rejected.state_key='extraction-rejected:'||r.id
       WHERE NOT EXISTS(SELECT 1 FROM extension_state p WHERE p.extension_id=? AND p.state_key='extracted:'||r.id)
       ORDER BY coalesce(cursor.updated_at,rejected.updated_at,0),s.updated_at,s.id LIMIT ?`).all(sdk.extensionId,sdk.extensionId,sdk.extensionId,maxSources);
-    // Phase 1: complete every chat request and persist outputs. No embeddings are requested.
+    // Complete every chat request and persist outputs before graph commit.
     let rejected = 0;
     await sdk.models.mapChat(sources, async (source) => {
       renew();
@@ -53,7 +53,7 @@ export async function run(sdkOverride?: ShaleSDK) {
       renew();
       sdk.saveCheckpoint(data,{id,key:id});
     });
-    // Phase 2: graph ingestion and progress are transactional; existing chunk embeddings are reused.
+    // Graph ingestion and progress are transactional.
     renew();
     const committed = commitExtractions(sdk);
     sdk.logger.log(`Knowledge extraction: ${committed} windows committed, ${rejected} rejected windows retained.`);

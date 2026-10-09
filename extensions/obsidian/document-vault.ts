@@ -32,16 +32,10 @@ export async function prepareVaultDocuments(
   return { documents, failed };
 }
 
-/** Only embeddings and transactional writes run here, including during recovery. */
+/** Commit a prepared document and its graph evidence. */
 export async function finalizeDocument(
   document: ParsedDocument, vault: VaultContext, sdk: ShaleSDK, namespace: string,
   checkpointId = documentCheckpointId(document.filePath),
 ) {
-  const texts = document.contextualChunks.map(chunk => chunk.text_content);
-  const embeddings: number[][] = [];
-  // Keep document-sized workloads bounded without issuing chat calls in Phase 2.
-  for (let start = 0; start < texts.length; start += 64) {
-    embeddings.push(...await sdk.embed(texts.slice(start, start + 64)));
-  }
-  return commitDocument(sdk, document, embeddings, vault, namespace, checkpointId);
+  return commitDocument(sdk, document, vault, namespace, checkpointId);
 }

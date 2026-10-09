@@ -25,7 +25,7 @@ it("propagates a file message timeout to the in-flight vision transport", async 
     await setup(sdk);
     await expect(sdk.messages.request("file:process", {
       filePath: "https://example.com/chart.png",
-      options: { deferEmbedding: true },
+      options: {},
     }, { timeoutMs: 30 })).rejects.toThrow("timed out");
     expect(transportStarted).toBe(true);
     expect(aborted).toBe(true);

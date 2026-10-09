@@ -26,15 +26,6 @@ export interface Chunk {
   text_content: string;
 }
 
-export interface ChunkWithEmbedding {
-  id?: number;
-  source_id: string;
-  chunk_index: number;
-  chunk_type?: ChunkType;
-  text_content: string;
-  embedding: number[]; // Float32Array also acceptable, but usually passed as number[] from JS
-}
-
 export interface Entity {
   id?: number;
   namespace?: string;
@@ -72,7 +63,6 @@ export interface IngestSourceAndChunksOptions {
     chunk_index?: number;
     chunk_type?: ChunkType;
     text_content: string;
-    embedding: number[] | Float32Array;
   }[];
 }
 
@@ -110,8 +100,8 @@ export function addSource(source: Source) {
   return true;
 }
 
-// 2. Chunks and Embeddings
-export function addChunksWithEmbeddings(chunks: ChunkWithEmbedding[]) {
+// 2. Chunks
+export function addChunks(chunks: Chunk[]) {
   const insertChunk = db.query<
     { id: number },
     { $source_id: string; $chunk_index: number; $chunk_type: string; $text_content: string }
@@ -120,12 +110,8 @@ export function addChunksWithEmbeddings(chunks: ChunkWithEmbedding[]) {
     VALUES ($source_id, $chunk_index, $chunk_type, $text_content)
     RETURNING id
   `);
-  const insertVector = db.query(`
-    INSERT INTO vector_index (rowid, embedding) 
-    VALUES ($rowid, $embedding)
-  `);
 
-  const txn = db.transaction((items: ChunkWithEmbedding[]) => {
+  const txn = db.transaction((items: Chunk[]) => {
     for (const chunk of items) {
       const uri = db.query<{ uri: string }, [string]>("SELECT uri FROM sources WHERE id=?").get(chunk.source_id)?.uri;
       if (excludedSourceId(db, chunk.source_id, uri ?? "")) continue;
@@ -137,18 +123,13 @@ export function addChunksWithEmbeddings(chunks: ChunkWithEmbedding[]) {
       });
 
       if (!res) continue;
-
-      insertVector.run({
-        $rowid: res.id,
-        $embedding: new Uint8Array(new Float32Array(chunk.embedding).buffer),
-      });
     }
   });
 
   txn(chunks);
 }
 
-// 3. Unified Atomic Ingestion (Source + Chunks + Vectors)
+// 3. Unified Atomic Ingestion (Source + Chunks)
 export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
   sourceId: string;
   chunkIds: number[];
@@ -170,11 +151,6 @@ export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
     INSERT INTO chunks (source_id, chunk_index, chunk_type, text_content) 
     VALUES ($source_id, $chunk_index, $chunk_type, $text_content)
     RETURNING id
-  `);
-
-  const insertVector = db.query(`
-    INSERT INTO vector_index (rowid, embedding) 
-    VALUES ($rowid, $embedding)
   `);
 
   const txn = db.transaction(() => {
@@ -209,16 +185,6 @@ export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
       }
 
       chunkIds.push(res.id);
-
-      const embeddingBuffer =
-        chunk.embedding instanceof Float32Array
-          ? new Uint8Array(chunk.embedding.buffer)
-          : new Uint8Array(new Float32Array(chunk.embedding).buffer);
-
-      insertVector.run({
-        $rowid: res.id,
-        $embedding: embeddingBuffer,
-      });
     }
 
     return {
@@ -531,34 +497,6 @@ export function linkChunksToEntities(links: ChunkEntityLink[]) {
   });
 
   txn(links);
-}
-
-// 8. Vector Search
-export function searchSimilarChunks(
-  queryEmbedding: number[],
-  limit: number = 10,
-) {
-  const stmt = db.query(`
-    SELECT 
-      c.id, 
-      c.source_id, 
-      c.chunk_index,
-      c.text_content, 
-      v.distance,
-      (1.0 - vec_distance_cosine(v.embedding, $query)) AS cosine_similarity,
-      s.title AS source_title,
-      s.uri AS source_uri
-    FROM vector_index v
-    JOIN chunks c ON c.id = v.rowid
-    LEFT JOIN sources s ON c.source_id = s.id
-    WHERE v.embedding MATCH $query AND k = $limit
-    ORDER BY v.distance
-  `);
-
-  return stmt.all({
-    $query: new Uint8Array(new Float32Array(queryEmbedding).buffer),
-    $limit: limit,
-  });
 }
 
 // 9. BM25 Search

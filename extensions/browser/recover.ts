@@ -16,7 +16,7 @@ export interface RecoverResult {
 
 /**
  * Crash recovery runner invoked when queued checkpoints exist.
- * Embeds uncommitted summaries and commits sources, chunks, and graph edges without re-querying LLM.
+ * Commits prepared page summaries and graph evidence without re-querying the LLM.
  */
 async function recoverOwned(
   sdk: ShaleSDK,
@@ -66,7 +66,7 @@ async function recoverOwned(
           throw new Error("Malformed browser page checkpoint");
         }
 
-        // Finalization is deliberately LLM-free. Reusing the normal Phase 2
+        // Finalization is deliberately LLM-free. Reusing the normal commit
         // path preserves HTML-derived chunks, links, images, and session edges.
         const prepared: PreparedPageData = {
           jobId: data.jobId,

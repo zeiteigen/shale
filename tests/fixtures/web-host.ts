@@ -9,9 +9,10 @@ import type { WebContext } from "../../main/web-api";
 export function createWebHost(overrides: Partial<WebContext> = {}) {
   const rootDir = mkdtempSync(join(tmpdir(), "shale-web-"));
   mkdirSync(join(rootDir, "extensions", "demo"), { recursive: true });
+  mkdirSync(join(rootDir, "data"));
   writeFileSync(join(rootDir, "package.json"), '{"name":"web-test"}');
-  writeFileSync(join(rootDir, "settings.json"), '{"PORT":7425}');
-  writeFileSync(join(rootDir, "settings.help.json"), JSON.stringify({ extension: "root", settings: {
+  writeFileSync(join(rootDir, "data/settings.json"), '{"PORT":7425}');
+  writeFileSync(join(rootDir, "data/settings.help.json"), JSON.stringify({ extension: "root", settings: {
     PORT: { type: "number", description: "Host port", default: 7425, integer: true, range: { min: 1, max: 65535 } },
   } }));
   writeFileSync(join(rootDir, "extensions/demo/manifest.json"), '{"name":"demo","description":"Demo settings"}');

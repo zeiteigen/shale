@@ -56,7 +56,7 @@ export async function parseImageFile(
     // time and would abort a valid model request before its configured timeout.
     const response = await sdk.messages.request("file:process", {
       filePath: rawPath, fileType: "image",
-      options: { timeoutMs: options?.timeoutMs, deferEmbedding: true },
+      options: { timeoutMs: options?.timeoutMs },
     }, { timeoutMs: 0, signal: options?.signal });
     return parsedImageResponse(response, rawPath);
   }
@@ -86,9 +86,9 @@ export async function parseImageFile(
 }
 
 /**
- * Parses a batch of image files adhering to Phase 1 of the two-phase system (Zero embeddings).
+ * Parses a batch of image files.
  * Uses the cross-extension message bus "files:process" or "file:process" bulk channels
- * with deferEmbedding: true. Standalone execution is used when no handler exists.
+ * Standalone execution is used when no handler exists.
  */
 export async function parseImageFilesBatch(
   filePaths: string[],
@@ -107,7 +107,7 @@ export async function parseImageFilesBatch(
   if (bulkChannel) {
     const response = await sdk.messages.request<{ results?: ProcessFileResponse[] } & Partial<ProcessFileResponse>, any>(bulkChannel, {
       filePaths: rawPaths, fileType: "image",
-      options: { timeoutMs: options?.timeoutMs, deferEmbedding: true },
+      options: { timeoutMs: options?.timeoutMs },
     }, { timeoutMs: 0, signal: options?.signal });
     const results = response.results ?? (rawPaths.length === 1 ? [response as ProcessFileResponse] : []);
     const byPath = new Map(results.map(result => [result.filePath.replace(/^file:\/\//, ""), result]));

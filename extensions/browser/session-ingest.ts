@@ -1,12 +1,10 @@
 import { fingerprint } from "./inbox-store";
 import { isSourceExcluded } from "../../lib/knowledge/exclusions";
-import { embedBounded } from "./embed-bounded";
 import { ensureBrowserSchema } from "./storage-schema";
 import { commitContextGraph } from "./context-graph";
 import {
   commitActivityGraph,
   visitSource,
-  visitObservation,
 } from "./activity-graph";
 import type { ShaleSDK } from "@shale/sdk";
 import type {
@@ -21,8 +19,7 @@ import { commitSessionGraph, sessionObservationText } from "./session-graph";
 import { sessionChunks } from "./session-chunks";
 
 /**
- * Phase 1: Synthesizes browsing session with Chat model and saves checkpoint.
- * Zero embedding calls happen in this phase.
+ * Synthesize a browsing session with the chat model and save a checkpoint.
  */
 export async function prepareSession(
   sdk: ShaleSDK,
@@ -41,7 +38,7 @@ export async function prepareSession(
   const checkpointId = `browser_session:${sessionId}`;
 
   sdk.logger.info(
-    `[browser] [Phase 1: Chat Model] Synthesizing session ${sessionId} (${visits.length} pages)...`,
+    `[browser] Synthesizing session ${sessionId} (${visits.length} pages)...`,
   );
   const synthesis = await synthesizeSessionWithLLM(sdk, visits, settings);
 
@@ -78,8 +75,7 @@ export async function prepareSession(
 }
 
 /**
- * Phase 2: Embeds session narrative with Embedding model and commits to graph.
- * Zero chat model calls happen in this phase.
+ * Commit a prepared session narrative and its graph evidence.
  */
 export async function finalizeSession(
   sdk: ShaleSDK,
@@ -117,7 +113,7 @@ export async function finalizeSession(
   });
 
   sdk.logger.info(
-    `[browser] [Phase 2: Embedding Model] Embedding and ingesting session "${synthesis.sessionTitle}"...`,
+    `[browser] Ingesting session "${synthesis.sessionTitle}"...`,
   );
 
   const sessionText = [
@@ -144,15 +140,6 @@ export async function finalizeSession(
           !isSourceExcluded(sdk.database, visitSource(v).id, visitSource(v).uri),
       )
     : [];
-  const embeddings = await embedBounded(
-    sdk,
-    [
-      ...chunks.map(chunk => chunk.text_content),
-      ...unseen.map((v) => visitObservation(sdk, v)),
-    ],
-    settings,
-    assertOwned,
-  );
   assertOwned();
   const { sourceRes, edgesCount } = sdk.database.transaction(() => {
     if (prepared.collectorId) {
@@ -182,7 +169,7 @@ export async function finalizeSession(
         created_at: startTime,
         updated_at: endTime,
       },
-      chunks: chunks.map((chunk, index) => ({ ...chunk, embedding: embeddings[index] })),
+      chunks,
     });
     if (sourceRes.skipped) {
       sdk.checkpoint.delete(checkpointId);
@@ -197,7 +184,7 @@ export async function finalizeSession(
     );
     if (prepared.collectorId) {
       for (const [index, visit] of unseen.entries())
-        commitActivityGraph(sdk, visit, prepared, embeddings[index + chunks.length]!);
+        commitActivityGraph(sdk, visit, prepared);
       // Late observations can change a session's first event and therefore its identity.
       // Replace overlapping derived sessions; immutable event sources remain untouched.
       const eventIds = visits.map((v) => v.eventId).filter(Boolean);

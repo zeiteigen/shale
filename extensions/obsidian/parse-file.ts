@@ -71,7 +71,7 @@ export function calculateDynamicTargetTokens(
 
 /**
  * Expands note content using the Chat model to enrich conceptual context,
- * background information, and domain terminology for semantic search.
+ * background information, and domain terminology for later knowledge analysis.
  */
 export async function expandNoteWithChatModel(
   sdk: ShaleSDK,
@@ -228,7 +228,7 @@ export function buildContextualChunks(
  * performs dynamic chunking, optionally expands atomic notes via Chat model,
  * and contextualizes chunks with metadata.
  *
- * NOTE: Embedding is strictly moved outside this function to support local embedding workloads.
+ * Parsing returns text chunks and never persists them itself.
  */
 export async function parseFile(
   filePath: string,

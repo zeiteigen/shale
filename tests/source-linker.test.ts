@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import * as sqliteVec from "sqlite-vec";
 import { join } from "node:path";
 import { isTExtensionManifest, type ExtensionManifest } from "../lib/extension";
 import {
@@ -8,9 +7,7 @@ import {
   type ShaleSDK,
   type Source,
 } from "../sdk";
-import {
-  findKnnCandidatePairs,
-} from "../extensions/source-linker/knn-finder";
+import { findCandidatePairs } from "../extensions/source-linker/candidate-finder";
 import {
   parseLLMResponse,
   buildAnalysisPrompt,
@@ -28,7 +25,6 @@ function createTestDb(): Database {
   const db = new Database(":memory:");
   db.run("PRAGMA journal_mode = WAL;");
   db.run("PRAGMA foreign_keys = ON;");
-  sqliteVec.load(db);
 
   // Sources
   db.run(`
@@ -56,13 +52,6 @@ function createTestDb(): Database {
     ) STRICT;
   `);
 
-  // Vector virtual table (4 dimensions for lightweight testing)
-  db.run(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS vector_index USING vec0(
-      embedding float[4]
-    );
-  `);
-
   // FTS5
   db.run(`
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -72,6 +61,17 @@ function createTestDb(): Database {
       tokenize='porter'
     );
   `);
+
+  db.run(`CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(rowid, text_content) VALUES (new.id, new.text_content);
+  END`);
+  db.run(`CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text_content) VALUES ('delete', old.id, old.text_content);
+  END`);
+  db.run(`CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text_content) VALUES ('delete', old.id, old.text_content);
+    INSERT INTO chunks_fts(rowid, text_content) VALUES (new.id, new.text_content);
+  END`);
 
   // Extension state
   db.run(`
@@ -128,7 +128,6 @@ function insertSourceWithChunk(
   db: Database,
   source: Source,
   chunkText: string,
-  embedding: number[],
   chunkId: number,
 ) {
   db.run(
@@ -152,11 +151,6 @@ function insertSourceWithChunk(
     [chunkId, source.id, 0, chunkText],
   );
 
-  const buf = new Uint8Array(new Float32Array(embedding).buffer);
-  db.run(`INSERT INTO vector_index (rowid, embedding) VALUES (?, ?);`, [
-    chunkId,
-    buf,
-  ]);
 }
 
 describe("Source Linker Extension", () => {
@@ -187,8 +181,7 @@ describe("Source Linker Extension", () => {
       const help = await Bun.file(helpPath).json();
 
       expect(help.extension).toBe("source-linker");
-      expect(help.settings.knnK).toBeDefined();
-      expect(help.settings.minKnnSimilarity).toBeDefined();
+      expect(help.settings.candidatesPerChunk).toBeDefined();
       expect(help.settings.maxPairsPerRun).toBeDefined();
 
       for (const [key, value] of Object.entries(settings)) {
@@ -197,24 +190,17 @@ describe("Source Linker Extension", () => {
     });
   });
 
-  describe("2. KNN Candidate Pair Discovery", () => {
+  describe("2. Text Candidate Pair Discovery", () => {
     let db: Database;
     let sdk: ShaleSDK;
 
     beforeEach(() => {
       db = createTestDb();
-      sdk = createExtensionSDK(
-        "source-linker",
-        "source-linker",
-        db,
-        undefined,
-        undefined,
-        undefined,
-        join(import.meta.dir, "../extensions/source-linker"),
-      );
+      sdk = createExtensionSDK("source-linker", { namespace: "source-linker", database: db,
+        extensionDir: join(import.meta.dir, "../extensions/source-linker") });
     });
 
-    it("discovers similar sources via KNN and ignores dissimilar sources", async () => {
+    it("discovers textually related sources and ignores unrelated sources", async () => {
       const source1: Source = {
         id: "src-quantum-1",
         type: "markdown_note",
@@ -248,35 +234,27 @@ describe("Source Linker Extension", () => {
         hash: "h3",
       };
 
-      // Vector 1 and Vector 2 are very close (cosine similarity ~ 0.99)
-      // Vector 3 is orthogonal
       insertSourceWithChunk(
         db,
         source1,
         "Quantum superposition allows qubits to exist in multiple states.",
-        [1.0, 0.0, 0.0, 0.0],
         1,
       );
       insertSourceWithChunk(
         db,
         source2,
-        "Entangled qubits display correlations across distance.",
-        [0.98, 0.1, 0.0, 0.0],
+        "Quantum superposition and entangled qubits display correlations across distance.",
         2,
       );
       insertSourceWithChunk(
         db,
         source3,
         "Flour, water, yeast, and salt fermented over 24 hours.",
-        [0.0, 0.0, 1.0, 0.0],
         3,
       );
 
       const targetSources = [source1, source2, source3];
-      const candidates = await findKnnCandidatePairs(targetSources, sdk, {
-        minKnnSimilarity: 0.7,
-        knnK: 5,
-      });
+      const candidates = await findCandidatePairs(targetSources, sdk, { candidatesPerChunk: 5, maxPairsPerRun: 10 });
 
       expect(candidates.length).toBe(1);
       const pair = candidates[0];
@@ -284,7 +262,7 @@ describe("Source Linker Extension", () => {
         (pair.sourceA.id === source1.id && pair.sourceB.id === source2.id) ||
           (pair.sourceA.id === source2.id && pair.sourceB.id === source1.id),
       ).toBe(true);
-      expect(pair.knnSimilarity).toBeGreaterThan(0.9);
+      expect(pair.textScore).toBeGreaterThan(0);
     });
   });
 
@@ -358,7 +336,7 @@ describe("Source Linker Extension", () => {
           uri: "u2",
           hash: "h2",
         },
-        knnSimilarity: 0.88,
+        textScore: 0.88,
         matchedChunkIds: [1, 2],
       };
 
@@ -404,15 +382,8 @@ describe("Source Linker Extension", () => {
 
     beforeEach(() => {
       db = createTestDb();
-      sdk = createExtensionSDK(
-        "source-linker",
-        "source-linker",
-        db,
-        undefined,
-        undefined,
-        undefined,
-        join(import.meta.dir, "../extensions/source-linker"),
-      );
+      sdk = createExtensionSDK("source-linker", { namespace: "source-linker", database: db,
+        extensionDir: join(import.meta.dir, "../extensions/source-linker") });
     });
 
     it("creates canonical mention and alias coreference graph connections", () => {
@@ -424,7 +395,7 @@ describe("Source Linker Extension", () => {
         relation: "RELATES_TO",
         reason: "The notes cover the profiled organization.",
         weight: 0.9,
-        knnSimilarity: 0.86,
+        textScore: 0.86,
         entityResolutions: [{
           canonicalName: "OpenAI",
           entityType: "Organization",
@@ -480,14 +451,12 @@ describe("Source Linker Extension", () => {
         db,
         source1,
         "Gradient descent optimizes loss functions by iteratively following negative gradients.",
-        [0.9, 0.1, 0.0, 0.0],
         10,
       );
       insertSourceWithChunk(
         db,
         source2,
         "Adam combines momentum and adaptive learning rates with gradient descent.",
-        [0.88, 0.12, 0.0, 0.0],
         20,
       );
 
@@ -541,7 +510,7 @@ describe("Source Linker Extension", () => {
       expect(meta.reason).toBe(
         "Adam optimizer is an adaptive extension of standard gradient descent.",
       );
-      expect(meta.knnSimilarity).toBeGreaterThan(0.9);
+      expect(meta.textScore).toBeGreaterThan(0);
 
       // Verify watermark was persisted in extension_state
       const savedWatermark = sdk.state.getWatermark(WATERMARK_KEY);
@@ -564,7 +533,7 @@ describe("Source Linker Extension", () => {
         title: "Alpha",
         hash: "h1",
       };
-      insertSourceWithChunk(db, source1, "Alpha content", [1, 0, 0, 0], 1);
+      insertSourceWithChunk(db, source1, "Alpha content", 1);
 
       // Set existing watermark ahead of source1
       sdk.state.setWatermark("500", WATERMARK_KEY);
@@ -588,15 +557,8 @@ describe("Source Linker Extension", () => {
 
     beforeEach(() => {
       db = createTestDb();
-      sdk = createExtensionSDK(
-        "source-linker",
-        "source-linker",
-        db,
-        undefined,
-        undefined,
-        undefined,
-        join(import.meta.dir, "../extensions/source-linker"),
-      );
+      sdk = createExtensionSDK("source-linker", { namespace: "source-linker", database: db,
+        extensionDir: join(import.meta.dir, "../extensions/source-linker") });
     });
 
     it("recovers uncommitted LLM link decisions via recover.ts", async () => {
@@ -611,7 +573,7 @@ describe("Source Linker Extension", () => {
             reason: "System architecture specifies database design constraints.",
             weight: 0.91,
           },
-          knnSimilarity: 0.85,
+          textScore: 0.85,
           updatedAt: 5000,
         },
         {

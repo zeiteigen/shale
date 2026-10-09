@@ -60,7 +60,7 @@ export function registerKnowledgeGraphPrompts(mcp: McpServer) {
             text: `Please check the following statement against the knowledge graph:
 "${statement}"
 
-1. Use search_graph with hybrid mode to locate relevant source chunks, passages, and graph neighborhoods.
+1. Use search_graph with BM25 mode to locate relevant source chunks, passages, and graph neighborhoods.
 2. Cross-reference the identified entities and claims with traverse_graph.
 3. Check if there are existing accepted claims that support or contradict this statement.
 4. Conclude whether the statement is supported, contradicted, or unknown based on the knowledge graph.`,

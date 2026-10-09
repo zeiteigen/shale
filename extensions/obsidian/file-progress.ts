@@ -10,7 +10,7 @@ export function recordCommittedFile(sdk: ShaleSDK, namespace: string, uri: strin
   sdk.state.set(key(namespace, uri), String(updatedAt));
 }
 
-/** Retrying one failed attachment must not repeat chat and embedding for completed files. */
+/** Retrying one failed attachment must not repeat chat work for completed files. */
 export function unfinishedFiles(paths: string[], sdk: ShaleSDK, namespace: string, force: boolean): string[] {
   if (force) return paths;
   return paths.filter(path => {

@@ -1,6 +1,6 @@
 # Image processor
 
-The `file:process` and `files:process` handlers perform all vision work before any embedding requests. Set `options.deferEmbedding` to true when preparing a larger connector batch.
+The `file:process` and `files:process` handlers perform vision analysis and return contextual text chunks for the caller to store.
 
 Responses include URI-based `identityKey` values, local asset fingerprints, and portable `knowledge` claims with predicates, chunk indexes, proposal status, method, and model when available. `VISUAL_LAYOUT` and `VISUAL_MEANING` are interpretations; both description chunks are synthetic. Disabling `describeImages` produces placeholders with the `fallback` method. When descriptions are enabled, failed or empty vision responses return failed items so connectors can retry instead of indexing an unavailable description as successful. Context edges default to the directed `CONTAINED_IN` relationship.
 

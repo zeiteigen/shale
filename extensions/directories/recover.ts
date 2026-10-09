@@ -7,7 +7,7 @@ import type { DirectoryResult, PendingDirectoryFile, PreparedDirectoryFile } fro
 export async function run(sdkOverride?: ShaleSDK, contextOverride?: CheckpointContext<PreparedDirectoryFile>) {
   const sdk = sdkOverride ?? getSDK(import.meta.dir);
   const context = contextOverride ?? sdk.getCheckpointContext<PreparedDirectoryFile>();
-  return withDirectoryRun(sdk, () => sdk.models.phase("embedding", async () => {
+  return withDirectoryRun(sdk, async () => {
     const result: DirectoryResult = { directory: "recovery", filesProcessed: 0, filesSkipped: 0, chunksCreated: 0, errors: [] };
     const pending: PendingDirectoryFile[] = [];
     for (const checkpoint of context.checkpoints) {
@@ -30,7 +30,7 @@ export async function run(sdkOverride?: ShaleSDK, contextOverride?: CheckpointCo
     await finalizeFiles(sdk, pending);
     if (result.errors.length) throw new Error(`Directory recovery failed for ${result.errors.length} file(s)`);
     return { recoveredFiles: result.filesProcessed, discardedFiles: result.filesSkipped };
-  }));
+  });
 }
 
 if (import.meta.main) {

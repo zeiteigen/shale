@@ -23,13 +23,13 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
 
   mcp.tool(
     "search_graph",
-    "Searches the knowledge graph and source text chunks using hybrid/vector/BM25 retrieval, returning matching chunks expanded with their graph neighborhoods and evidence.",
+    "Searches the knowledge graph and source text chunks using BM25 retrieval, returning matching chunks expanded with their graph neighborhoods and evidence.",
     {
       query: z.string().describe("Search query text or keywords"),
       mode: z
-        .enum(["hybrid", "vector", "bm25"])
-        .default("hybrid")
-        .describe("Retrieval mode: hybrid combines BM25 and vector embeddings"),
+        .enum(["bm25"])
+        .default("bm25")
+        .describe("Full-text retrieval mode"),
       limit: z.number().int().min(1).max(100).default(10).describe("Maximum chunks to return"),
       maxSeeds: z
         .number()

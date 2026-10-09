@@ -37,69 +37,18 @@ Safely ingests entities and relationships with namespacing, preventing term coll
 
 ### 4. Unified Source & Chunk Ingestion (`sdk.ingest`)
 
-Atomically commits a source document, its chunked text, and vector embeddings in a single SQLite transaction.
+Atomically commits a source document, its chunked text, in a single SQLite transaction.
 
 - `sdk.ingest.sourceAndChunks(input: IngestSourceAndChunksInput): IngestSourceAndChunksResult`
-  - Atomically writes to `sources`, `chunks`, `vector_index` (vec0), and automatically updates `chunks_fts` (FTS5).
+  - Atomically writes to `sources`, `chunks`, and automatically updates `chunks_fts` (FTS5).
 
-### 5. Vector Embeddings (`sdk.embed` / `embed`)
+### 5. Model requests
 
-Generates vector embeddings using any OpenAI-compatible endpoint (OpenAI, Ollama, vLLM, LMStudio, etc.).
-
-- `sdk.embed(text: string, options?: EmbedderOptions): Promise<number[]>`
-- `sdk.embed(texts: string[], options?: EmbedderOptions): Promise<number[][]>`
-- `embed(text | texts, options?: EmbedderOptions): Promise<number[] | number[][]>` (standalone function)
-
-See [Model configuration and batches](MODELS.md) for independent chat/embedding profiles, GPU scheduling, and index migration.
-
-Non-secret configuration belongs in root `settings.json` and is read fresh on every request. Use the local web interface’s **Settings → Shale host** page, `bun run settings list root`, `bun run settings set root <key> <value>`, or `bun run settings tui root`. API keys remain in `.env`.
-
-- `OPENAI_API_KEY`: API key for the embedding provider, kept in `.env`.
-- `OPENAI_BASE_URL`: Shared base URL (default: `https://api.openai.com/v1`). Chat and embedding paths are appended automatically.
-- `EMBEDDING_ENDPOINT`: Optional full embedding endpoint URL. Use `OPENAI_CHAT_ENDPOINT` for chat.
-- `OPENAI_EMBEDDING_MODEL`: Model name (default: `text-embedding-3-small`).
-- `EMBEDDING_DIMENSIONS`: Storage padding and new/empty SQLite index size (default: 4096); larger vectors are rejected. Reindex populated databases after changing the model or storage size.
+Use `sdk.queryLLM` and `sdk.queryLLMBatch` for chat and vision requests. See [Model configuration and batches](MODELS.md).
 
 ### 6. Chunk Search (`sdk.search` / `search`)
 
-Provides high-performance search across ingested chunks across three distinct modes:
-
-#### 1. Hybrid Search (`mode: "hybrid"`)
-
-Combines vector embedding search and BM25 full-text search with configurable fusion of results:
-
-- **Reciprocal Rank Fusion (RRF)**: default rank-based fusion with configurable `rrfK`, `vectorWeight`, and `bm25Weight`.
-- **Linear Fusion**: weighted normalized score combination.
-- **Custom Fusion**: user-provided scoring function receiving candidate ranks and scores.
-
-```typescript
-const results = await sdk.search.hybrid({
-  query: "quantum computing principles",
-  limit: 10,
-  fusion: {
-    strategy: "rrf",
-    rrfK: 60,
-    vectorWeight: 1.0,
-    bm25Weight: 1.0,
-  },
-});
-```
-
-#### 2. Vector Embeddings Only Search (`mode: "vector"`)
-
-Calculates similarity to a query string (auto-embedded via `sdk.embedder`), a raw vector, or a pre-existing chunk ID (K Nearest Neighbors). Computes and returns **cosine similarity** in results:
-
-```typescript
-// Similarity to a pre-existing chunk (KNN, excludes self by default)
-const neighbors = await sdk.search.vector({
-  chunkId: 42,
-  limit: 5,
-  excludeSelf: true,
-});
-// neighbors[0].cosineSimilarity is [-1, 1]
-```
-
-#### 3. BM25 Only Search (`mode: "bm25"`)
+#### BM25 Search (`mode: "bm25"`)
 
 Performs full-text keyword search across chunks with sentence decomposition:
 
@@ -117,10 +66,8 @@ const results = await sdk.search.bm25({
 
 Standalone convenience functions:
 
-- `searchHybrid(options)`
-- `searchVector(options)`
 - `searchBM25(options)`
-- `searchChunks(options)` (unified entry point taking `{ mode: "hybrid" | "vector" | "bm25", ... }`)
+- `searchChunks(options)` (unified entry point taking `{ mode: "bm25", ... }`)
 
 ### 7. Checkpoints & Crash Recovery (`sdk.checkpoint` / `checkpoint`)
 
@@ -202,7 +149,7 @@ export async function run() {
   const prompt = `History:\n${context.combinedText}\n\nNew Messages:\n${newItems.map((m) => m.text).join("\n")}`;
   const extracted = await callLLM(prompt);
 
-  // Step 5: Ingest (Source, Chunks, Vectors, and Graph)
+  // Step 5: Ingest (Source, Chunks, and Graph)
   sdk.ingest.sourceAndChunks({
     source: {
       type: "chat_thread",
@@ -212,7 +159,6 @@ export async function run() {
     },
     chunks: extracted.chunks.map((c) => ({
       text_content: c.text,
-      embedding: c.vector,
     })),
   });
 
@@ -230,11 +176,10 @@ export async function run() {
 ```
 ## Runtime and recovery guarantees
 
-- Model request options accept an `AbortSignal`. File and web parser handlers pass message cancellation through to the model transport. GPU batches wait for outstanding chat requests before entering embedding.
+- Model request options accept an `AbortSignal`. File and web parser handlers pass message cancellation through to the model transport. GPU batches wait for outstanding chat requests before releasing their reservation.
 - Recovery scripts own checkpoint resolution. Call `context.resolve(id)` only after committing that checkpoint's work; the host retains any unresolved rows, including partially completed batches.
 - Source-linker saves complete candidate batches before analysis. `maxPairsPerRun` bounds analysis per invocation; remaining pairs persist for subsequent runs. Failed requests retain their work, and discovery watermarks advance only when the batch is complete.
 - Source entities use `source:<source ID>` as their graph identity. Titles remain display labels. Ingesting an updated URI without an explicit ID preserves its existing source ID. Existing ambiguous title-based links cannot be reconstructed without re-analysis.
-- Vector indexes use cosine distance. Older Euclidean indexes migrate transactionally on startup/search, preserving vector bytes, chunk IDs, and embedding provenance; no model inference is needed. Filtered searches calculate distances within the matching source/type set before limiting results.
 - HTTP ingest and visualizer servers bind to `127.0.0.1`. The visualizer rejects external origins and hostnames. Invalid ingest requests return non-success HTTP statuses; accepted requests return 202.
 - `bun test` uses a temporary database via its preload. `SHALE_DB_PATH` overrides the database path for isolated tools/hosts. `bun run typecheck` checks host, tests, message contracts, and UI separately.
 # Rich knowledge graph

@@ -22,7 +22,7 @@ it('grounds session facts in the whole captured revision when observations span 
   synthesis:{sessionTitle:'Session',summary:'Summary',topics:[],dominantDomains:[],method:'heuristic'}};
  try {
   const chunks=sessionChunks('Summary',sessionObservationText(prepared),500);
-  sdk.ingest.sourceAndChunks({namespace:'browser',source:{id:'split',uri:'browser-session://split',title:'Session',type:'web_session',origin:'browser'},chunks:chunks.map(c=>({...c,embedding:[1,0,0,0]}))});
+  sdk.ingest.sourceAndChunks({namespace:'browser',source:{id:'split',uri:'browser-session://split',title:'Session',type:'web_session',origin:'browser'},chunks});
   const graph=new SourceGraph(database,sdk.graph,'split','browser');
   expect(sessionEvidence(sdk,'split',graph).observed[0].chunkIndex).toBeUndefined();
   commitSessionGraph(sdk,'split',prepared,[],[]);
@@ -32,16 +32,9 @@ it('grounds session facts in the whole captured revision when observations span 
  } finally {database.close();}
 });
 
-it('finalizes an oversized session with complete observations and bounded real transport inputs', async () => {
+it('finalizes an oversized session with complete observations and bounded chunks', async () => {
  const database=createTestDatabase();
- const inputs:string[]=[];
- const sdk=createExtensionSDK('browser',{database,namespace:'browser',models:{
-  connection:{baseUrl:'https://models.test.invalid/v1',resource:null,maxRetries:0,fetchFn:async(_url: RequestInfo | URL | string, init?: RequestInit)=>{
-   const body=JSON.parse(String(init?.body));
-   for(const text of body.input){expect(text.length).toBeLessThanOrEqual(1000);inputs.push(text);}
-   return Response.json({data:body.input.map((_:string,index:number)=>({index,embedding:[1,0,0,0]}))});
-  }},embedding:{model:'test-embedding',dimensions:4,padToDimensions:null},
- }});
+ const sdk=createExtensionSDK('browser',{database,namespace:'browser'});
  const prepared:PreparedSessionData={sessionId:'large',startTime:1,endTime:2,namespace:'browser',checkpointId:'large',
   visits:Array.from({length:79},(_,i)=>({url:`https://example.org/${i}`,title:'x'.repeat(1000)+i,domain:'example.org',visitedAt:1+i})),
   synthesis:{sessionTitle:'Large session',summary:'Preserved summary',topics:[],dominantDomains:[],method:'heuristic'}};
@@ -51,7 +44,7 @@ it('finalizes an oversized session with complete observations and bounded real t
   const chunks=database.query<{chunk_type:string;text_content:string},[]>('SELECT chunk_type,text_content FROM chunks ORDER BY chunk_index').all();
   expect(chunks.filter(c=>c.chunk_type==='verbatim').map(c=>c.text_content).join('')).toBe(sessionObservationText(prepared));
   expect(chunks.length).toBeGreaterThan(100);
-  expect(inputs.length).toBe(chunks.length);
+  expect(chunks.every(chunk=>chunk.text_content.length<=1000)).toBe(true);
   expect(sdk.graph.claims.list({predicate:'CONTAINS_PAGE'})).toHaveLength(79);
  } finally {database.close();}
 });

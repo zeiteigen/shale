@@ -15,7 +15,7 @@
     "imageSystemPrompt": {
       "type": "string",
       "description": "System prompt for multimodal image analysis.",
-      "default": "You are an expert multimodal analysis assistant. You analyze images to produce detailed, semantically rich descriptions capturing both visible layout elements and underlying conceptual meaning for semantic search and knowledge retrieval."
+      "default": "You are an expert multimodal analysis assistant. You analyze images to produce detailed descriptions capturing visible layout elements and underlying conceptual meaning."
     },
     "imageTimeoutMs": {
       "type": "number",

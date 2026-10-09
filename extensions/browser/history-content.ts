@@ -14,7 +14,7 @@ export interface HistoryPageContent {
   extraction?: WebPageParseResponse["extraction"];
 }
 
-/** Fetch each eligible URL once; prepare all text before any embeddings start. */
+/** Fetch each eligible URL once and prepare its extracted text. */
 export async function prepareHistoryContent(
   sdk: ShaleSDK,
   payload: HistoryBatchPayload,

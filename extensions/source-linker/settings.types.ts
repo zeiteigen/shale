@@ -1,6 +1,5 @@
 export interface SourceLinkerSettings {
-  knnK: number;
-  minKnnSimilarity: number;
+  candidatesPerChunk: number;
   maxPairsPerRun: number;
   bidirectional: boolean;
   defaultRelation: string;

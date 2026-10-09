@@ -1,7 +1,7 @@
 {
   "name": "source-linker",
   "version": "0.1.0",
-  "description": "Discovers related sources via KNN and uses an LLM to establish semantic links, resolve entity coreferences, and preserve connection evidence.",
+  "description": "Discovers related sources via full-text retrieval and uses an LLM to establish semantic links, resolve entity coreferences, and preserve connection evidence.",
   "namespace": "source-linker",
   "checkpoint_recover": "recover.ts",
   "crons": [

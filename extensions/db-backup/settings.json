@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "backupOnStartup": true,
-  "backupDir": "./backups",
+  "backupDir": "./data/backups",
   "filenamePrefix": "production-backup-",
   "maxBackups": 10,
   "timestampFormat": "iso"

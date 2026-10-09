@@ -107,15 +107,8 @@ describe("db-backup Extension", () => {
 
   it("creates a consistent and valid backup database", async () => {
     const backupDir = join(tempDir, "backups");
-    const sdk = createExtensionSDK(
-      "db-backup",
-      "db-backup",
-      testDb,
-      undefined,
-      undefined,
-      "db-backup",
-      join(import.meta.dir, "../extensions/db-backup"),
-    );
+    const sdk = createExtensionSDK("db-backup", { namespace: "db-backup", database: testDb,
+      extensionName: "db-backup", extensionDir: join(import.meta.dir, "../extensions/db-backup") });
 
     const result = await executeBackup(sdk, {
       backupDir,
@@ -184,15 +177,8 @@ describe("db-backup Extension", () => {
 
   it("skips backup when enabled is false", async () => {
     const backupDir = join(tempDir, "skip-test");
-    const sdk = createExtensionSDK(
-      "db-backup",
-      "db-backup",
-      testDb,
-      undefined,
-      undefined,
-      "db-backup",
-      join(import.meta.dir, "../extensions/db-backup"),
-    );
+    const sdk = createExtensionSDK("db-backup", { namespace: "db-backup", database: testDb,
+      extensionName: "db-backup", extensionDir: join(import.meta.dir, "../extensions/db-backup") });
 
     const result = await executeBackup(sdk, {
       enabled: false,

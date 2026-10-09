@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import * as sqliteVec from "sqlite-vec";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -26,7 +25,6 @@ function createTestDb(): Database {
   const db = new Database(":memory:");
   db.run("PRAGMA journal_mode = WAL;");
   db.run("PRAGMA foreign_keys = ON;");
-  sqliteVec.load(db);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS sources (
@@ -52,11 +50,6 @@ function createTestDb(): Database {
     ) STRICT;
   `);
 
-  db.run(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS vector_index USING vec0(
-      embedding float[4096]
-    );
-  `);
 
   db.run(`
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -79,11 +72,6 @@ function createTestDb(): Database {
     END;
   `);
 
-  db.run(`
-    CREATE TRIGGER IF NOT EXISTS chunks_vector_ad AFTER DELETE ON chunks BEGIN
-      DELETE FROM vector_index WHERE rowid = old.id;
-    END;
-  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS extension_state (
@@ -231,19 +219,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
           );
         }
 
-        // Embeddings endpoint
-        const inputCount = Array.isArray(body.input) ? body.input.length : 1;
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from({ length: inputCount }, (_, i) => ({
-              object: "embedding",
-              index: i,
-              embedding: new Array(4096).fill(0.05),
-            })),
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return new Response("Unexpected request", { status: 404 });
       };
 
       // Create process-image SDK
@@ -264,7 +240,6 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         "obsidian",
         "obsidian",
         db,
-        undefined,
         undefined,
         undefined,
         undefined,
@@ -289,7 +264,6 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         fileType: "image",
         contextEntity: "Vault: Analytics",
         options: {
-          deferEmbedding: true,
         },
       });
 
@@ -356,19 +330,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
           );
         }
 
-        // Embeddings endpoint
-        const inputCount = Array.isArray(body.input) ? body.input.length : 1;
-        return new Response(
-          JSON.stringify({
-            object: "list",
-            data: Array.from({ length: inputCount }, (_, i) => ({
-              object: "embedding",
-              index: i,
-              embedding: new Array(4096).fill(0.02),
-            })),
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return new Response("Unexpected request", { status: 404 });
       };
 
       // 1. Initialize process-image extension
@@ -468,7 +430,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
     });
   });
 
-  describe("5. Bulk Image Parsing & Strict Two-Phase Local GPU Optimization", () => {
+  describe("5. Bulk Image Parsing", () => {
     it("checks bulk capability via files:can-process", async () => {
       const bus = createMessageBus();
       const db = createTestDb();
@@ -477,7 +439,6 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         "process-image",
         "images",
         db,
-        undefined,
         undefined,
         "process-image",
         join(import.meta.dir, "../extensions/process-image"),
@@ -489,7 +450,6 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         "caller",
         "caller",
         db,
-        undefined,
         undefined,
         undefined,
         undefined,
@@ -508,7 +468,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       expect(res.results["notes.md"].canProcess).toBe(false);
     });
 
-    it("parses multiple images in bulk via files:process with deferEmbedding: true (Zero Embeddings)", async () => {
+    it("parses multiple images in bulk via files:process", async () => {
       const bus = createMessageBus();
       const db = createTestDb();
       const callLog: string[] = [];
@@ -531,15 +491,6 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
-        } else if (urlStr.includes("/embeddings")) {
-          callLog.push("embedding");
-          return new Response(
-            JSON.stringify({
-              object: "list",
-              data: [{ index: 0, embedding: new Array(4096).fill(0.1) }],
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
         }
         return new Response("Not found", { status: 404 });
       };
@@ -558,7 +509,6 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         "caller",
         "caller",
         db,
-        undefined,
         undefined,
         undefined,
         undefined,
@@ -577,7 +527,6 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         filePaths: [img1, img2, img3],
         fileType: "image",
         contextEntity: "Vault: BulkTest",
-        options: { deferEmbedding: true },
       });
 
       expect(response.success).toBe(true);
@@ -590,127 +539,9 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         expect(item.chunks.length).toBe(2);
         expect(item.chunks[0].chunk_type).toBe("synthetic");
         expect(item.chunks[1].chunk_type).toBe("synthetic");
-        // Embeddings must be deferred
-        expect(item.chunks[0].embedding).toBeUndefined();
-        expect(item.chunks[1].embedding).toBeUndefined();
       }
 
-      // Assert zero embedding calls occurred during Phase 1 bulk parsing
-      expect(callLog.filter((c) => c === "embedding").length).toBe(0);
       expect(callLog.filter((c) => c === "chat").length).toBe(3);
-    });
-
-    it("strictly enforces Two-Phase Local GPU Optimization: all Chat calls occur before a single batch embedding call", async () => {
-      const bus = createMessageBus();
-      const db = createTestDb();
-      const callLog: Array<"chat" | "embedding"> = [];
-      let batchEmbeddingCount = 0;
-      let totalEmbedTextsReceived = 0;
-
-      const mockFetch: import("../lib/ai").FetchFn = async (url: any, init: any) => {
-        const urlStr = String(url);
-        const body = init?.body ? JSON.parse(init.body) : {};
-
-        if (urlStr.includes("/chat/completions") || body.messages) {
-          callLog.push("chat");
-          return new Response(
-            JSON.stringify({
-              choices: [
-                {
-                  message: {
-                    role: "assistant",
-                    content:
-                      "Physical Layout: Grid of nodes. Underlying Meaning: Network topology.",
-                  },
-                },
-              ],
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        } else if (urlStr.includes("/embeddings") || body.input) {
-          callLog.push("embedding");
-          batchEmbeddingCount++;
-          const inputs = Array.isArray(body.input) ? body.input : [body.input];
-          totalEmbedTextsReceived += inputs.length;
-          return new Response(
-            JSON.stringify({
-              object: "list",
-              data: inputs.map((_: any, idx: number) => ({
-                index: idx,
-                embedding: new Array(4096).fill(0.05 + idx * 0.01),
-              })),
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        return new Response("Not found", { status: 404 });
-      };
-
-      const imageExtSDK = createExtensionSDK("process-image", {
-        namespace: "images",
-        database: db,
-        models: { connection: { fetchFn: mockFetch } },
-        extensionName: "process-image",
-        extensionDir: join(import.meta.dir, "../extensions/process-image"),
-        messageBus: bus,
-      });
-      await setupProcessImage(imageExtSDK);
-
-      const callerSDK = createExtensionSDK(
-        "caller",
-        "caller",
-        db,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        bus,
-      );
-
-      const tempDir = mkdtempSync(join(tmpdir(), "twophase-bulk-"));
-      const imgA = join(tempDir, "nodeA.png");
-      const imgB = join(tempDir, "nodeB.png");
-      const imgC = join(tempDir, "nodeC.png");
-      writeFileSync(imgA, "NODE_A");
-      writeFileSync(imgB, "NODE_B");
-      writeFileSync(imgC, "NODE_C");
-
-      // Execute bulk parse with deferEmbedding: false (triggers both Phase 1 and Phase 2)
-      const response = await callerSDK.messages.request("files:process", {
-        filePaths: [imgA, imgB, imgC],
-        fileType: "image",
-        contextEntity: "Vault: Network",
-        options: { deferEmbedding: false },
-      });
-
-      expect(response.success).toBe(true);
-      expect(response.totalProcessed).toBe(3);
-
-      // Verify each image got 2 chunks with valid embeddings
-      for (const res of response.results) {
-        expect(res.chunks.length).toBe(2);
-        expect(res.chunks[0].embedding).toBeDefined();
-        expect(res.chunks[1].embedding).toBeDefined();
-        expect(res.chunks[0].chunk_type).toBe("synthetic");
-        expect(res.chunks[1].chunk_type).toBe("synthetic");
-      }
-
-      // Crucial Two-Phase Assertions:
-      // 1. All Chat calls must happen strictly before any embedding call
-      const firstEmbedIndex = callLog.indexOf("embedding");
-      const lastChatIndex = callLog.lastIndexOf("chat");
-
-      expect(firstEmbedIndex).toBeGreaterThan(-1);
-      expect(lastChatIndex).toBeGreaterThan(-1);
-      expect(lastChatIndex).toBeLessThan(firstEmbedIndex);
-
-      // 2. Exactly 1 batch embedding call should be executed for all 6 chunks (3 images x 2 chunks)
-      expect(batchEmbeddingCount).toBe(1);
-      expect(totalEmbedTextsReceived).toBe(6);
-
-      // 3. Zero chat calls after embedding begins
-      const afterEmbed = callLog.slice(firstEmbedIndex);
-      expect(afterEmbed.every((c) => c === "embedding")).toBe(true);
     });
 
     it("parses image batch in Obsidian using parseImageFilesBatch via files:process messaging", async () => {
@@ -752,7 +583,6 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
         "obsidian",
         "obsidian",
         db,
-        undefined,
         undefined,
         undefined,
         undefined,

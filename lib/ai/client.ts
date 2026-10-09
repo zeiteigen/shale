@@ -28,7 +28,7 @@ export function createOpenAIClient(
   }
   return new OpenAI({
     apiKey: resolveApiKey(options, role),
-    baseURL: options?.baseUrl ?? getRootSetting(role === "chat" ? "OPENAI_CHAT_BASE_URL" : "EMBEDDING_BASE_URL")
+    baseURL: options?.baseUrl ?? getRootSetting("OPENAI_CHAT_BASE_URL")
       ?? getRootSetting("OPENAI_BASE_URL"),
     fetch: options?.fetchFn,
     timeout: resolveTimeout(options, role),

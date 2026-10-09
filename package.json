@@ -31,7 +31,6 @@
     "officeparser": "^8.1.0",
     "openai": "^7.12.1",
     "pdfjs-dist": "6.2.108",
-    "sqlite-vec": "^0.1.9",
     "stopword": "^3.1.5",
     "zod": "^4.6.5"
   },

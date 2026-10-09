@@ -7,7 +7,7 @@ import { recordCommittedFile } from "./file-progress";
 
 /** Commit source, graph evidence, and checkpoint deletion in one transaction. */
 export function commitDocument(
-  sdk: ShaleSDK, document: ParsedDocument, embeddings: number[][],
+  sdk: ShaleSDK, document: ParsedDocument,
   vault: VaultContext, namespace = "obsidian", checkpointId?: string,
 ) {
   return sdk.database.transaction(() => {
@@ -21,7 +21,7 @@ export function commitDocument(
           document.contextualChunks.map(chunk => [chunk.text_content, chunk.chunk_type, chunk.metadata]),
         ])).digest("hex"),
       },
-      chunks: document.contextualChunks.map((chunk, index) => ({ ...chunk, embedding: embeddings[index] })),
+      chunks: document.contextualChunks,
     });
     if (result.skipped) {
       if (checkpointId) sdk.deleteCheckpoint(checkpointId);

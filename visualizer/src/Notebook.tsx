@@ -26,7 +26,7 @@ function Notebook() {
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [visibleTypes, setVisibleTypes] = useState(new Set<string>());
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<SearchMode>("hybrid");
+  const [mode, setMode] = useState<SearchMode>("bm25");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +113,7 @@ function Notebook() {
             <label htmlFor="knowledge-search">Search the notebook</label>
             <div className="search-box"><Search size={16} /><input id="knowledge-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="A concept, name, or question" /><button disabled={isSearching}>{isSearching ? "…" : "Find"}</button></div>
             <div className="search-modes">
-              {(["hybrid", "bm25", "vector"] as SearchMode[]).map((item) => <button type="button" key={item} className={mode === item ? "mode active" : "mode"} onClick={() => setMode(item)}>{item === "bm25" ? "text" : item}</button>)}
+              {(["bm25"] as SearchMode[]).map((item) => <button type="button" key={item} className={mode === item ? "mode active" : "mode"} onClick={() => setMode(item)}>{item === "bm25" ? "text" : item}</button>)}
             </div>
           </form>
 

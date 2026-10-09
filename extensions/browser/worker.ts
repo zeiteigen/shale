@@ -17,7 +17,7 @@ import {
 import type { BrowserExtensionSettings } from "./settings.types";
 import { prepareSessionJobs, finalizeSessionJob } from "./session-jobs";
 
-/** One bounded chat-then-embedding batch, with durable output and transactional completion. */
+/** One bounded processing batch, with durable output and transactional completion. */
 export async function runWorker(sdk: ShaleSDK) {
   const policy = browserSettings(sdk);
 
@@ -112,7 +112,7 @@ export async function runWorker(sdk: ShaleSDK) {
             return null;
           }
         })).filter((item): item is PreparedJob => item !== null);
-        // Context reads prepared page analyses from the cache; it never runs during embeddings.
+        // Context reads prepared page analyses from the cache.
         const settings = browserSettings(sdk);
         let sessions: Awaited<ReturnType<typeof prepareSessionJobs>> = [];
         try {

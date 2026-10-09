@@ -17,7 +17,7 @@ interruption; the ingesting extension owns document checkpoints and ingestion tr
 const document = await sdk.messages.request("file:process", {
   filePath: "/path/to/report.docx", // Local paths or encoded file:// URLs
   contextEntity: "Research vault",
-  options: { deferEmbedding: true, namespace: "research" },
+  options: { namespace: "research" },
 }, { target: "process-document", timeoutMs: 120_000 });
 
 const batch = await sdk.messages.request("files:process", {
@@ -25,7 +25,6 @@ const batch = await sdk.messages.request("files:process", {
     "/path/to/paper.pdf",
     { filePath: "/path/to/slides.pptx", contextEntity: "Presentations" },
   ],
-  options: { deferEmbedding: true },
 }, { target: "process-document", timeoutMs: 300_000 });
 
 const capability = await sdk.messages.request("file:can-process", {
@@ -58,7 +57,7 @@ Parsing requires no model calls. Optional summaries are disabled by default.
 Set `enablePdfOcr` to `true` to transcribe PDF pages without a text layer with installed
 `pdftoppm` (Poppler) and `tesseract` tools. `ocrLanguage` selects installed
 language data, for example `eng`; language data is never downloaded. OCR stays
-on the CPU and runs before embeddings. Page numbers, the OCR engine, language,
+on the CPU. Page numbers, the OCR engine, language,
 confidence scores and a transcription warning are retained in the document metadata.
 Each completed page is persisted in extension state under its PDF fingerprint
 and OCR configuration. A parser deadline or cancellation retains completed
@@ -74,12 +73,6 @@ The prompt preserves visible handwriting and equations and marks illegible words
 as `[unclear]`. Explicitly blank pages do not produce text chunks. A failed vision
 request leaves the document unfinished so the caller can retry from cached pages.
 
-1. Prepare every document and optional chat summary in the batch without embeddings.
-2. Embed all eligible chunks in bounded batches after preparation finishes, using
-   Shale's shared model coordinator.
-
-`options.deferEmbedding` skips Phase 2. Item options override shared batch options,
-including deferral. `precomputedEmbedding` supplies the first chunk's vector.
 `options.customPrompt` overrides the summary instruction, and `options.timeoutMs`
 overrides the per-file parsing and summary deadlines. The message request's timeout
 is a separate deadline covering the entire batch; increase it for larger batches.
@@ -89,8 +82,8 @@ knowledge claims. `summaryMaxChars` bounds the source supplied to the model;
 `inputTruncated` records when only the document's beginning was summarized. A
 summary failure retains the extracted text and records `metadata.summaryError`.
 
-One parsing failure does not stop other files. Failed embeddings mark affected
-files unsuccessful while retaining extracted chunks for inspection or retry.
+One parsing failure does not stop other files. Failed files retain extracted
+chunks for inspection or retry.
 `totalProcessed` counts successful files; `totalFailed` and `errors` describe failures.
 Cancellation rejects the whole request and stops subsequent work.
 
@@ -107,7 +100,7 @@ bun run settings set process-document includeNotes false
 ```
 
 Schema fallbacks: 50 MiB source limit, 60 second parsing and summary deadlines, 1,800
-characters per extracted chunk, 64 chunks per embedding request, notes included,
+characters per extracted chunk, notes included,
 and summaries disabled. `supportedExtensions` can disable built-in formats;
 adding a name does not add a parser.
 The checked-in settings raise the source limit to 300 MiB and the parsing deadline

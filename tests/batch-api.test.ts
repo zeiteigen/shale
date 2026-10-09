@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
 import { LLMClient } from "../sdk/llm";
-import { EmbedderClient } from "../sdk/embed";
 import { createExtensionSDK } from "../sdk";
 import { batchTransport } from "./fixtures/batch-api";
 import { parseBatchOutput } from "../lib/ai/batch-output";
@@ -10,12 +9,12 @@ const originalEnv = { ...process.env };
 beforeEach(() => {
   process.env = { ...originalEnv };
   for (const key of Object.keys(process.env))
-    if (/^(OPENAI_|EMBEDDING_|MODEL_BATCH_)/.test(key)) delete process.env[key];
+    if (/^(OPENAI_|MODEL_BATCH_)/.test(key)) delete process.env[key];
 });
 afterEach(() => { process.env = { ...originalEnv }; });
 
 it("uploads chat JSONL, submits one job, polls, and reorders detailed output", async () => {
-  process.env.OPENAI_CHAT_ENDPOINT = "https://unused.invalid/v1/embeddings";
+  process.env.OPENAI_CHAT_ENDPOINT = "https://unused.invalid/v1/chat/completions";
   const transport = batchTransport();
   const client = new LLMClient({ batchMode: "api", batchEndpoint: "https://chat-batch.invalid/v1/batches?version=1",
     apiKey: "chat-key", fetchFn: transport.fetchFn, batchPollIntervalMs: 1 });
@@ -30,20 +29,7 @@ it("uploads chat JSONL, submits one job, polls, and reorders detailed output", a
   expect(transport.retrievals[0]).toBe("https://chat-batch.invalid/v1/batches/batch-0?version=1");
 });
 
-it("batches embedding requests through their own endpoint and validates returned vectors", async () => {
-  process.env.EMBEDDING_ENDPOINT = "https://unused.invalid/v1/chat/completions";
-  const transport = batchTransport();
-  const client = new EmbedderClient({ batchMode: "api", batchSize: 2, padToDimensions: 4,
-    batchEndpoint: "https://embedding-batch.invalid/v1/batches", fetchFn: transport.fetchFn, batchPollIntervalMs: 1 });
-  const vectors = await client.embedBatch(["1", "2", "3", "4", "5"]);
-  expect(vectors.map(vector => vector[0])).toEqual([1, 2, 3, 4, 5]);
-  expect(transport.uploads[0].lines.map(line => line.body.input.length)).toEqual([2, 2, 1]);
-  expect(transport.submissions).toHaveLength(1);
-  expect(transport.submissions[0].url).toBe("https://embedding-batch.invalid/v1/batches");
-  expect(transport.submissions[0].body.endpoint).toBe("/v1/embeddings");
-});
-
-it("uses dedicated batches for extension tasks and finishes chat before embedding", async () => {
+it("uses chat batches for extension tasks across preparation and finalization", async () => {
   const transport = batchTransport();
   const db = new Database(":memory:");
   db.run("CREATE TABLE extension_state(extension_id TEXT,state_key TEXT,value TEXT,updated_at INTEGER,PRIMARY KEY(extension_id,state_key))");
@@ -51,19 +37,15 @@ it("uses dedicated batches for extension tasks and finishes chat before embeddin
     const sdk = createExtensionSDK("batch-extension", { database: db, models: {
       connection: { fetchFn: transport.fetchFn, batchMode: "api", batchPollIntervalMs: 1 },
       chat: { batchEndpoint: "https://chat-batch.invalid/v1/batches" },
-      embedding: { batchEndpoint: "https://embed-batch.invalid/v1/batches", padToDimensions: 4 },
     } });
-    const vectors = await sdk.models.batch(
+    const output = await sdk.models.batch(
       () => sdk.models.mapChat(["1", "2", "3"], text => sdk.queryLLM(text)),
-      texts => sdk.embed(texts),
+      async prepared => prepared,
     );
-    expect(vectors).toHaveLength(3);
-    expect(transport.submissions.map(item => item.body.endpoint)).toEqual(["/v1/chat/completions", "/v1/embeddings"]);
+    expect(output).toEqual(["1", "2", "3"]);
+    expect(transport.submissions.map(item => item.body.endpoint)).toEqual(["/v1/chat/completions"]);
     expect(transport.uploads[0].lines).toHaveLength(3);
     expect(sdk.state.getAll()).toHaveLength(0);
-    const calls = transport.submissions.length;
-    await expect(sdk.models.phase("chat", () => sdk.embed("bad"))).rejects.toThrow("chat phase");
-    expect(transport.submissions.length).toBe(calls);
   } finally { db.close(); }
 });
 

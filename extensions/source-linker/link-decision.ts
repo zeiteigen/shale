@@ -10,7 +10,7 @@ export interface LinkCheckpoint {
   sourceB: { id: string; title: string };
   analysis: LLMLinkAnalysis;
   accepted?: boolean;
-  knnSimilarity: number;
+  textScore: number;
   updatedAt: number;
 }
 
@@ -28,7 +28,7 @@ export function acceptedLink(data: LinkCheckpoint, sdk: ShaleSDK): DiscoveredLin
     relation: data.analysis.relation,
     reason: data.analysis.reason,
     weight: data.analysis.weight,
-    knnSimilarity: data.knnSimilarity,
+    textScore: data.textScore,
     entityResolutions: data.analysis.entityResolutions ?? [],
     evidenceA:data.evidenceA,evidenceB:data.evidenceB,extractionRun:data.extractionRun,model:data.model,
   };

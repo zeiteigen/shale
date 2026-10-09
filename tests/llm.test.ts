@@ -83,17 +83,6 @@ describe("LLM Querying & Multimodal Integration", () => {
       expect(timeout).toBe(300000);
     });
 
-    it("allocates the local-model timeout when an embedding endpoint is configured directly", () => {
-      delete process.env.MODEL_TIMEOUT_MS;
-      delete process.env.OPENAI_TIMEOUT_MS;
-      delete process.env.EMBEDDING_TIMEOUT_MS;
-      delete process.env.OPENAI_BASE_URL;
-      process.env.EMBEDDING_ENDPOINT = "http://localhost:11434/v1/embeddings";
-
-      expect(resolveTimeout(undefined, "embedding")).toBe(300000);
-      delete process.env.EMBEDDING_ENDPOINT;
-    });
-
     it("uses 60,000ms default for cloud endpoints", () => {
       delete process.env.MODEL_TIMEOUT_MS;
       delete process.env.OPENAI_TIMEOUT_MS;

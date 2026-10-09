@@ -1,7 +1,7 @@
 {
   "name": "process-document",
   "version": "0.1.0",
-  "description": "Local document text extraction, structural chunking, optional summaries, and batch embeddings for PDFs, Office, and OpenDocument files.",
+  "description": "Local document text extraction, structural chunking, and optional summaries for PDFs, Office, and OpenDocument files.",
   "namespace": "documents",
   "setup_script": "setup.ts"
 }
