@@ -60,10 +60,10 @@ export const mutationSchemas = {
   update_source:z.object({sourceId:key,expectedVersion:version,title:text.optional(),uri:text.optional(),metadata:metadata.optional()}).strict(),
   remove_source:z.object({sourceId:key,expectedVersion:version,blockReingestion:z.boolean().default(false)}).strict(),
   restore_source:z.object({sourceId:key,expectedVersion:version,unblockReingestion:z.boolean().default(false)}).strict(),
-  add_chunk:z.object({sourceId:key,expectedVersion:version,text:z.string().trim().min(1).max(100000),
-    chunkType:z.enum(['verbatim','synthetic']).default('verbatim'),entityIds:z.array(id).max(100).default([]),claimIds:z.array(key).max(100).default([])}).strict(),
+  add_chunk:z.object({sourceId:key,expectedVersion:version,text:z.string().trim().min(1).max(1200),
+    chunkType:z.enum(['verbatim','synthetic']).default('synthetic'),entityIds:z.array(id).max(100).default([]),claimIds:z.array(key).max(100).default([])}).strict(),
   revise_chunk:z.object({sourceId:key,chunkId:id,expectedVersion:version,expectedSourceVersion:version,
-    text:z.string().trim().min(1).max(100000).optional(),chunkType:z.enum(['verbatim','synthetic']).optional(),
+    text:z.string().trim().min(1).max(8000).optional(),chunkType:z.enum(['verbatim','synthetic']).optional(),
     entityIds:z.array(id).max(100).optional(),claimIds:z.array(key).max(100).optional()}).strict(),
   remove_chunk:z.object({sourceId:key,chunkId:id,expectedVersion:version,expectedSourceVersion:version}).strict(),
 };

@@ -102,12 +102,31 @@ describe("Browser durable processing", () => {
     const f = browserFixture();
     try {
       f.sdk.state.setJson("pending-ingest", [
-        { id: "old-a", receivedAt: 1, payload: capture("a") },
-        { id: "old-b", receivedAt: 2, payload: capture("b") },
+        { id: "old-a", receivedAt: Date.now(), payload: capture("a") },
+        { id: "old-b", receivedAt: Date.now() + 1, payload: capture("b") },
       ]);
       expect(pendingJobs(f.sdk)).toHaveLength(2);
       expect(f.sdk.state.get("pending-ingest")).toBeNull();
       expect(pendingJobs(f.sdk)).toHaveLength(2);
+    } finally {
+      f.database.close();
+    }
+  });
+  it("expires old failed raw jobs into truthful compact receipts", () => {
+    const f = browserFixture();
+    try {
+      admitBrowserPayload(f.sdk, batch([capture("expired-record")]));
+      f.database.query("UPDATE browser_jobs SET state='failed',received_at=?,updated_at=?,prepared='{}',settings='{}'")
+        .run(Date.now() - 25 * 60 * 60 * 1000, Date.now() - 25 * 60 * 60 * 1000);
+      expect(pendingJobs(f.sdk)).toHaveLength(0);
+      const row = f.database.query<any, []>("SELECT id,payload,payload_bytes,prepared,settings,error,outcome FROM browser_jobs").get();
+      expect(row.payload).not.toContain("SQLite supports useful");
+      expect(row.payload_bytes).toBe(0);
+      expect(row.prepared).toBeNull();
+      expect(row.settings).toBeNull();
+      expect(row.error).toContain("resubmit to retry");
+      expect(JSON.parse(row.outcome).expired).toBe(true);
+      expect(() => retryBrowserJobs(f.sdk, [row.id])).toThrow("expired; resubmit");
     } finally {
       f.database.close();
     }
@@ -132,6 +151,20 @@ describe("Browser durable processing", () => {
         status.records.find((x) => x.recordId === "new-capture")?.outcome
           .reused,
       ).toBe(true);
+      let cache = f.database.query<any, []>("SELECT prepared FROM browser_content_cache LIMIT 1").get();
+      const receipt = JSON.parse(cache.prepared);
+      expect(receipt.cacheState).toBe("complete");
+      expect(receipt.memory).toBeUndefined();
+      expect(receipt.pageData).toBeUndefined();
+      expect(receipt.analysis?.summary).toBeUndefined();
+      for (let version = 0; version < 35; version++) {
+        const page = { ...capture(`version-${version}`, "https://example.com/sqlite", Date.now() + version),
+          textContent: `SQLite content revision ${version}. `.repeat(20) };
+        admitBrowserPayload(f.sdk, batch([page], `revision-${version}`));
+        await runWorker(f.sdk);
+      }
+      expect(f.database.query<any, []>(`SELECT count(*) AS n FROM browser_content_cache
+        WHERE json_extract(prepared,'$.canonicalSourceId')=(SELECT id FROM sources WHERE uri='https://example.com/sqlite')`).get().n).toBeLessThanOrEqual(32);
     } finally {
       f.database.close();
     }
@@ -296,9 +329,7 @@ describe("Browser durable processing", () => {
           "SELECT text_content FROM chunks c JOIN sources s ON s.id=c.source_id WHERE s.type='web_session' AND c.chunk_type='verbatim'",
         )
         .get();
-      expect(observed.text_content).not.toContain(
-        "Evidence about SQLite indexes",
-      );
+      expect(observed).toBeNull();
     } finally {
       f.database.close();
     }
@@ -617,38 +648,26 @@ it("attributes delayed SPA attention to the navigation that started its interval
     f.database.close();
   }
 });
-it("keeps opt-in public enrichment separate from captured DOM and observed visits", async () => {
+it("adds opt-in public enrichment to the canonical page without duplicating visits", async () => {
   const f = browserFixture();
   let requests = 0;
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => {
-      requests++;
-      return new Response(
-        `<main><h1>Public reference</h1><p>${"Public SQLite reference evidence. ".repeat(10)}</p></main>`,
-        { headers: { "Content-Type": "text/html" } },
-      );
-    },
-  });
   try {
-    const url = server.url.href;
+    const url = "https://example.com/public-reference";
     const record = { type: "public_page_capture", recordId: "disabled", url };
     expect(admitBrowserPayload(f.sdk, batch([record])).records[0].status).toBe(
       "skipped",
     );
     expect(requests).toBe(0);
-    const parserSDK = (await import("../sdk")).createExtensionSDK(
-      "web-page-parser",
-      { database: f.database },
-    );
-    parserSDK.settings.getAll = () =>
-      ({ allowFetch: true, enableLlmContext: false }) as any;
-    const { parseWebPage } =
-      await import("../extensions/web-page-parser/parser");
     f.sdk.messages.handle(
       "web:parse",
-      (input) => parseWebPage(parserSDK, input),
+      (input: any) => {
+        if (input.allowFetch) requests++;
+        const text = input.allowFetch
+          ? `Public SQLite reference evidence. `.repeat(10)
+          : `Captured SQLite DOM evidence. `.repeat(10);
+        return { title: "SQLite reference", text, chunks: [text], contextualSummary: "", imageUrls: [], imageChunks: [],
+          extraction: { method: input.allowFetch ? "public-fetch" : "live-dom", version: "test", quality: "full", truncated: false, originalChars: text.length, reasons: [] } };
+      },
       { name: "web-page-parser", priority: 100 },
     );
     f.policy.allowPublicPageEnrichment = true;
@@ -667,10 +686,10 @@ it("keeps opt-in public enrichment separate from captured DOM and observed visit
           "SELECT count(*) AS n FROM sources WHERE type IN ('web_page','public_web_page')",
         )
         .get().n,
-    ).toBe(2);
+    ).toBe(1);
     const results = queryBrowser(f.sdk, {
       query: "Public SQLite",
-      domain: "127.0.0.1",
+      domain: "example.com",
     }).pages;
     expect(
       results.some(
@@ -690,9 +709,8 @@ it("keeps opt-in public enrichment separate from captured DOM and observed visit
           "SELECT text_content FROM chunks c JOIN sources s ON s.id=c.source_id WHERE s.type='web_page' AND c.chunk_index=1",
         )
         .get().text_content,
-    ).toContain("SQLite supports useful");
+    ).toContain("Public SQLite");
   } finally {
-    server.stop(true);
     f.database.close();
   }
 });
@@ -734,7 +752,7 @@ it("labels backfilled observations and does not infer tab navigation without tab
     f.database.close();
   }
 });
-it("retrieves the version captured for an old session and reuses returning content without model calls", async () => {
+it("uses current canonical memory for an old session citation and reuses returning content", async () => {
   const f = browserFixture();
   try {
     f.policy.enableLlmAnalysis = false;
@@ -776,16 +794,8 @@ it("retrieves the version captured for an old session and reuses returning conte
       to: t + 1000,
     });
     expect(historical.pages.length).toBeGreaterThan(0);
-    expect(
-      historical.pages.some((page) =>
-        page.passage.includes("Historical SQLite"),
-      ),
-    ).toBe(true);
-    expect(
-      historical.pages.every(
-        (page) => !page.passage.includes("Fresh gardening"),
-      ),
-    ).toBe(true);
+    expect(historical.pages.some((page) => page.passage.includes("Fresh gardening"))).toBe(true);
+    expect(historical.pages.every((page) => !page.passage.includes("Historical SQLite"))).toBe(true);
     expect(
       queryBrowser(f.sdk, { query: "gardening" }).pages.some((page) =>
         page.passage.includes("Fresh gardening"),
@@ -820,7 +830,8 @@ it("retrieves the version captured for an old session and reuses returning conte
           "SELECT count(*) AS n FROM sources WHERE type='web_page_version'",
         )
         .get().n,
-    ).toBe(2);
+    ).toBe(0);
+    expect(f.database.query<any, []>("SELECT count(*) AS n FROM sources WHERE type='web_page'").get().n).toBe(1);
     const row = f.database
       .query<any, []>(
         "SELECT payload,payload_hash FROM browser_jobs WHERE record_id='old'",
@@ -861,30 +872,31 @@ it("exhausts a managed job during startup recovery so it cannot block later cron
 it("migrates a stored legacy active session without dropping repeated visits", () => {
   const f = browserFixture();
   try {
+    const now = Date.now() - 31 * 60 * 1000;
     f.sdk.state.setJson("active_session_state", {
       sessionId: "old-session",
-      startTime: 1,
-      lastActivityTime: 3,
+      startTime: now,
+      lastActivityTime: now + 2,
       visits: [
         {
           url: "https://example.com/A",
           title: "A",
           domain: "example.com",
-          visitedAt: 1,
+          visitedAt: now,
           tabId: 1,
         },
         {
           url: "https://example.com/B",
           title: "B",
           domain: "example.com",
-          visitedAt: 2,
+          visitedAt: now + 1,
           tabId: 1,
         },
         {
           url: "https://example.com/A",
           title: "A again",
           domain: "example.com",
-          visitedAt: 3,
+          visitedAt: now + 2,
           tabId: 1,
         },
       ],

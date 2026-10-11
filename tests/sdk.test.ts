@@ -379,7 +379,7 @@ describe("Shale SDK Architecture", () => {
       });
 
       expect(res.sourceId).toBe("doc-1");
-      expect(res.chunkIds.length).toBe(2);
+      expect(res.chunkIds.length).toBe(3);
 
       // Verify sources row
       const source = db
@@ -397,13 +397,15 @@ describe("Shale SDK Architecture", () => {
           "SELECT text_content FROM chunks WHERE source_id = 'doc-1' ORDER BY chunk_index ASC",
         )
         .all();
-      expect(chunks.length).toBe(2);
+      expect(chunks.length).toBe(3);
+      expect(chunks[0].text_content).toContain("High level architecture overview");
+      expect(chunks.slice(1).map(chunk => chunk.text_content).join(" ")).toContain("Section 1: High level architecture overview");
 
       // Verify FTS5
       const ftsResults = db
         .query("SELECT * FROM chunks_fts WHERE chunks_fts MATCH 'architecture'")
         .all();
-      expect(ftsResults.length).toBe(1);
+      expect(ftsResults.length).toBe(2);
 
       // Verify entity links
       const links = db
@@ -486,7 +488,7 @@ describe("Shale SDK Architecture", () => {
           text_content: msg.text,
         })),
       });
-      expect(ingestRes.chunksCount).toBe(2);
+      expect(ingestRes.chunksCount).toBe(3);
 
       sdk.graph.ingest({
         entities: [
@@ -507,7 +509,7 @@ describe("Shale SDK Architecture", () => {
 
       // And context hydration on the next run now retrieves the 2 chunks!
       const nextContext = sdk.context.hydrate(channelUri, 10);
-      expect(nextContext.chunks.length).toBe(2);
+      expect(nextContext.chunks.length).toBe(3);
       expect(nextContext.combinedText).toContain("New release v1.0");
       expect(nextContext.combinedText).toContain("Check out the new features.");
     });
@@ -652,11 +654,11 @@ describe("Shale SDK Architecture", () => {
         });
 
         expect(res.sourceId).toBe("src-convenience-1");
-        expect(res.chunksCount).toBe(2);
+        expect(res.chunksCount).toBe(3);
 
         // Context hydration via top-level function
         const hydrated = hydrateContext("file:///test/doc.md", 5);
-        expect(hydrated.chunks.length).toBe(2);
+        expect(hydrated.chunks.length).toBe(3);
         expect(hydrated.combinedText).toContain("Chunk one");
         expect(hydrated.combinedText).toContain("Chunk two");
 

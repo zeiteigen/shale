@@ -146,6 +146,10 @@ export function pendingJobs(
   due = true,
 ): BrowserJob[] {
   migrateLegacyInbox(sdk);
+  expireStaleRawJobs(sdk);
+  sdk.database.query(`DELETE FROM browser_content_cache WHERE extension_id=? AND updated_at<?
+    AND coalesce(json_extract(prepared,'$.cacheState'),'staged')!='complete'`)
+    .run(sdk.extensionId, Date.now() - 24 * 60 * 60 * 1000);
   const rows = sdk.database
     .query<any, [string, number, number]>(
       `SELECT * FROM browser_jobs WHERE extension_id=?
@@ -163,11 +167,53 @@ export function pendingJobs(
     settings: row.settings ? JSON.parse(row.settings) : undefined,
   }));
 }
+/** Failed transport records keep enough time for retry, then become receipts. */
+export function expireStaleRawJobs(sdk: ShaleSDK, now = Date.now()) {
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  const expired = sdk.database
+    .query<{ id: string; state: string; prepared: string | null }, [string, number]>(
+      `SELECT id,state,prepared FROM browser_jobs WHERE extension_id=?
+       AND state IN ('received','prepared','failed') AND received_at<? AND payload_bytes>0`,
+    )
+    .all(sdk.extensionId, cutoff);
+  if (!expired.length) return 0;
+  sdk.database.transaction(() => {
+    for (const row of expired) {
+      const keepPrepared = isBoundedPrepared(row.prepared);
+      sdk.database
+        .query(
+          `UPDATE browser_jobs SET state=CASE WHEN ? AND state!='failed' THEN 'prepared' WHEN ? THEN state ELSE 'failed' END,
+          payload=json_object('type',json_extract(payload,'$.type'),'recordId',record_id,'collectorId',collector_id,'url',json_extract(payload,'$.url')),
+          payload_bytes=0,settings=NULL,
+          prepared=CASE WHEN ? THEN prepared ELSE NULL END,
+          error=CASE WHEN ? THEN 'Raw capture expired after 24 hours; prepared memory retained' ELSE 'Raw capture expired after 24 hours; resubmit to retry' END,
+          outcome=CASE WHEN ? THEN '{"rawExpired":true,"preparedRetained":true}' ELSE '{"expired":true}' END,updated_at=?
+          WHERE extension_id=? AND id=?`,
+        )
+        .run(keepPrepared, keepPrepared, keepPrepared, keepPrepared, keepPrepared, now, sdk.extensionId, row.id);
+      if (!keepPrepared) sdk.checkpoint.delete(row.id);
+    }
+  })();
+  return expired.length;
+}
+function isBoundedPrepared(value: string | null): boolean {
+  if (!value || value.length > 256_000) return false;
+  try {
+    const data = JSON.parse(value);
+    const pages = data?.type === "pages" ? data.pages : data?.prepared?.type === "pages" ? data.prepared.pages : null;
+    if (Array.isArray(pages)) return pages.every((page: any) => !!page?.memory?.summary &&
+      Array.isArray(page.memory.snippets) && page.memory.snippets.length <= 16 &&
+      page.memory.snippets.every((snippet: any) => typeof snippet.text === "string" && snippet.text.length <= 1200));
+    return data?.type === "session" || data?.prepared?.type === "session" ||
+      data?.type === "history" || data?.prepared?.type === "history" ||
+      data?.type === "bookmarks" || data?.prepared?.type === "bookmarks";
+  } catch { return false; }
+}
 export function finishJob(sdk: ShaleSDK, id: string, outcome: unknown = {}) {
   sdk.database
     .query(
-      `UPDATE browser_jobs SET state='indexed',updated_at=?,prepared=NULL,error=NULL,outcome=?,
-    payload=json_object('type',json_extract(payload,'$.type'),'recordId',record_id,'collectorId',collector_id,'url',json_extract(payload,'$.url')) WHERE id=? AND extension_id=? AND state IN ('received','prepared')`,
+      `UPDATE browser_jobs SET state='indexed',updated_at=?,prepared=NULL,settings=NULL,error=NULL,outcome=?,
+    payload=json_object('type',json_extract(payload,'$.type'),'recordId',record_id,'collectorId',collector_id,'url',json_extract(payload,'$.url')),payload_bytes=0 WHERE id=? AND extension_id=? AND state IN ('received','prepared')`,
     )
     .run(Date.now(), JSON.stringify(outcome), id, sdk.extensionId);
   sdk.checkpoint.delete(id);
@@ -176,20 +222,20 @@ export function prepareJob(
   sdk: ShaleSDK,
   job: BrowserJob,
   prepared: import("./payload-pipeline").PreparedBrowserPayload,
-  settings: Partial<import("./settings.types").BrowserExtensionSettings>,
 ) {
   sdk.database.transaction(() => {
     sdk.checkpoint.save(
-      { type: "browser_job", jobId: job.id, prepared, settings },
+      { type: "browser_job", jobId: job.id, prepared },
       { id: job.id, key: job.id },
     );
     sdk.database
       .query(
-        `UPDATE browser_jobs SET prepared=?,settings=?,state='prepared',updated_at=? WHERE id=? AND extension_id=?`,
+        `UPDATE browser_jobs SET prepared=?,settings=NULL,state='prepared',updated_at=?,
+         payload=json_object('type',json_extract(payload,'$.type'),'recordId',record_id,'collectorId',collector_id,'url',json_extract(payload,'$.url')),
+         payload_bytes=0 WHERE id=? AND extension_id=?`,
       )
       .run(
         JSON.stringify(prepared),
-        JSON.stringify(settings),
         Date.now(),
         job.id,
         sdk.extensionId,

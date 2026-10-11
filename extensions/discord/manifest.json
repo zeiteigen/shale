@@ -1,0 +1,13 @@
+{
+  "name": "discord",
+  "namespace": "discord",
+  "version": "0.1.0",
+  "description": "Ingest Discord servers, channels, threads, and DMs from DiscordChatExporter JSON exports, with optional scheduled sync.",
+  "checkpoint_recover": "recover.ts",
+  "setup_script": "refresh.ts",
+  "auth_script": "auth.ts",
+  "crons": [
+    { "name": "discord-import", "schedule": "*/15 * * * *", "script": "index.ts", "run_on_startup": true },
+    { "name": "discord-sync", "schedule": "0 * * * *", "script": "sync.ts" }
+  ]
+}

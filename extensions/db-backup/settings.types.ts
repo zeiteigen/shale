@@ -24,6 +24,9 @@ export interface DbBackupSettings {
    */
   maxBackups: number;
 
+  /** Maximum age in days for matching backup files; expired files are removed even when count retention is unlimited. */
+  maxAgeDays: number;
+
   /**
    * Timestamp format appended to backup filenames ("iso" or "unix").
    */

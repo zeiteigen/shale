@@ -106,7 +106,7 @@ describe('Knowledge graph',()=> {
   it('retains exact evidence across source replacement and invalidates all dependent conclusions',()=> {
     const {sdk,graph,a,b,db}=fixture();ingest(sdk);
     const parent=graph.claims.add({subject:a.id,predicate:'LEADS',object:b.id,status:'accepted',
-      evidence:[{sourceId:'source-1',chunkIndex:0,quote:'Alice leads Atlas.',locator:{start:0,end:18}}]});
+      evidence:[{sourceId:'source-1',chunkIndex:1,quote:'Alice leads Atlas.',locator:{start:0,end:18}}]});
     const child=graph.claims.add({subject:b.id,predicate:'HAS_LEADER',value:true,status:'accepted',dependsOn:[parent.id]});
     const grandchild=graph.claims.add({subject:b.id,predicate:'IS_STAFFED',value:true,status:'accepted',dependsOn:[child.id]});
     ingest(sdk); // Same revision does not invalidate claims.
@@ -125,7 +125,7 @@ describe('Knowledge graph',()=> {
     const {sdk,graph,a,b}=fixture();ingest(sdk);
     expect(()=>graph.ingestClaims([
       {subject:a.id,predicate:'LEADS',object:b.id},
-      {subject:a.id,predicate:'LEADS',object:b.id,evidence:[{sourceId:'source-1',chunkIndex:0,quote:'Bob',locator:{start:0,end:3}}]},
+      {subject:a.id,predicate:'LEADS',object:b.id,evidence:[{sourceId:'source-1',chunkIndex:1,quote:'Bob',locator:{start:0,end:3}}]},
     ])).toThrow('does not match');
     expect(graph.claims.list()).toHaveLength(0);
   });
@@ -192,11 +192,11 @@ describe('Knowledge graph',()=> {
 
   it('expands text search with graph paths and saved supporting passages without an LLM',async()=> {
     const {sdk,graph,a,b}=fixture();ingest(sdk);
-    graph.claims.add({subject:a.id,predicate:'LEADS',object:b.id,status:'accepted',evidence:[{sourceId:'source-1',chunkIndex:0,quote:'Alice leads Atlas.'}]});
+    graph.claims.add({subject:a.id,predicate:'LEADS',object:b.id,status:'accepted',evidence:[{sourceId:'source-1',chunkIndex:1,quote:'Alice leads Atlas.'}]});
     const result=await sdk.search.graph({query:'Alice',mode:'bm25',graph:{maxDepth:1}});
-    expect(result.results).toHaveLength(1);
+    expect(result.results).toHaveLength(2);
     expect(result.neighborhoods.length).toBeGreaterThan(0);
-    expect(result.relatedPassages[0].text).toBe('Alice leads Atlas.');
+    expect(result.relatedPassages.some(passage => passage.text === 'Alice leads Atlas.')).toBe(true);
     expect(result.evidence[0].quote).toBe('Alice leads Atlas.');
   });
 

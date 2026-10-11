@@ -1,9 +1,10 @@
-import { createHash } from "node:crypto";
 import type { ShaleSDK } from "@shale/sdk";
 import type { VaultContext } from "./graph";
 import type { ParsedDocument } from "./parse-document";
 import { commitDocumentGraph } from "./document-graph";
 import { recordCommittedFile } from "./file-progress";
+import { contentFingerprint, memoryChunks, prepareSourceMemory } from "../../lib/memory/prepare";
+import { compactParsedDocument } from "./memory";
 
 /** Commit source, graph evidence, and checkpoint deletion in one transaction. */
 export function commitDocument(
@@ -11,17 +12,17 @@ export function commitDocument(
   vault: VaultContext, namespace = "obsidian", checkpointId?: string,
 ) {
   return sdk.database.transaction(() => {
+    const memory = document.memory ?? prepareSourceMemory(document.contextualChunks, { title: document.documentTitle });
+    document = { ...document, memory };
+    document = compactParsedDocument(document);
     const result = sdk.ingest.sourceAndChunks({
       namespace,
       source: {
         type: "document", uri: document.documentUri, origin: "obsidian",
         title: document.documentTitle, updated_at: document.updatedAt,
-        hash: createHash("sha256").update(JSON.stringify([
-          document.documentUri, document.assetHash, document.metadata,
-          document.contextualChunks.map(chunk => [chunk.text_content, chunk.chunk_type, chunk.metadata]),
-        ])).digest("hex"),
+        hash: document.sourceFingerprint ?? contentFingerprint(document.contextualChunks),
       },
-      chunks: document.contextualChunks,
+      chunks: memoryChunks(memory), memory,
     });
     if (result.skipped) {
       if (checkpointId) sdk.deleteCheckpoint(checkpointId);

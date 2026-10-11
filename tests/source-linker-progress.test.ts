@@ -34,6 +34,7 @@ it("retains failed analyses and candidate overflow across bounded runs", async (
     await expect(processSourceLinks(sdk, { maxPairsPerRun: 1 })).rejects.toThrow("Offline");
     expect(sdk.state.getWatermark(WATERMARK_KEY)).toBeNull();
     expect(readLinkBatch(sdk)?.pairs).toHaveLength(3);
+    expect(database.query<{ count: number }, []>("SELECT count(*) AS count FROM source_memory_pins").get()!.count).toBeGreaterThan(0);
     sdk.queryLLM = (async () => { calls++; return JSON.stringify(analysis); }) as any;
     await processSourceLinks(sdk, { maxPairsPerRun: 1 });
     expect(readLinkBatch(sdk)?.pairs).toHaveLength(2);
@@ -41,6 +42,7 @@ it("retains failed analyses and candidate overflow across bounded runs", async (
     await processSourceLinks(sdk, { maxPairsPerRun: 1 });
     await processSourceLinks(sdk, { maxPairsPerRun: 1 });
     expect(sdk.hasCheckpoints()).toBe(false);
+    expect(database.query<{ count: number }, []>("SELECT count(*) AS count FROM source_memory_pins").get()!.count).toBe(0);
     expect(sdk.state.getWatermark(WATERMARK_KEY)).toBe("102");
     expect(calls).toBe(4);
     expect((await processSourceLinks(sdk)).sourcesAnalyzed).toBe(0);
@@ -104,7 +106,7 @@ it("keeps same-titled sources distinct and maps visualizer chunks by source ID",
     const graph = getGraphData(sdk);
     expect(graph.nodes).toHaveLength(2);
     expect(graph.nodes.map((node) => node.sourceUri).sort()).toEqual(["uri:0", "uri:1"]);
-    expect(graph.nodes.map((node) => node.chunks[0].text_content).sort()).toEqual(["content 0", "content 1"]);
+    expect(graph.nodes.map((node) => node.chunks[0].text_content).every(text => text.startsWith("Extractive overview of Same title:"))).toBe(true);
     expect(graph.nodes.map((node) => node.name)).toEqual(["Same title", "Same title"]);
   } finally { database.close(); }
 });

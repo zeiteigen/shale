@@ -2,16 +2,19 @@ import type { ShaleSDK } from "@shale/sdk";
 import type { WebPageParseResponse } from "../../lib/messages/web-contracts";
 import type { HistoryBatchPayload } from "./types";
 import type { BrowserExtensionSettings } from "./settings.types";
+import type { PreparedPageData } from "./types";
 import { evaluateUrl } from "./filter";
 import { isCatalogStale } from "./catalog-lifecycle";
 import { ensureBrowserSchema } from "./storage-schema";
 import { isSourceExcluded } from '../../lib/knowledge/exclusions';
+import { preparePageVisit } from "./page-ingest";
 
 export interface HistoryPageContent {
   url: string;
   fetchedAt: number;
-  chunks: string[];
   extraction?: WebPageParseResponse["extraction"];
+  origin: "live-dom" | "public-fetch";
+  preparedPage?: PreparedPageData;
 }
 
 /** Fetch each eligible URL once and prepare its extracted text. */
@@ -30,30 +33,27 @@ export async function prepareHistoryContent(
     if (!content) {
       content = (async () => {
         try {
-          // If we already have stored verbatim chunks from a live page capture, reuse them
-          // to avoid redundant unauthenticated HTTP fetches that fail on authenticated pages.
+          // Existing live captures already own the page memory. History should
+          // point at that page rather than fetch and duplicate its body.
           const existingSource = sdk.database
             .query<{ id: string }, [string]>(
-              "SELECT id FROM sources WHERE uri = ? AND type = 'web_page' LIMIT 1",
+              "SELECT id FROM sources WHERE uri = ? AND type IN ('web_page','public_web_page') LIMIT 1",
             )
             .get(policy.cleanUrl);
           if (existingSource) {
-            const cachedChunks = sdk.database
-              .query<{ text_content: string }, [string]>(
-                "SELECT text_content FROM chunks WHERE source_id = ? AND chunk_type = 'verbatim' ORDER BY chunk_index ASC",
-              )
-              .all(existingSource.id)
-              .map((row) => row.text_content)
-              .filter((c) => !c.startsWith("{\n  \"url\":") && !c.startsWith("{\"url\":"));
-            if (cachedChunks.length > 0) {
-              return {
-                url: policy.cleanUrl,
-                fetchedAt: Date.now(),
-                chunks: cachedChunks,
-                extraction: { method: "live-dom", version: "stored-chunks-v1", quality: "full", truncated: false,
-                  originalChars: cachedChunks.reduce((total,chunk)=>total+chunk.length,0), reasons: [] },
-              };
-            }
+            const retained = sdk.memory.get(existingSource.id);
+            const receipt = sdk.database.query<{ quality: string | null }, [string, string]>(
+              `SELECT json_extract(prepared,'$.extraction.quality') AS quality FROM browser_content_cache
+               WHERE extension_id=? AND source_id=? AND json_extract(prepared,'$.cacheState')='complete'
+              ORDER BY updated_at DESC LIMIT 1`).get(sdk.extensionId, existingSource.id);
+            const coverage = retained.coverage as { inputCharacters?: number };
+            return {
+              url: policy.cleanUrl,
+              fetchedAt: Date.now(),
+              origin: "live-dom",
+              extraction: { method: "stored-memory", version: "memory-v1", quality: (receipt?.quality ?? "partial") as "full" | "partial" | "metadata", truncated: false,
+                originalChars: coverage.inputCharacters ?? 0, reasons: ["Reused existing canonical source memory"] },
+            };
           }
 
           const parsed = await sdk.messages.request("web:parse", {
@@ -65,12 +65,26 @@ export async function prepareHistoryContent(
             chunkSize: settings.chunkSize,
           }, { target: "web-page-parser", timeoutMs: 20000 });
           if (!parsed.text.trim()) throw new Error("No readable page content");
-          const chunks = parsed.chunks.filter((chunk) => chunk.trim());
+          const fetchedAt = Date.now();
+          const preparedPage = await preparePageVisit(sdk, {
+            type: "page_visit",
+            url: policy.cleanUrl,
+            title: item.title || parsed.title,
+            textContent: parsed.text,
+            blocks: parsed.blocks,
+            extraction: parsed.extraction,
+            captureOrigin: "public-fetch",
+            visitedAt: fetchedAt,
+            capturedAt: fetchedAt,
+            recordInSession: false,
+            recordId: `history-page:${policy.cleanUrl}`,
+          }, settings, { managed: true, parsed });
           return {
             url: policy.cleanUrl,
-            fetchedAt: Date.now(),
-            chunks: chunks.length ? chunks : [parsed.text],
+            fetchedAt,
+            origin: "public-fetch",
             extraction: parsed.extraction,
+            preparedPage: preparedPage ?? undefined,
           };
         } catch (error) {
           sdk.logger.warn(`[History] Could not fetch/parse ${policy.cleanUrl}; using metadata: ${String(error)}`);
@@ -79,6 +93,6 @@ export async function prepareHistoryContent(
       })();
       fetched.set(policy.cleanUrl, content);
     }
-    return content;
+    return content ?? null;
   });
 }

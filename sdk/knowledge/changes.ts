@@ -10,6 +10,7 @@ import { KnowledgeReads } from './reads';
 import { recordVersion } from './version';
 import { projectConnections } from './projection';
 import { fingerprint, replay, saveChange, type ChangeContext } from './audit';
+import { compactAudit } from '../../lib/memory/audit';
 
 type Operation={type:MutationName;args:Record<string,unknown>};
 const sourceOperations=new Set(['add_source','update_source','remove_source','restore_source','add_chunk','revise_chunk','remove_chunk']);
@@ -67,7 +68,7 @@ export class KnowledgeEditor {
           const before=this.snapshot(args);
           const result=sourceOperations.has(operation.type) ? this.sources.execute(operation.type,args,parsed.actor,parsed.reason) :
             this.graphEdits.execute(operation.type,args,parsed.actor,parsed.reason,refs);
-          details.push({type:operation.type,args,before,result,after:this.snapshot(args)});
+          details.push({type:operation.type,args:compactAudit(args),before:compactAudit(before),result,after:compactAudit(this.snapshot(args))});
         }
         const changed=this.db.query<{kind:string;record_id:string},[]>('SELECT DISTINCT kind,record_id FROM knowledge_edit_journal').all();
         const claimIds=changed.filter(r=>r.kind==='claim').map(r=>r.record_id);
@@ -106,7 +107,7 @@ export class KnowledgeEditor {
         requiresReview:claims.filter(id=>['stale','proposed','disputed'].includes(this.graph.claims.get(id).status))} : result;
       saveChange(this.db,payload,context,response,changeId);
       // before/after are retained separately in the operation payload for historical correction inspection.
-      this.db.query('UPDATE graph_changes SET operations=? WHERE id=?').run(JSON.stringify({...payload,before,after:this.snapshot(typeof input==='object' && input!==null ? input as Record<string,unknown> : {})}),changeId);
+      this.db.query('UPDATE graph_changes SET operations=? WHERE id=?').run(JSON.stringify(compactAudit({...payload,before,after:this.snapshot(typeof input==='object' && input!==null ? input as Record<string,unknown> : {})})),changeId);
       this.db.run('DELETE FROM knowledge_edit_journal');
       this.db.run('UPDATE knowledge_edit_session SET active=0 WHERE id=1');
       return response as T;
@@ -123,7 +124,7 @@ export class KnowledgeEditor {
     if(typeof args.sourceId==='string') {
       const source=this.db.query('SELECT * FROM sources WHERE id=?').get(args.sourceId);
       records[`source:${args.sourceId}`]=source ?? this.db.query('SELECT * FROM graph_source_archives WHERE source_id=?').get(args.sourceId);
-      records.chunks=this.db.query('SELECT * FROM chunks WHERE source_id=? ORDER BY chunk_index,id').all(args.sourceId);
+      records.chunks=this.db.query('SELECT id,source_id,chunk_index,chunk_type FROM chunks WHERE source_id=? ORDER BY chunk_index,id').all(args.sourceId);
       records.metadata=this.db.query('SELECT * FROM graph_source_metadata WHERE source_id=?').get(args.sourceId);
       records.chunkLinks=this.db.query('SELECT ce.* FROM chunk_entities ce JOIN chunks c ON c.id=ce.chunk_id WHERE c.source_id=?').all(args.sourceId);
     }

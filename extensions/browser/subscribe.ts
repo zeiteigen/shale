@@ -12,6 +12,7 @@ import { wakeBrowserWorker } from "./worker-scheduler";
 import { browserStatus, retryBrowserJobs } from "./status";
 import { queryBrowser, correctContext } from "./retrieval";
 import type { BrowserExtensionSettings } from "./settings.types";
+import { refreshBrowserSource } from './refresh';
 let cachedSdk: ShaleSDK | null = null;
 const resolveSDK = () => (cachedSdk ??= getSDK(import.meta.dir));
 export function capturePolicy(sdk: ShaleSDK) {
@@ -27,6 +28,7 @@ export function capturePolicy(sdk: ShaleSDK) {
 export async function init(): Promise<void> {
   const sdk = resolveSDK();
   migrateLegacyInbox(sdk);
+  sdk.messages.handle('source:refresh',request=>refreshBrowserSource(sdk,request));
   sdk.messages.handle("browser:query", (filter) => queryBrowser(sdk, filter), {
     name: "browser",
   });

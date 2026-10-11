@@ -13,6 +13,7 @@ import { commitCatalogGraph } from "./catalog-graph";
 import { isSourceExcluded } from "../../lib/knowledge/exclusions";
 
 import { prepareHistoryContent, type HistoryPageContent } from "./history-content";
+import { finalizePageVisit } from "./page-ingest";
 
 /**
  * Processes a batch of browser history visits.
@@ -36,7 +37,7 @@ export async function finalizeHistoryBatch(
     visitCount?: number;
     typedCount?: number;
     textContent: string;
-    chunks: string[];
+      chunks: string[];
     sourceId: string;
     sourceUri: string;
     pageEntity: string;
@@ -82,9 +83,8 @@ export async function finalizeHistoryBatch(
     const fetched = content?.url === filter.cleanUrl ? content : null;
     const chunks = [
       textContent + (fetched
-        ? `\nContent Origin: public-fetch\nContent Fetched At: ${new Date(fetched.fetchedAt).toISOString()}\nExtraction: ${JSON.stringify(fetched.extraction ?? {})}`
+        ? `\nContent Origin: ${fetched.origin}\nContent Observed At: ${new Date(fetched.fetchedAt).toISOString()}\nExtraction Quality: ${fetched.extraction?.quality ?? "metadata"}`
         : ""),
-      ...(fetched?.chunks ?? []),
     ];
     validItems.push({
       title,
@@ -159,6 +159,12 @@ export function processHistoryBatch(
 ) {
   return sdk.models.batch(
     () => prepareHistoryContent(sdk, payload, settings),
-    (contents) => finalizeHistoryBatch(sdk, payload, settings, afterCommit, contents),
+    async (contents) => {
+      const pages = new Map<string, NonNullable<HistoryPageContent["preparedPage"]>>();
+      for (const content of contents)
+        if (content?.preparedPage) pages.set(content.url, content.preparedPage);
+      for (const page of pages.values()) await finalizePageVisit(sdk, page, settings);
+      return finalizeHistoryBatch(sdk, payload, settings, afterCommit, contents);
+    },
   );
 }

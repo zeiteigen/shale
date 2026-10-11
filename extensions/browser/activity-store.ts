@@ -54,8 +54,10 @@ export function storeActivity(
         "Activity event ID was reused with different observations",
         409,
       );
+    pruneActivity(sdk);
     return;
   }
+  pruneActivity(sdk);
   sdk.database
     .query("INSERT INTO browser_activity VALUES(?,?,?,?,?,?)")
     .run(
@@ -66,6 +68,11 @@ export function storeActivity(
       event.sequence ?? event.visitedAt,
       JSON.stringify(event),
     );
+}
+function pruneActivity(sdk: ShaleSDK): void {
+  const retentionCutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  sdk.database.query("DELETE FROM browser_activity WHERE extension_id=? AND occurred_at<?")
+    .run(sdk.extensionId, retentionCutoff);
 }
 export function activityEvents(
   sdk: ShaleSDK,

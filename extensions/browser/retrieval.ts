@@ -63,9 +63,7 @@ export function queryBrowser(
     filter.goal;
   const where: string[] = [
     "s.origin='browser'",
-    contextual
-      ? "s.type IN ('web_page_version','public_web_page_version')"
-      : "s.type IN ('web_page','public_web_page')",
+    "s.type IN ('web_page','public_web_page')",
     "c.chunk_type='verbatim'",
   ];
   const params: any[] = [];
@@ -108,13 +106,13 @@ export function queryBrowser(
   )
     throw new Error("Invalid capture quality");
   if (filter.quality) {
-    where.push("json_extract(cache.prepared,'$.parser.extraction.quality')=?");
+    where.push("coalesce(json_extract(cache.prepared,'$.extraction.quality'),json_extract(cache.prepared,'$.parser.extraction.quality'))=?");
     params.push(filter.quality);
   }
   const pages = sdk.database
     .query<any, any[]>(
       `SELECT s.id AS sourceId,s.title,coalesce(json_extract(cache.prepared,'$.pageData.cleanUrl'),s.uri) AS url,c.text_content AS passage,c.chunk_index AS chunkIndex,
-    coalesce(json_extract(cache.prepared,'$.parser.extraction.quality'),'metadata') AS quality,
+    coalesce(json_extract(cache.prepared,'$.extraction.quality'),json_extract(cache.prepared,'$.parser.extraction.quality'),'metadata') AS quality,
     cache.prepared,${match ? "bm25(chunks_fts)" : "0"} AS rank FROM ${match ? "chunks_fts JOIN chunks c ON c.id=chunks_fts.rowid" : "chunks c"}
     JOIN sources s ON s.id=c.source_id LEFT JOIN browser_content_cache cache ON (cache.source_id=s.id OR json_extract(cache.prepared,'$.canonicalSourceId')=s.id) AND cache.extension_id=?
       AND cache.content_key=(SELECT cc.content_key FROM browser_content_cache cc WHERE (cc.source_id=s.id OR json_extract(cc.prepared,'$.canonicalSourceId')=s.id) AND cc.extension_id=? AND json_extract(cc.prepared,'$.indexedHash')=s.hash ORDER BY cc.updated_at DESC,cc.content_key LIMIT 1)
@@ -123,16 +121,21 @@ export function queryBrowser(
     .all(sdk.extensionId, sdk.extensionId, ...params, limit)
     .map((row) => {
       const prepared = row.prepared ? JSON.parse(row.prepared) : null;
-      const located = prepared?.parser?.chunkLocators?.[row.chunkIndex - 1];
+      const located = prepared?.memory?.snippets?.[row.chunkIndex - 1]?.locator ??
+        prepared?.parser?.chunkLocators?.[row.chunkIndex - 1];
+      let locator = located?.locator ?? null;
+      if (!locator && row.chunkIndex > 0) {
+        try { locator = sdk.memory.get(row.sourceId).snippets[row.chunkIndex - 1]?.locator ?? null; } catch { /* legacy source */ }
+      }
       return {
         sourceId: row.sourceId,
         title: row.title,
         url: row.url,
         passage: row.passage,
-        captureOrigin: prepared?.pageData?.captureOrigin ?? "unknown",
+        captureOrigin: prepared?.captureOrigin ?? prepared?.pageData?.captureOrigin ?? "unknown",
         quality: row.quality,
         rank: row.rank,
-        locator: located?.locator ?? null,
+        locator,
         headingPath: located?.headingPath ?? [],
       };
     });
@@ -171,7 +174,9 @@ export function queryBrowser(
     WHERE cm.session_id=b.session_id AND cm.extension_id=b.extension_id AND ${threadWhere.join(" AND ")})`);
     sessionParams.push(...threadParams);
   }
-  if (words.length) {
+  // Explicit typed context membership already scopes the session set; do not
+  // require the short narrative to repeat every search term from its pages.
+  if (words.length && !filter.goal && !filter.topic && !filter.threadId) {
     sessionWhere.push(
       "(" +
         words

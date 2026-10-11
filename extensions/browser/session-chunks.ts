@@ -14,9 +14,13 @@ export function sessionChunks(narrative: string, observation: string, size = 100
     }
     return chunks;
   };
-  const generated = split(narrative, "synthetic"), observed = split(observation, "verbatim");
-  return [generated[0], observed[0], ...generated.slice(1), ...observed.slice(1)]
-    .filter(chunk => chunk !== undefined).map((chunk, chunk_index) => ({ ...chunk, chunk_index }));
+  // Session observations remain in the typed activity tables. Never duplicate
+  // their complete event JSON into searchable source chunks.
+  void observation;
+  return split(narrative, "synthetic").map((chunk, chunk_index) => ({
+    ...chunk,
+    chunk_index,
+  }));
 }
 
 /** A split observation is grounded in its complete immutable source revision. */

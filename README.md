@@ -3,16 +3,17 @@
 A local knowledge workspace with SQLite storage, modular connectors, and a unified web interface for host controls, settings, and the knowledge graph.
 
 ```sh
-bun install
-bun install --cwd visualizer
+bun run setup   # bun install (root + visualizer) and each extension's installer, e.g. Instagram's Python sidecar
 bun run start
 ```
 
-Open **http://localhost:7425**. Use Overview to run background jobs and follow output, Settings to configure the host and extensions, and Knowledge to explore sources and review claims.
+Open **http://localhost:7425**. Use Overview to run background jobs and follow output, Settings to configure the host and extensions, Accounts to connect services such as Discord and Instagram, and Knowledge to explore sources and review claims.
 
 The daemon serves the interface and ingestion API together. Settings are read fresh from disk; port and database changes require a restart. Host settings and their schema live in `data/settings.json` and `data/settings.help.json`. The default database is `data/production.db`, with backups in `data/backups/`. API keys live in `data/.env`, loaded at startup without overriding existing environment variables. Example configuration files are also in `data/`. Terminal commands remain available for automation, with `--cli` enabling the legacy interactive console.
 
 See [the web interface guide](visualizer/README.md) for development, compatibility, and verification, and [the SDK guide](sdk/README.md) for extension development.
+
+See [the source memory guide](docs/source-memory.md) for summary/snippet storage, editing, refresh, and migration. The future dreaming process is tracked in [the roadmap](docs/roadmap.md).
 
 ## Connect Pi to Shale's MCP server
 

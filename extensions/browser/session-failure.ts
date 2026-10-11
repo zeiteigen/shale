@@ -16,8 +16,8 @@ export function failSession(
     const attempts = (old?.attempts ?? 0) + 1;
     sdk.database
       .query(
-        `INSERT INTO browser_sessions(extension_id,session_id,collector_id,activity_hash,start_time,end_time,boundary_reason,attempts,next_attempt_at,error)
-      VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(extension_id,session_id) DO UPDATE SET attempts=excluded.attempts,next_attempt_at=excluded.next_attempt_at,error=excluded.error`,
+        `INSERT INTO browser_sessions(extension_id,session_id,collector_id,activity_hash,start_time,end_time,boundary_reason,attempts,next_attempt_at,error,prepared_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(extension_id,session_id) DO UPDATE SET attempts=excluded.attempts,next_attempt_at=excluded.next_attempt_at,error=excluded.error,prepared_at=coalesce(browser_sessions.prepared_at,excluded.prepared_at)`,
       )
       .run(
         sdk.extensionId,
@@ -30,6 +30,7 @@ export function failSession(
         attempts,
         Date.now() + Math.min(3600000, 1000 * 2 ** Math.min(12, attempts)),
         String(error).slice(0, 2000),
+        Date.now(),
       );
     if (attempts >= maxAttempts)
       sdk.database

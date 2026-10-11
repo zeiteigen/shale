@@ -7,10 +7,11 @@
     "./mcp": "./mcp/index.ts"
   },
   "scripts": {
+    "setup": "bun setup.ts",
     "start": "bun run --cwd visualizer build && bun main/index.ts",
     "web:build": "bun run --cwd visualizer build",
     "test:web": "bun test tests/web-interface.test.ts tests/visualizer-server.test.ts tests/ingest-http.test.ts",
-    "test:web:browser": "bun run web:build && SHALE_WEB_E2E=1 bun test tests/web-interface-ui.test.ts",
+    "test:web:browser": "bun run web:build && SHALE_WEB_E2E=1 bun test tests/web-interface-ui.test.ts tests/notebook-connections-ui.test.ts tests/node-reader-ui.test.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tests/tsconfig.json && tsc -p tests/types/tsconfig.json && tsc -p visualizer/tsconfig.json",
     "settings": "bun scripts/settings.ts",
     "mcp": "bun mcp/cli.ts",

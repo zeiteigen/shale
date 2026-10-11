@@ -61,7 +61,11 @@ describe('Knowledge editing transactions',()=>{
     expect(preview.preview).toBe(true);
     expect(db.query('SELECT * FROM graph_source_revisions').all()).toHaveLength(0);
     await sdk.knowledge.apply({reason:'commit text',operations});
-    expect(db.query('SELECT text_content FROM chunks ORDER BY chunk_index').all()).toEqual([{text_content:'one'},{text_content:'two'}]);
+    const liveChunks=db.query<{chunk_index:number;chunk_type:string;text_content:string}, []>('SELECT chunk_index,chunk_type,text_content FROM chunks ORDER BY chunk_index').all();
+    expect(liveChunks).toHaveLength(3);
+    expect(liveChunks[0]).toMatchObject({chunk_index:0,chunk_type:'synthetic'});
+    expect(liveChunks[0]!.text_content).toContain('one');
+    expect(liveChunks.slice(1).map(chunk=>chunk.text_content)).toEqual(['one','two']);
     const before=db.query('SELECT * FROM sources').all();
     await expect(sdk.knowledge.apply({reason:'invalid batch',operations:[
       {type:'update_source',args:{sourceId:'new',title:'Changed'}},
@@ -140,7 +144,7 @@ describe('Knowledge editing transactions',()=>{
 
   it('revises and withdraws evidence without rewriting exact historical citations',async()=>{
     const {sdk,edit,source,entity,claim}=setup();const src=await source('evidence','original evidence text');const node=entity('Fact'),fact=claim(node.id,'known');
-    const original=sdk.graph.evidence.add(fact.id,{sourceId:src.sourceId,chunkIndex:0,quote:'original',locator:{start:0,end:8}});
+    const original=sdk.graph.evidence.add(fact.id,{sourceId:src.sourceId,chunkIndex:1,quote:'original',locator:{start:0,end:8}});
     const revised=await edit('revise_evidence',{evidenceId:original,patch:{quote:'evidence',locator:{start:9,end:17},confidence:0.9}});
     const items=sdk.graph.evidence.list(fact.id);expect(items).toHaveLength(2);
     expect(items.find(e=>e.id===original)!.withdrawnAt).toBeDefined();expect(items.find(e=>e.id===original)!.quote).toBe('original');
@@ -150,7 +154,7 @@ describe('Knowledge editing transactions',()=>{
     await edit('retract_evidence',{evidenceId:sourceOnly.replacementId});
     expect(sdk.graph.evidence.list(fact.id).every(e=>e.withdrawnAt!==undefined)).toBe(true);
     const revision=await sdk.knowledge.read('get_source_revision',{revisionId:items[0]!.revisionId}) as any;
-    expect(revision.chunks[0].text_content).toBe('original evidence text');
+    expect(revision.chunks[1].text_content).toBe('original evidence text');
     await expect(edit('revise_evidence',{evidenceId:original,patch:{quote:'wrong'}})).rejects.toThrow('withdrawn');
     await edit('batch_review_claims',{claims:[{claimId:fact.id,status:'accepted'}]});
     await edit('remove_source',{sourceId:src.sourceId});
@@ -186,14 +190,21 @@ describe('Knowledge source and chunk editing',()=>{
   it('adds, revises and removes chunks with stable surviving IDs, snapshots and FTS',async()=>{
     const {db,sdk,edit,source,entity,claim}=setup();const src=await source('text','original uniquealpha');
     const node=entity('Referenced'),fact=claim(node.id,'fact');
-    const oldRevision=sdk.graph.evidence.list(sdk.graph.claims.list({subject:src.entityId,predicate:'HAS_CONTENT'})[0]!.id)[0]!.revisionId;
+    const sourceHash=db.query<{hash:string},[string]>('SELECT hash FROM sources WHERE id=?').get(src.sourceId)!.hash;
+    const oldRevision=db.query<{id:number},[string,string]>('SELECT id FROM graph_source_revisions WHERE source_id=? AND hash=?').get(src.sourceId,sourceHash)!.id;
+    const historical=sdk.graph.claims.add({subject:node.id,predicate:'PRIOR_SOURCE_TEXT',value:'original uniquealpha'});
+    sdk.graph.evidence.add(historical.id,{sourceId:src.sourceId,chunkIndex:1,quote:'original uniquealpha',locator:{start:0,end:'original uniquealpha'.length}});
     const appended=await edit('add_chunk',{sourceId:src.sourceId,text:'append uniquebeta',entityIds:[node.id],claimIds:[fact.id]});
-    expect((await sdk.knowledge.read('get_source_revision',{revisionId:oldRevision}) as any).chunks).toHaveLength(1);
+    const oldChunks=(await sdk.knowledge.read('get_source_revision',{revisionId:oldRevision}) as any).chunks;
+    expect(oldChunks).toHaveLength(2);
+    expect(oldChunks[1].text_content).toBe('original uniquealpha');
     await edit('revise_chunk',{sourceId:src.sourceId,chunkId:src.chunkIds[0],text:'corrected uniquegamma',chunkType:'synthetic'});
     expect(db.query('SELECT id FROM chunks WHERE id=?').get(src.chunkIds[0])).not.toBeNull();
-    expect((await sdk.search.bm25({query:'uniquealpha'}))).toHaveLength(0);
+    expect((await sdk.search.bm25({query:'uniquealpha'}))).toHaveLength(1);
+    expect(db.query<{text_content:string},[string,number]>('SELECT text_content FROM chunks WHERE source_id=? AND chunk_index=?').get(src.sourceId,0)!.text_content).toBe('corrected uniquegamma');
     expect((await sdk.search.bm25({query:'uniquegamma'}))).toHaveLength(1);
-    expect((await sdk.knowledge.read('get_source_revision',{revisionId:oldRevision}) as any).chunks[0].text_content).toBe('original uniquealpha');
+    const historicalChunks=(await sdk.knowledge.read('get_source_revision',{revisionId:oldRevision}) as any).chunks;
+    expect(historicalChunks.some((chunk:any)=>chunk.chunk_index===1 && chunk.text_content==='original uniquealpha')).toBe(true);
     await edit('revise_chunk',{sourceId:src.sourceId,chunkId:appended.chunkId,entityIds:[node.id],claimIds:[]});
     expect(sdk.graph.evidence.list(fact.id).every(e=>e.withdrawnAt!==undefined)).toBe(true);
     await edit('remove_chunk',{sourceId:src.sourceId,chunkId:appended.chunkId});
@@ -201,7 +212,7 @@ describe('Knowledge source and chunk editing',()=>{
     const another=await edit('add_chunk',{sourceId:src.sourceId,text:'next'});
     expect((db.query('SELECT chunk_index FROM chunks WHERE id=?').get(another.chunkId) as any).chunk_index).toBe(2);
     const listed=await sdk.knowledge.read('list_chunks',{sourceId:src.sourceId,limit:1,offset:1}) as any;
-    expect(listed.total).toBe(2);expect(listed.chunks).toHaveLength(1);expect(listed.chunks[0].version).toBeGreaterThan(0);
+    expect(listed.total).toBe(3);expect(listed.chunks).toHaveLength(1);expect(listed.chunks[0].version).toBeGreaterThan(0);
     await expect(edit('remove_chunk',{sourceId:'wrong-source',chunkId:another.chunkId})).rejects.toThrow('Unknown live source');
   });
 
@@ -223,13 +234,15 @@ describe('Knowledge source and chunk editing',()=>{
 
   it('archives spam, blocks normalized connector identities, preserves shared nodes, and restores with remapped IDs',async()=>{
     const {db,sdk,edit,source,entity,claim}=setup();const src=await source('spam','spam uniquespam');const shared=entity('Shared'),fact=claim(shared.id,'shared');
-    sdk.graph.evidence.add(fact.id,{sourceId:src.sourceId,chunkIndex:0,quote:'spam'});
+    sdk.graph.evidence.add(fact.id,{sourceId:src.sourceId,chunkIndex:1,quote:'spam'});
     const originalCitation=sdk.graph.evidence.list(fact.id)[0]!;
     await edit('remove_source',{sourceId:src.sourceId,blockReingestion:true});
     expect(await sdk.search.bm25({query:'uniquespam'})).toHaveLength(0);
     expect(sdk.graph.entities.get(shared.id).name).toBe('Shared');expect(sdk.graph.claims.get(fact.id).status).toBe('stale');
     expect((await sdk.knowledge.read('list_sources',{status:'removed'}) as any).sources[0].id).toBe(src.sourceId);
-    expect((await sdk.knowledge.read('list_chunks',{sourceId:src.sourceId,archived:true}) as any).chunks).toHaveLength(1);
+    const archived=(await sdk.knowledge.read('list_chunks',{sourceId:src.sourceId,archived:true}) as any).chunks;
+    expect(archived).toHaveLength(2);
+    expect(archived[1].text_content).toContain('spam uniquespam');
     const skipped=sdk.ingest.sourceAndChunks({source:{uri:'browser-public://test%3A%2F%2Fspam',title:'spam',type:'text',origin:'browser'},chunks:[{text_content:'spam'}]});
     expect(skipped.skipped).toBe('excluded');
     await expect(edit('restore_source',{sourceId:src.sourceId})).rejects.toThrow('excluded');
@@ -237,8 +250,30 @@ describe('Knowledge source and chunk editing',()=>{
     const restored=await edit('restore_source',{sourceId:src.sourceId,unblockReingestion:true});
     expect(restored.chunkIds[0]).not.toBe(src.chunkIds[0]);expect(sdk.graph.claims.get(fact.id).status).toBe('stale');
     expect(sdk.graph.evidence.list(fact.id)[0]!.revisionId).toBe(originalCitation.revisionId);
-    expect(await sdk.search.bm25({query:'uniquespam'})).toHaveLength(1);
+    const spamResults=await sdk.search.bm25({query:'uniquespam'});
+    expect(spamResults).toHaveLength(2);
+    expect(spamResults.every(result=>result.source_id===src.sourceId)).toBe(true);
     expect((await sdk.knowledge.read('inspect_source',{sourceId:src.sourceId}) as any).exclusions).toHaveLength(0);
+  });
+
+  it('preserves source memory snippet IDs, locators, purpose, and fingerprint across archive restore',async()=>{
+    const {sdk,edit,source}=setup();
+    const src=await source('memory-archive','The original source text for archival.');
+    const before=sdk.memory.get(src.sourceId);
+    sdk.memory.edit({sourceId:src.sourceId,expectedVersion:before.version,actor:'curator',reason:'Retain located detail',
+      add:[{text:'located source detail',kind:'derived',locator:{originalChunkIndex:7,start:12,end:32,pageNumber:4},purpose:'supporting passage'}]});
+    const active=sdk.memory.get(src.sourceId);
+    const retained=active.snippets.find(snippet=>snippet.text==='located source detail')!;
+    const fingerprint=active.freshness.fingerprint;
+    await edit('remove_source',{sourceId:src.sourceId});
+    const archived=JSON.parse((sdk.database.query<{snapshot:string},[string]>('SELECT snapshot FROM graph_source_archives WHERE source_id=?').get(src.sourceId)!).snapshot);
+    expect(archived.memory.snippets.find((snippet:any)=>snippet.text==='located source detail')).toMatchObject({
+      id:retained.id,locator:{originalChunkIndex:7,start:12,end:32,pageNumber:4},purpose:'supporting passage'});
+    await edit('restore_source',{sourceId:src.sourceId});
+    const restored=sdk.memory.get(src.sourceId);
+    expect(restored.freshness.fingerprint).toBe(fingerprint);
+    expect(restored.snippets.find(snippet=>snippet.text==='located source detail')).toMatchObject({
+      id:retained.id,locator:{originalChunkIndex:7,start:12,end:32,pageNumber:4},purpose:'supporting passage'});
   });
 
   it('rejects restore conflicts without partial writes',async()=>{
@@ -256,7 +291,9 @@ describe('Knowledge source and chunk editing',()=>{
     expect(result.sourceId).toBe(src.sourceId);expect(db.query('SELECT * FROM graph_source_archives').all()).toHaveLength(0);
     expect((await sdk.knowledge.read('list_sources',{status:'all'}) as any).total).toBe(1);
     await edit('remove_source',{sourceId:src.sourceId});
-    expect((await sdk.knowledge.read('list_chunks',{sourceId:src.sourceId,archived:true}) as any).chunks[0].text_content).toBe('returned content');
+    const archived=(await sdk.knowledge.read('list_chunks',{sourceId:src.sourceId,archived:true}) as any).chunks;
+    expect(archived).toHaveLength(2);
+    expect(archived[1].text_content).toBe('returned content');
   });
 
   it('skips excluded Obsidian commits and browser catalog items without aborting eligible records',async()=>{

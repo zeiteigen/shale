@@ -13,11 +13,29 @@ import { createExtensionSDK } from "../sdk";
 import { isTExtensionManifest } from "../lib/extension";
 import { clearAllCheckpoints, hasQueuedCheckpoints } from "../lib/db";
 import { runCron } from "../main/index";
+import { compactParsedFile } from "../extensions/obsidian/memory";
+import { prepareSourceMemory } from "../lib/memory/prepare";
 
 describe("Obsidian Extension AI Summary Checkpoints & Recovery", () => {
   const extensionId = "obsidian parser";
   beforeEach(() => {
     clearAllCheckpoints(extensionId);
+  });
+
+  it("bounds parsed frontmatter and removes full note text from durable checkpoints", () => {
+    const fullText = "distinctive-source-text-".repeat(1000);
+    const chunks = [{ chunk_index: 0, text_content: fullText }];
+    const compact = compactParsedFile({
+      filePath: "/note.md", noteTitle: "Note", noteUri: "file:///note.md", updatedAt: 1,
+      parsed: { title: "Note", body: fullText, rawContent: fullText, frontmatter: { source: fullText }, tags: [], wikilinks: [], images: [], references: [] },
+      chunks: [], contextualChunks: chunks, memory: prepareSourceMemory(chunks, { title: "Note" }),
+    } as any);
+    const serialized = JSON.stringify(compact);
+    expect(String(compact.parsed.frontmatter.source).length).toBeLessThan(fullText.length);
+    expect(compact.parsed.body).toBe("");
+    expect(compact.parsed.rawContent).toBe("");
+    expect(serialized).not.toContain(fullText);
+    expect(compact.contextualChunks.reduce((count, chunk) => count + chunk.text_content.length, 0)).toBeLessThan(fullText.length);
   });
 
   it("manifest.json includes valid checkpoint_recover script", () => {
@@ -74,10 +92,12 @@ Short note on qubits and superposition.`,
     expect(checkpoints[0].data.noteTitle).toBe("Quantum");
 
     // The contextual chunks should include the AI summary expansion
-    const hasExpandedChunk = checkpoints[0].data.parsedFile.chunks.some(
-      (c: any) => c.heading?.includes("(Expanded Context)"),
+    expect(checkpoints[0].data.parsedFile.parsed.body).toBe("");
+    expect(checkpoints[0].data.parsedFile.parsed.rawContent).toBe("");
+    expect(checkpoints[0].data.parsedFile.chunks).toEqual([]);
+    expect(checkpoints[0].data.parsedFile.memory.summary).toContain(
+      "Qubits; superposition; decoherence time; quantum gates.",
     );
-    expect(hasExpandedChunk).toBe(true);
   });
 
   it("reuses checkpointed AI summary if available instead of querying LLM", async () => {

@@ -3,6 +3,8 @@ import { parsedImageResponse } from "./image-response";
 import type { ProcessFileResponse } from "../../lib/messages.types";
 import type { PreparedSourceClaim } from "../../sdk/graph/prepared";
 import type { ContextualChunk } from "./parse-file";
+import { fingerprintFile } from "../../lib/memory/fingerprint";
+import { prepareSourceMemory, type PreparedSourceMemory } from "../../lib/memory/prepare";
 import {
   describeImageWithChatModel as sharedDescribeImage,
   parseImageFile as sharedParseImageFile,
@@ -18,6 +20,8 @@ export interface ParsedImage {
   assetHash?: string;
   contextualChunk: ContextualChunk;
   contextualChunks: ContextualChunk[];
+  memory?: PreparedSourceMemory;
+  sourceFingerprint?: string;
 }
 
 export interface ParseImageOptions {
@@ -58,7 +62,7 @@ export async function parseImageFile(
       filePath: rawPath, fileType: "image",
       options: { timeoutMs: options?.timeoutMs },
     }, { timeoutMs: 0, signal: options?.signal });
-    return parsedImageResponse(response, rawPath);
+    return await parsedImageResponse(response, rawPath);
   }
 
   // 2. Standalone fallback using the SDK implementation
@@ -79,6 +83,8 @@ export async function parseImageFile(
     updatedAt: localResult.updatedAt,
     description: localResult.description,
     assetHash: localResult.assetHash,
+    memory: prepareSourceMemory(contextualChunks, { title: localResult.imageTitle, summary: localResult.description }),
+    sourceFingerprint: localResult.assetHash ?? await fingerprintFile(rawPath),
     knowledge: localResult.contextualChunks.map(c => ({ predicate: String(c.metadata?.predicate ?? "VISUAL_DESCRIPTION"), value: c.text_content, chunkIndex: c.chunk_index, status: "proposed", method: String(c.metadata?.origin ?? "vision"), model: c.metadata?.model as string | undefined })),
     contextualChunk: contextualChunks[0],
     contextualChunks,
@@ -114,7 +120,7 @@ export async function parseImageFilesBatch(
     const parsed: ParsedImage[] = [];
     for (const filePath of rawPaths) {
       const result = byPath.get(filePath);
-      if (result?.success) parsed.push(parsedImageResponse(result, filePath));
+      if (result?.success) parsed.push(await parsedImageResponse(result, filePath));
       else sdk.logger.warn(`Image remains pending for retry: ${filePath}: ${result?.error ?? "No image result returned"}`);
     }
     return parsed;

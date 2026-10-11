@@ -16,10 +16,12 @@ import {
 } from "./payload-pipeline";
 import type { BrowserExtensionSettings } from "./settings.types";
 import { prepareSessionJobs, finalizeSessionJob } from "./session-jobs";
+import { expirePreparedSessions } from "./session-retention";
 
 /** One bounded processing batch, with durable output and transactional completion. */
 export async function runWorker(sdk: ShaleSDK) {
   const policy = browserSettings(sdk);
+  expirePreparedSessions(sdk);
 
   const lease = acquireTaskLease(
     sdk.database,
@@ -104,7 +106,7 @@ export async function runWorker(sdk: ShaleSDK) {
                       managed: true,
                     }));
             assertOwned();
-            prepareJob(sdk, job, payload, settings);
+            prepareJob(sdk, job, payload);
             return { job, payload, settings };
           } catch (error) {
             failJob(sdk, job, error, settings.maxJobAttempts ?? 5);

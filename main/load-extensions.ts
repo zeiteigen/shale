@@ -6,7 +6,7 @@ import {
   CronExtension,
 } from "../lib/extension";
 import { IngestMaterial } from "../lib/ingest.types";
-import { createExtensionSDK, sdkStorage } from "../sdk";
+import { createExtensionSDK, sdkStorage, isAuthProvider, type AuthProvider, type ShaleSDK } from "../sdk";
 
 export type IngestHook = import("./ingest-admission").IngestSubscriber & {
   func: (item: IngestMaterial) => Promise<void>;
@@ -20,6 +20,7 @@ const crons: CronExtension[] = [];
 const subscribe_ingest: IngestHook[] = [];
 const checkpointRecoverScripts = new Map<string, string>();
 const extensionNamespaces = new Map<string, string>();
+const authProviders = new Map<string, { provider: AuthProvider; sdk: ShaleSDK }>();
 
 for await (const file of glob.scan(extensionsDir)) {
   try {
@@ -66,6 +67,18 @@ for await (const file of glob.scan(extensionsDir)) {
             `Error executing setup_script for extension "${manifest.name}":`,
             setupErr,
           );
+        }
+      }
+
+      if (manifest.auth_script) {
+        try {
+          const authModule = await import(join(extensionFolder, manifest.auth_script));
+          const provider = authModule.auth ?? authModule.default;
+          if (!isAuthProvider(provider)) throw new Error("auth_script must export an AuthProvider as `auth` or default");
+          authProviders.set(manifest.name, { provider, sdk: createExtensionSDK(manifest.name, manifest.namespace || manifest.name,
+            undefined, undefined, manifest.name, extensionFolder) });
+        } catch (authErr) {
+          console.error(`Error loading auth_script for extension "${manifest.name}":`, authErr);
         }
       }
 
@@ -156,4 +169,4 @@ export function registerCheckpointRecoverScript(
   checkpointRecoverScripts.set(extensionId, scriptPath);
 }
 
-export { crons, subscribe_ingest, checkpointRecoverScripts, extensionNamespaces };
+export { crons, subscribe_ingest, checkpointRecoverScripts, extensionNamespaces, authProviders };

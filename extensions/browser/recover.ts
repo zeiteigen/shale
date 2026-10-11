@@ -7,6 +7,9 @@ import { finalizePageVisit } from "./ingest-processor";
 import { finalizeSession } from "./session-manager";
 import type { BrowserExtensionSettings } from "./settings.types";
 import type { PreparedPageData } from "./types";
+import { contentFingerprint, memoryChunks, prepareSourceMemory } from "../../lib/memory/prepare";
+import type { PreparedSourceMemory } from "../../lib/memory/prepare";
+import { browserSettings } from "./settings-policy";
 
 export interface RecoverResult {
   recoveredPages: number;
@@ -68,20 +71,34 @@ async function recoverOwned(
 
         // Finalization is deliberately LLM-free. Reusing the normal commit
         // path preserves HTML-derived chunks, links, images, and session edges.
+        const memory: PreparedSourceMemory = data.memory ?? prepareSourceMemory(
+          (data.parsedChunks?.length ? data.parsedChunks : [pageData.textContent ?? ""])
+            .map((text_content: string, chunk_index: number) => ({
+              text_content,
+              chunk_index,
+              metadata: data.parser?.chunkLocators?.[chunk_index],
+            })),
+          { title: pageData.title ?? pageData.url, summary: analysis.summary },
+        );
+        const preparedPage = {
+          ...pageData,
+          textContent: memory.snippets.filter((snippet) => snippet.kind === "excerpt").map((snippet) => snippet.text).join("\n\n"),
+          excerpt: memory.summary.slice(0, 300),
+        };
         const prepared: PreparedPageData = {
           jobId: data.jobId,
           contentKey: data.contentKey,
-          settings: data.settings,
-          pageData,
+          pageData: preparedPage,
           analysis,
+          memory,
+          sourceFingerprint: data.sourceFingerprint ?? contentFingerprint(memoryChunks(memory)),
           cleanUrl: pageData.cleanUrl || pageData.url,
           domain: pageData.domain || "",
           checkpointId: item.id,
           namespace,
-          parser: data.parser,
-          parsedChunks: data.parsedChunks,
-          contextualSummary: data.contextualSummary,
-          imageChunks: data.imageChunks,
+          extraction: data.extraction ?? data.parser?.extraction,
+          imageKnowledge: data.imageKnowledge ?? data.parser?.imageKnowledge,
+          imageOffset: data.imageOffset ?? data.parsedChunks?.length ?? 0,
           sessionUpdate: data.sessionUpdate,
         };
         await finalizePageVisit(
@@ -134,14 +151,14 @@ async function recoverOwned(
             "SELECT id,attempts FROM browser_jobs WHERE extension_id=? AND id=? AND state IN ('received','prepared')",
           )
           .get(sdk.extensionId, data.jobId);
-        if (job) failJob(sdk, job, err, data.settings?.maxJobAttempts ?? 5);
+        if (job) failJob(sdk, job, err, data.settings?.maxJobAttempts ?? browserSettings(sdk).maxJobAttempts ?? 5);
       }
       if (data.type === "browser_session_analysis" && data.collectorId)
         failSession(
           sdk,
           { ...data, checkpointId: item.id },
           err,
-          data.settings?.maxJobAttempts ?? 5,
+          data.settings?.maxJobAttempts ?? browserSettings(sdk).maxJobAttempts ?? 5,
         );
       sdk.logger.error(
         `[Recovery] Failed recovering checkpoint ${item.id}: ${err?.message || err}`,

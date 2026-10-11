@@ -371,7 +371,7 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
       );
 
       expect(ingestResult.imageTitle).toBe("event_bus.png");
-      expect(ingestResult.chunksCreated).toBe(2);
+      expect(ingestResult.chunksCreated).toBe(3);
 
       // Verify SQLite records
       const source = db
@@ -390,11 +390,11 @@ describe("Process Image Extension & Unified Cross-Extension Messaging", () => {
           "SELECT chunk_index, chunk_type, text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'event_bus.png') ORDER BY chunk_index ASC",
         )
         .all();
-      expect(chunks.length).toBe(2);
+      expect(chunks.length).toBe(3);
       expect(chunks[0].chunk_type).toBe("synthetic");
       expect(chunks[0].text_content).toContain("Microservice boxes");
-      expect(chunks[1].chunk_type).toBe("synthetic");
-      expect(chunks[1].text_content).toContain("Event-driven architecture");
+      expect(chunks.slice(1).every(chunk => chunk.chunk_type === "synthetic")).toBe(true);
+      expect(chunks.slice(1).map(chunk => chunk.text_content).join(" ")).toContain("Event-driven architecture");
 
       // Verify Image entity and IN_SAME_VAULT edge returned in ingestResult
       expect(

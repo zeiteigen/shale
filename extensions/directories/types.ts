@@ -1,4 +1,5 @@
 import type { ProcessFileResponse } from "../../lib/messages.types";
+import type { PreparedSourceMemory } from "../../lib/memory/prepare";
 
 export interface DirectoryInfo { path: string; name: string }
 
@@ -19,6 +20,8 @@ export interface PreparedDirectoryFile {
   fingerprint: string;
   updatedAt: number;
   parsed: ProcessFileResponse;
+  memory: PreparedSourceMemory;
+  sourceFingerprint?: string;
 }
 
 export interface PendingDirectoryFile {

@@ -1,0 +1,22 @@
+{
+  "extension": "instagram",
+  "settings": {
+    "importDir": { "type": "string", "description": "Folder scanned for an unzipped Instagram 'Download your information' export in JSON format (any messages/inbox/<thread>/message_N.json beneath it). Relative paths resolve from the Shale project root; ~/ is supported.", "default": "./data/instagram/import" },
+    "syncEnabled": { "type": "boolean", "description": "Fetch recent DMs with the instagrapi sidecar on the instagram-sync cron, using the account connected on the Accounts page. Uses Instagram's private API, which can trigger security challenges or account restrictions; use at your own risk.", "default": false, "possibleValues": [true, false] },
+    "pythonBin": { "type": "string", "description": "Python interpreter with instagrapi installed. Empty uses the virtualenv created by `bun run setup instagram` (data/instagram/venv), falling back to python3.", "default": "" },
+    "sessionFile": { "type": "string", "description": "Where the sidecar stores the instagrapi session so it does not log in on every run.", "default": "./data/instagram/session.json" },
+    "usernameEnv": { "type": "string", "description": "Fallback environment variable (e.g. in data/.env) for the Instagram username, used only when no account is connected on the Accounts page.", "default": "INSTAGRAM_USERNAME" },
+    "passwordEnv": { "type": "string", "description": "Fallback environment variable (e.g. in data/.env) for the Instagram password, used only when no account is connected on the Accounts page.", "default": "INSTAGRAM_PASSWORD" },
+    "maxThreadsPerSync": { "type": "number", "description": "Most recently active threads checked per sync.", "default": 20, "range": { "min": 1, "max": 200 } },
+    "maxMessagesPerThread": { "type": "number", "description": "Maximum messages fetched per thread per sync.", "default": 200, "range": { "min": 10, "max": 5000 } },
+    "syncTimeoutMinutes": { "type": "number", "description": "Maximum run time of one sidecar invocation.", "default": 20, "range": { "min": 1, "max": 240 } },
+    "gapMinutes": { "type": "number", "description": "A silence longer than this starts a new conversation window (one searchable source per window).", "default": 30, "range": { "min": 1, "max": 1440 } },
+    "maxWindowMessages": { "type": "number", "description": "Maximum messages per conversation window.", "default": 120, "range": { "min": 5, "max": 1000 } },
+    "maxWindowChars": { "type": "number", "description": "Maximum transcript characters per window; keep at or below 12000 so whole windows stay searchable.", "default": 11000, "range": { "min": 1000, "max": 12000 } },
+    "idleMinutes": { "type": "number", "description": "The newest window of a conversation is indexed only after this much silence.", "default": 60, "range": { "min": 0, "max": 10080 } },
+    "maxWindowsPerRun": { "type": "number", "description": "Windows summarised per batch.", "default": 50, "range": { "min": 1, "max": 1000 } },
+    "summarize": { "type": "boolean", "description": "Summarise each window with the chat LLM; otherwise a heuristic summary is used.", "default": true, "possibleValues": [true, false] },
+    "llmModel": { "type": "string", "description": "Optional chat model override for window summaries. Empty uses the default.", "default": "" },
+    "namespace": { "type": "string", "description": "Namespace for Instagram sources and graph entities.", "default": "instagram" }
+  }
+}

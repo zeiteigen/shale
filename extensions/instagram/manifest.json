@@ -1,0 +1,14 @@
+{
+  "name": "instagram",
+  "namespace": "instagram",
+  "version": "0.1.0",
+  "description": "Ingest Instagram direct messages from the official 'Download your information' JSON export, with an optional instagrapi sync sidecar.",
+  "checkpoint_recover": "recover.ts",
+  "setup_script": "refresh.ts",
+  "auth_script": "auth.ts",
+  "install_script": "install.ts",
+  "crons": [
+    { "name": "instagram-import", "schedule": "*/30 * * * *", "script": "index.ts", "run_on_startup": true },
+    { "name": "instagram-sync", "schedule": "17 */2 * * *", "script": "sync.ts" }
+  ]
+}

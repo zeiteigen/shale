@@ -791,7 +791,8 @@ describe("Browser Ingestion Extension", () => {
       await finalizeBrowserPayload(testSdk, prepared, {});
       expect(parses).toBe(1);
       expect(testDb.query("SELECT id FROM sources WHERE type='browser_history'").all()).toHaveLength(2);
-      expect(testDb.query("SELECT id FROM chunks WHERE text_content='Durable parsed article content.'").all()).toHaveLength(2);
+      expect(testDb.query("SELECT id FROM chunks WHERE text_content='Durable parsed article content.'").all()).toHaveLength(1);
+      expect(testDb.query("SELECT id FROM sources WHERE type='web_page'").all()).toHaveLength(1);
       await processHistoryBatch(testSdk, {
         type: "history_batch", items: [{ url: "https://example.com/disabled", title: "Disabled", visitTime: 3000 }],
       }, { fetchHistoryPages: false });

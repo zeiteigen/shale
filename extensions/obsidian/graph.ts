@@ -3,6 +3,7 @@ import { SourceGraph, type ShaleSDK, type GraphValue } from '@shale/sdk';
 import { commitPreparedClaims } from '../../sdk/graph/prepared';
 import type { ParsedFile } from './parse-file';
 import type { ParsedImage } from './parse-image';
+import { prepareSourceMemory } from '../../lib/memory/prepare';
 
 export interface VaultContext { name: string; path: string }
 
@@ -15,6 +16,8 @@ export function linkVaultMembership(graph: SourceGraph, subject: number, vault: 
 
 export function commitNoteGraph(sdk: ShaleSDK, sourceId: string, namespace: string,
   file: ParsedFile, vault: VaultContext): SourceGraph {
+  file = file.memory ? file : { ...file, memory: prepareSourceMemory(file.contextualChunks, { title: file.noteTitle }) };
+  const memory = file.memory!;
   const graph = new SourceGraph(sdk.database,sdk.graph,sourceId,namespace,file.updatedAt);
   const note = graph.entity(file.noteUri,file.noteTitle,'Note');
   // Older recovery records stored chunks without parsed markdown metadata.
@@ -55,24 +58,30 @@ export function commitNoteGraph(sdk: ShaleSDK, sourceId: string, namespace: stri
     graph.link(note,'REFERENCES',target,{method:'document-link',evidence:graph.quote(reference.raw),
       qualifiers:{resolved:!!uri,vault:localUri(vault.path),...JSON.parse(JSON.stringify(reference))}});
   }
-  for (const chunk of file.contextualChunks) if (chunk.chunk_type === 'synthetic') {
-    graph.claim(note,'EXPANDED_CONTEXT',{value:chunk.text_content},{status:'proposed',method:'llm',
-      model:chunk.metadata?.model as string | undefined,
-      evidence:[...graph.evidence(0),...graph.evidence(chunk.chunk_index,undefined,'generated','mentions')]});
+  for (const snippet of memory.snippets) if (snippet.kind === 'derived') {
+    const originalChunkIndex = snippet.locator.originalChunkIndex;
+    graph.claim(note,'EXPANDED_CONTEXT',{value:snippet.text},{status:'proposed',method:'llm',
+      model:snippet.locator.model as string | undefined,
+      evidence: originalChunkIndex === undefined ? graph.evidence() :
+        graph.evidence(originalChunkIndex,undefined,'generated','mentions')});
   }
   return graph;
 }
 
 export function commitImageGraph(sdk: ShaleSDK, sourceId: string, namespace: string,
   image: ParsedImage, vault: VaultContext): SourceGraph {
+  image = image.memory ? image : { ...image, memory: prepareSourceMemory(image.contextualChunks, { title: image.imageTitle, summary: image.description }) };
+  const memory = image.memory!;
   const graph = new SourceGraph(sdk.database,sdk.graph,sourceId,namespace,image.updatedAt);
   const entity = graph.entity(image.imageUri,image.imageTitle,'Image');
   linkVaultMembership(graph,entity,vault);
   graph.claim(entity,'SOURCE_URI',{value:image.imageUri});
   if (image.assetHash) graph.claim(entity,'ASSET_SHA256',{value:image.assetHash});
-  commitPreparedClaims(graph,entity,image.knowledge ?? image.contextualChunks.map(chunk => ({
-    predicate:chunk.chunk_index === 0 ? 'VISUAL_LAYOUT' : 'VISUAL_MEANING',
-    value:chunk.text_content,chunkIndex:chunk.chunk_index,status:'proposed',method:'vision',
-  })));
+  const knowledge = memory.snippets.filter(snippet => snippet.locator.originalChunkIndex !== undefined).map(snippet => ({
+    predicate: String(snippet.locator.predicate ?? 'VISUAL_DESCRIPTION'), value: snippet.text,
+    chunkIndex: snippet.locator.originalChunkIndex!, status: 'proposed' as const,
+    method: String(snippet.locator.origin ?? 'vision'), model: snippet.locator.model as string | undefined,
+  }));
+  commitPreparedClaims(graph,entity,knowledge);
   return graph;
 }

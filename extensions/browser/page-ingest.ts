@@ -1,7 +1,7 @@
-import { contentVersion, copyIndexedContent } from "./content-version";
 import { rememberCapture } from "./capture-store";
 import type { ShaleSDK } from "@shale/sdk";
 import type { WebPageParseResponse } from "../../lib/messages/web-contracts";
+import { contentFingerprint, memoryChunks, prepareSourceMemory } from "../../lib/memory/prepare";
 import type {
   PageVisitPayload,
   PreparedPageData,
@@ -16,9 +16,9 @@ import { analyzePageWithLLM } from "./llm-enricher";
 import { browserSourceId, sanitizeTopics } from "./identity";
 import { recordSessionVisit } from "./session-manager";
 import { finalizeSession } from "./session-ingest";
-import { chunkText } from "./chunk-text";
 import { commitPageGraph } from "./page-graph";
 import { isSourceExcluded } from "../../lib/knowledge/exclusions";
+import { sourceRefreshScope } from '../../lib/memory/refresh-scope';
 
 /**
  * Prepare a web page using chat analysis and checkpoints.
@@ -27,7 +27,7 @@ export async function preparePageVisit(
   sdk: ShaleSDK,
   payload: PageVisitPayload,
   settings: Partial<BrowserExtensionSettings>,
-  options: { jobId?: string; managed?: boolean } = {},
+  options: { jobId?: string; managed?: boolean; parsed?: WebPageParseResponse } = {},
 ): Promise<PreparedPageData | null> {
   const filter = evaluateUrl(payload.url, settings);
   if (payload.incognito && settings.excludePrivateBrowsing !== false)
@@ -67,25 +67,45 @@ export async function preparePageVisit(
   const checkpointId =
     options.jobId ??
     `browser_page:${filter.cleanUrl}:${payload.recordId || payload.eventId || payload.visitedAt || crypto.randomUUID()}`;
-  const cached = sdk.database
-    .query<{ prepared: string; source_id: string | null }, [string, string]>(
-      "SELECT prepared,source_id FROM browser_content_cache WHERE extension_id=? AND content_key=?",
-    )
-    .get(sdk.extensionId, contentKey);
+  const cacheRow = sourceRefreshScope() ? null : sdk.database
+    .query<{ prepared: string; source_id: string | null; updated_at: number }, [string, string]>(
+      "SELECT prepared,source_id,updated_at FROM browser_content_cache WHERE extension_id=? AND content_key=?",
+    ).get(sdk.extensionId, contentKey);
+  const cachedData = cacheRow ? JSON.parse(cacheRow.prepared) as any : null;
+  const staged = !!cachedData?.memory && cachedData.cacheState === "staged" &&
+    cacheRow!.updated_at >= Date.now() - 24 * 60 * 60 * 1000;
+  let cachedMemory: PreparedPageData["memory"] | undefined;
+  let cachedAnalysis: PreparedPageData["analysis"] | undefined;
+  let cached = staged ? cacheRow : null;
+  if (cacheRow && cachedData?.cacheState === "complete" && cacheRow.source_id) {
+    try {
+      const retained = sdk.memory.get(cacheRow.source_id);
+      if (retained.freshness.fingerprint === cachedData.sourceFingerprint) {
+        cachedMemory = {
+          summary: retained.summary.text,
+          summaryMethod: retained.summary.method,
+          snippets: retained.snippets.map(({ text, kind, locator, purpose, id }) => ({ text, kind, locator, purpose, id })),
+          coverage: retained.coverage,
+        };
+        cachedAnalysis = { summary: cachedMemory.summary,
+          topics: cachedData.graphMetadata?.topics ?? [],
+          category: cachedData.graphMetadata?.category ?? "general" };
+        cached = cacheRow;
+      }
+    } catch { /* Missing retained memory makes the receipt unusable for reuse. */ }
+  }
+  if (cacheRow && !cached) sdk.database
+    .query("DELETE FROM browser_content_cache WHERE extension_id=? AND content_key=?")
+    .run(sdk.extensionId, contentKey);
+  const stagedData = staged ? cachedData as PreparedPageData : undefined;
   let rawContent = (payload.textContent || payload.excerpt || title).trim();
-  let parser: WebPageParseResponse | undefined;
-  let parsedChunks: string[] | undefined;
-  let contextualSummary: string | undefined;
-  let imageChunks:
-    | Array<{
-        text_content: string;
-        chunk_type: "verbatim" | "synthetic";
-      }>
-    | undefined;
+  let parser: WebPageParseResponse | undefined = options.parsed;
   // The page parser owns HTML/readability extraction, contextualization, and
   // image delegation. It is optional so browser ingestion remains usable when
   // this extension is intentionally not installed.
   try {
+    if (parser) rawContent = parser.text || rawContent;
+    else {
     if (cached) throw new Error("Using cached parser output");
     const parsed = await sdk.messages.request(
       "web:parse",
@@ -107,30 +127,41 @@ export async function preparePageVisit(
     );
     parser = parsed;
     rawContent = parsed.text || rawContent;
-    parsedChunks = parsed.chunks;
-    contextualSummary = parsed.contextualSummary;
-    imageChunks = parsed.imageChunks.map((chunk) => ({
-      ...chunk,
-      chunk_type: "synthetic",
-    }));
+    }
   } catch (error) {
     sdk.logger.debug(
       `Web-page parser unavailable for ${filter.cleanUrl}; using browser content: ${String(error)}`,
     );
   }
   if (cached) {
-    const previous = JSON.parse(cached.prepared) as PreparedPageData;
-    parser = previous.parser;
-    rawContent = previous.pageData.textContent;
-    parsedChunks = previous.parsedChunks;
-    contextualSummary = previous.contextualSummary;
-    imageChunks = previous.imageChunks;
+    const previous = stagedData;
+    const previousMemory = cachedMemory ?? previous!.memory;
+    parser = {
+      title,
+      text: previousMemory.snippets.map((snippet) => snippet.text).join("\n\n"),
+      chunks: [],
+      contextualSummary: previousMemory.summary,
+      imageUrls: [],
+      imageChunks: [],
+      extraction: cachedData.extraction ?? previous?.extraction,
+      imageKnowledge: previous?.imageKnowledge,
+    };
+    rawContent = parser.text;
   }
   const visitedAt = payload.visitedAt || Date.now();
   const namespace = settings.namespace || sdk.namespace || "browser";
 
-  const pageData: WebPageData = {
-    ...payload,
+  const rawPageData: WebPageData = {
+    recordId: payload.recordId,
+    collectorId: payload.collectorId,
+    eventId: payload.eventId,
+    sequence: payload.sequence,
+    documentId: payload.documentId,
+    browserInstanceId: payload.browserInstanceId,
+    incognito: payload.incognito,
+    goal: payload.goal,
+    tabGroup: payload.tabGroup,
+    captureOrigin: payload.captureOrigin,
     url: payload.url,
     cleanUrl: filter.cleanUrl,
     domain: filter.domain,
@@ -139,8 +170,17 @@ export async function preparePageVisit(
     excerpt: payload.excerpt || rawContent.slice(0, 300),
     favIconUrl: payload.favIconUrl,
     author: payload.author,
-    links: payload.links,
-    images: payload.images,
+    links: payload.links?.slice(0, 100).map((link) => ({
+      url: link.url.slice(0, 2000),
+      text: link.text?.slice(0, 300),
+      rel: link.rel?.slice(0, 80),
+    })),
+    images: payload.images?.slice(0, 8).map((image) => ({
+      url: image.url.slice(0, 2000),
+      alt: image.alt?.slice(0, 300),
+      width: image.width,
+      height: image.height,
+    })),
     visitedAt,
     tabId: payload.tabId,
     windowId: payload.windowId,
@@ -152,9 +192,39 @@ export async function preparePageVisit(
 
   // Chat model request: generate summary, topics, and category
   const analysis = cached
-    ? (JSON.parse(cached.prepared) as PreparedPageData).analysis
-    : await analyzePageWithLLM(sdk, pageData, settings);
-  contextualSummary ||= analysis.summary;
+    ? cachedAnalysis ?? stagedData!.analysis
+    : await analyzePageWithLLM(sdk, rawPageData, settings);
+  const pageChunks = parser?.chunks?.length
+    ? parser.chunks.map((text_content, chunk_index) => ({
+        text_content,
+        chunk_type: "verbatim" as const,
+        chunk_index,
+        metadata: parser?.chunkLocators?.[chunk_index],
+      }))
+    : [{ text_content: rawContent, chunk_type: "verbatim" as const, chunk_index: 0 }];
+  const imageChunks = parser?.imageChunks.map((chunk, index) => ({
+    text_content: chunk.text_content,
+    chunk_type: "synthetic" as const,
+    chunk_index: pageChunks.length + index,
+    metadata: chunk.metadata,
+  })) ?? [];
+  const memory = cached
+    ? cachedMemory ?? stagedData!.memory
+    : prepareSourceMemory([...pageChunks, ...imageChunks], {
+        title,
+        summary: analysis.summary,
+      });
+  const sourceFingerprint = cached
+    ? cachedData.sourceFingerprint
+    : contentFingerprint([{text_content:rawContent,chunk_type:'verbatim'}]);
+  const pageData: WebPageData = {
+    ...rawPageData,
+    textContent: memory.snippets
+      .filter((snippet) => snippet.kind === "excerpt")
+      .map((snippet) => snippet.text)
+      .join("\n\n"),
+    excerpt: memory.summary.slice(0, 300),
+  };
   const sessionUpdate =
     options.managed || pageData.recordInSession === false
       ? null
@@ -182,17 +252,14 @@ export async function preparePageVisit(
       type: "browser_page_analysis",
       jobId: options.jobId,
       contentKey,
-      settings,
       pageData,
       analysis,
+      memory,
+      sourceFingerprint,
       namespace,
-      // Keep parser output in the checkpoint so recovery can commit the same
-      // rich page (HTML-derived chunks, links, and image descriptions) without
-      // calling the parser or LLM again.
-      parser,
-      parsedChunks,
-      contextualSummary,
-      imageChunks,
+      extraction: parser?.extraction ?? payload.extraction,
+      imageKnowledge: parser?.imageKnowledge,
+      imageOffset: pageChunks.length,
       sessionUpdate,
     },
     { id: checkpointId, key: checkpointId },
@@ -201,35 +268,21 @@ export async function preparePageVisit(
   const prepared: PreparedPageData = {
     jobId: options.jobId,
     contentKey,
-    settings,
-    canonicalSourceId: browserSourceId(
-      payload.captureOrigin === "public-fetch" ? "public" : "web",
-      filter.cleanUrl,
-    ),
-    indexedHash: cached
-      ? (JSON.parse(cached.prepared) as PreparedPageData).indexedHash
-      : undefined,
-    reused:
-      !!cached?.source_id &&
-      sdk.database
-        .query<{ hash: string }, [string]>(
-          "SELECT hash FROM sources WHERE id=?",
-        )
-        .get(cached.source_id)?.hash ===
-        (JSON.parse(cached.prepared) as PreparedPageData).indexedHash,
+    canonicalSourceId: browserSourceId("web", filter.cleanUrl),
+    memory,
+    sourceFingerprint,
     pageData,
     analysis,
     cleanUrl: filter.cleanUrl,
     domain: filter.domain,
     checkpointId,
     namespace,
-    parser,
-    parsedChunks,
-    contextualSummary,
-    imageChunks,
+    extraction: parser?.extraction ?? payload.extraction,
+    imageKnowledge: parser?.imageKnowledge,
+    imageOffset: pageChunks.length,
     sessionUpdate,
   };
-  sdk.database
+  if (!cachedMemory) sdk.database
     .query(
       `INSERT INTO browser_content_cache VALUES(?,?,?,?,?) ON CONFLICT(extension_id,content_key)
     DO UPDATE SET prepared=excluded.prepared,updated_at=excluded.updated_at`,
@@ -237,16 +290,28 @@ export async function preparePageVisit(
     .run(
       sdk.extensionId,
       contentKey,
-      JSON.stringify(prepared),
-      cached?.source_id ?? null,
+      JSON.stringify({ ...prepared, cacheState: "staged", settings: undefined, sessionUpdate: null }),
+      null,
       Date.now(),
     );
   rememberCapture(
     sdk,
     prepared,
-    contentVersion(prepared)?.id ?? browserSourceId("web", filter.cleanUrl),
+    browserSourceId("web", filter.cleanUrl),
   );
+  pruneContentCache(sdk, prepared.canonicalSourceId!);
   return prepared;
+}
+
+function pruneContentCache(sdk: ShaleSDK, sourceId: string, now = Date.now()): void {
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  sdk.database.query(`DELETE FROM browser_content_cache WHERE extension_id=? AND updated_at<?
+    AND coalesce(json_extract(prepared,'$.cacheState'),'staged')!='complete'`).run(sdk.extensionId, cutoff);
+  sdk.database.query(`DELETE FROM browser_content_cache WHERE extension_id=?
+    AND json_extract(prepared,'$.canonicalSourceId')=? AND content_key NOT IN (
+      SELECT content_key FROM browser_content_cache WHERE extension_id=?
+      AND json_extract(prepared,'$.canonicalSourceId')=? ORDER BY updated_at DESC,content_key DESC LIMIT 32)`)
+    .run(sdk.extensionId, sourceId, sdk.extensionId, sourceId);
 }
 
 /**
@@ -258,20 +323,44 @@ export async function finalizePageVisit(
   settings: Partial<BrowserExtensionSettings>,
   assertOwned: () => void = () => {},
 ): Promise<IngestedPageResult> {
+  const legacy = prepared as PreparedPageData & {
+    parsedChunks?: string[];
+    parser?: WebPageParseResponse;
+  };
+  if (!prepared.memory) {
+    const sourceChunks = legacy.parsedChunks?.length
+      ? legacy.parsedChunks
+      : [prepared.pageData.textContent ?? ""];
+    prepared.memory = prepareSourceMemory(
+      sourceChunks.map((text_content, chunk_index) => ({
+        text_content,
+        chunk_index,
+        metadata: legacy.parser?.chunkLocators?.[chunk_index],
+      })),
+      { title: prepared.pageData.title, summary: prepared.analysis.summary },
+    );
+    prepared.pageData = {
+      ...prepared.pageData,
+      textContent: prepared.memory.snippets
+        .filter((snippet) => snippet.kind === "excerpt")
+        .map((snippet) => snippet.text)
+        .join("\n\n"),
+      excerpt: prepared.memory.summary.slice(0, 300),
+    };
+    prepared.extraction ??= legacy.parser?.extraction;
+    prepared.imageKnowledge ??= legacy.parser?.imageKnowledge;
+    prepared.imageOffset ??= legacy.parsedChunks?.length ?? 0;
+    delete (prepared as any).parser;
+    delete (prepared as any).parsedChunks;
+    delete (prepared as any).contextualSummary;
+    delete (prepared as any).imageChunks;
+  }
   const { pageData, analysis, cleanUrl, domain, checkpointId, namespace } =
     prepared;
-  const sourceId = browserSourceId(
-    pageData.captureOrigin === "public-fetch" ? "public" : "web",
-    cleanUrl,
-  );
-  const sourceUri =
-    pageData.captureOrigin === "public-fetch"
-      ? `browser-public://${encodeURIComponent(cleanUrl)}`
-      : cleanUrl;
-  const version = contentVersion(prepared);
+  const sourceId = browserSourceId("web", cleanUrl);
+  const sourceUri = cleanUrl;
   if (
-    isSourceExcluded(sdk.database, sourceId, sourceUri) ||
-    (version && isSourceExcluded(sdk.database, version.id, version.uri))
+    isSourceExcluded(sdk.database, sourceId, sourceUri)
   ) {
     if (prepared.jobId) finishJob(sdk, prepared.jobId, { sourceId, skipped: "excluded" });
     else sdk.checkpoint.delete(checkpointId);
@@ -308,8 +397,7 @@ export async function finalizePageVisit(
         )
         .get(cache.source_id)?.hash
     : undefined;
-  const canonicalType =
-    pageData.captureOrigin === "public-fetch" ? "public_web_page" : "web_page";
+  const canonicalType = "web_page";
   const capturedAt = pageData.capturedAt ?? pageData.visitedAt;
   const current = sdk.database
     .query<{ hash: string; updated_at: number }, [string]>(
@@ -317,60 +405,29 @@ export async function finalizePageVisit(
     )
     .get(sourceId);
   const newest = !current || capturedAt >= current.updated_at;
-  if (cachedHash && cachedHash === currentHash) {
+  const observedQuality=current ? sdk.database.query<{quality:string|null},[string]>(`SELECT json_extract(metadata,'$.quality') AS quality
+    FROM source_observations WHERE source_id=? AND json_extract(metadata,'$.quality') IS NOT NULL ORDER BY captured_at DESC,id DESC LIMIT 1`).get(sourceId)?.quality : null;
+  const currentQuality = observedQuality ?? (current
+    ? sdk.database.query<{ quality: string | null }, [string, string, string]>(
+        `SELECT coalesce(json_extract(prepared,'$.extraction.quality'),json_extract(prepared,'$.parser.extraction.quality')) AS quality
+        FROM browser_content_cache WHERE extension_id=? AND source_id=?
+          AND json_extract(prepared,'$.indexedHash')=? ORDER BY updated_at DESC LIMIT 1`,
+      ).get(sdk.extensionId, sourceId, current.hash)?.quality
+    : null);
+  const qualityRank = { metadata: 0, partial: 1, full: 2 } as const;
+  const incomingQuality = prepared.extraction?.quality ?? "metadata";
+  const lowerQuality = !!currentQuality &&
+    (qualityRank[currentQuality as keyof typeof qualityRank] ?? 0) >
+      qualityRank[incomingQuality];
+  if (cachedHash && cachedHash === currentHash && cache?.source_id === sourceId) {
     assertOwned();
-    const result = sdk.database.transaction(() => {
-      let indexedId = cache!.source_id!;
-      if (version && indexedId !== version.id) {
-        copyIndexedContent(sdk, indexedId, version, prepared);
-        indexedId = version.id;
-      }
-      if (newest && current?.hash !== cachedHash) {
-        const restored = copyIndexedContent(
-          sdk,
-          indexedId,
-          { id: sourceId, uri: sourceUri, type: canonicalType },
-          prepared,
-        );
-        commitPageGraph(
-          sdk,
-          sourceId,
-          prepared,
-          sanitizeTopics(analysis.topics, { title: pageData.title, domain }),
-          restored.chunkIds.length - (prepared.imageChunks?.length ?? 0),
-        );
-      } else if (newest)
-        sdk.database
-          .query("UPDATE sources SET updated_at=max(updated_at,?) WHERE id=?")
-          .run(capturedAt, sourceId);
-      rememberCapture(sdk, prepared, indexedId);
-      sdk.database
-        .query(
-          "UPDATE browser_content_cache SET source_id=?,prepared=? WHERE extension_id=? AND content_key=?",
-        )
-        .run(
-          indexedId,
-          JSON.stringify({
-            ...prepared,
-            canonicalSourceId: sourceId,
-            indexedHash: cachedHash,
-          }),
-          sdk.extensionId,
-          prepared.contentKey!,
-        );
-      if (prepared.jobId)
-        finishJob(sdk, prepared.jobId, {
-          sourceId,
-          versionSourceId: indexedId,
-          reused: true,
-        });
-      else sdk.checkpoint.delete(checkpointId);
-      return sdk.database
-        .query<{ id: number }, [string]>(
-          "SELECT id FROM chunks WHERE source_id=? ORDER BY chunk_index",
-        )
-        .all(newest ? sourceId : indexedId);
-    })();
+    writeCompletedReceipt(sdk, prepared, sourceId, currentHash!, analysis);
+    rememberCapture(sdk, prepared, sourceId);
+    if (prepared.jobId) finishJob(sdk, prepared.jobId, { sourceId, reused: true });
+    else sdk.checkpoint.delete(checkpointId);
+    const result = sdk.database.query<{ id: number }, [string]>(
+      "SELECT id FROM chunks WHERE source_id=? ORDER BY chunk_index",
+    ).all(sourceId);
     return {
       sourceId,
       chunkIds: result.map((row) => row.id),
@@ -379,8 +436,27 @@ export async function finalizePageVisit(
       ...analysis,
     };
   }
+  if ((!newest || lowerQuality) && current) {
+    assertOwned();
+    rememberCapture(sdk, prepared, sourceId);
+    // This capture did not become canonical memory. Do not let its quality or
+    // provenance replace the receipt for the retained source revision.
+    if (prepared.contentKey) sdk.database.query(
+      "DELETE FROM browser_content_cache WHERE extension_id=? AND content_key=?",
+    ).run(sdk.extensionId, prepared.contentKey);
+    if (prepared.jobId) finishJob(sdk, prepared.jobId, {
+      sourceId,
+      stale: !newest,
+      lowerQuality,
+    });
+    else sdk.checkpoint.delete(checkpointId);
+    const result = sdk.database.query<{ id: number }, [string]>(
+      "SELECT id FROM chunks WHERE source_id=? ORDER BY chunk_index",
+    ).all(sourceId);
+    return { sourceId, chunkIds: result.map((row) => row.id), entitiesCount: 0,
+      edgesCount: 0, ...analysis };
+  }
   const title = pageData.title;
-  const rawContent = pageData.textContent;
   const visitedAt = pageData.visitedAt;
 
   sdk.logger.info(
@@ -388,160 +464,50 @@ export async function finalizePageVisit(
   );
 
   // Build stored text chunks.
-  const chunkSize = settings.chunkSize ?? 1000;
-  const rawChunks = (
-    prepared.parsedChunks?.length
-      ? prepared.parsedChunks
-      : chunkText(rawContent, chunkSize)
-  ).filter(Boolean);
+  const chunks = memoryChunks(prepared.memory);
   const topics =
     settings.extractTopics === false
       ? []
       : sanitizeTopics(analysis.topics, { title, domain });
 
-  const referenceLines = [
-    ...(pageData.author ? [`Author: ${pageData.author}`] : []),
-    ...(pageData.links ?? []).map(
-      (link) => `Link: ${link.text?.trim() || link.url}\nURL: ${link.url}`,
-    ),
-    ...(pageData.images ?? []).map(
-      (image) =>
-        `Image: ${image.alt?.trim() || "Untitled image"}\nURL: ${image.url}`,
-    ),
-  ];
-  const referenceChunks = referenceLines.length
-    ? chunkText(referenceLines.join("\n\n"), chunkSize)
-    : [];
-
-  const chunkRecords = [
-    {
-      text_content: `Page: ${title}\nURL: ${cleanUrl}\nDomain: ${domain}\nSummary: ${analysis.summary}\nContext: ${prepared.contextualSummary ?? ""}${topics.length ? `\nTopics: ${topics.join(", ")}` : ""}`,
-      chunk_type: "synthetic" as const,
-    },
-    ...rawChunks.map((text_content) => ({
-      text_content,
-      chunk_type: "verbatim" as const,
-    })),
-    ...referenceChunks.map((text_content) => ({
-      text_content,
-      chunk_type: "verbatim" as const,
-    })),
-    {
-      text_content: JSON.stringify(
-        {
-          url: cleanUrl,
-          title,
-          domain,
-          author: pageData.author,
-          captureOrigin: pageData.captureOrigin,
-          ...(prepared.jobId
-            ? { extraction: prepared.parser?.extraction }
-            : {
-                visitedAt,
-                tabId: pageData.tabId,
-                windowId: pageData.windowId,
-                openerTabId: pageData.openerTabId,
-                transitionType: pageData.transitionType,
-                sessionId: pageData.sessionId,
-              }),
-          links: pageData.links,
-          images: pageData.images,
-        },
-        null,
-        2,
-      ),
-      chunk_type: "verbatim" as const,
-    },
-    ...(prepared.imageChunks ?? []).map((chunk) => ({
-      ...chunk,
-      chunk_type: "synthetic" as const,
-    })),
-  ];
   assertOwned();
   const { sourceRes, graphRes } = sdk.database.transaction(() => {
-    const chunks = chunkRecords.map((chunk, i) => ({
-      ...chunk,
-      chunk_index: i,
-    }));
-    const immutable = version
-      ? sdk.ingest.sourceAndChunks({
-          namespace,
-          source: {
-            ...version,
-            origin: "browser",
-            title,
-            created_at: capturedAt,
-            updated_at: capturedAt,
-          },
-          chunks,
-        })
-      : null;
-    if (immutable?.skipped) {
-      if (prepared.jobId) finishJob(sdk, prepared.jobId, { sourceId, skipped: "excluded" });
-      else sdk.checkpoint.delete(checkpointId);
-      return { sourceRes: immutable, graphRes: { entitiesInserted: 0, edgesInserted: 0 } };
-    }
-    const sourceRes =
-      newest || !immutable
-        ? sdk.ingest.sourceAndChunks({
-            namespace,
-            source: {
-              id: sourceId,
-              type: canonicalType,
-              hash: immutable
-                ? sdk.database
-                    .query<{ hash: string }, [string]>(
-                      "SELECT hash FROM sources WHERE id=?",
-                    )
-                    .get(immutable.sourceId)!.hash
-                : undefined,
-              uri: sourceUri,
-              origin: "browser",
-              title,
-              created_at: capturedAt,
-              updated_at: capturedAt,
-            },
-            chunks,
-          })
-        : immutable;
+    const sourceRes = sdk.ingest.sourceAndChunks({
+      namespace,
+      source: {
+        id: sourceId,
+        type: canonicalType,
+        uri: sourceUri,
+        origin: "browser",
+        title,
+        hash: prepared.sourceFingerprint,
+        observation:{captureOrigin:pageData.captureOrigin ?? 'live-dom',quality:prepared.extraction?.quality ?? 'metadata'},
+        created_at: capturedAt,
+        updated_at: capturedAt,
+      },
+      chunks,
+      memory: prepared.memory,
+    });
     if (sourceRes.skipped) {
       if (prepared.jobId) finishJob(sdk, prepared.jobId, { sourceId, skipped: "excluded" });
       else sdk.checkpoint.delete(checkpointId);
       return { sourceRes, graphRes: { entitiesInserted: 0, edgesInserted: 0 } };
     }
-    const indexedId = immutable?.sourceId ?? sourceRes.sourceId;
-    const imageOffset = 2 + rawChunks.length + referenceChunks.length;
+    const indexedId = sourceRes.sourceId;
     const graph = commitPageGraph(
       sdk,
       sourceRes.sourceId,
       prepared,
       topics,
-      imageOffset,
+      prepared.imageOffset ?? 0,
     );
-    if (prepared.contentKey)
-      sdk.database
-        .query(
-          `INSERT INTO browser_content_cache VALUES(?,?,?,?,?)
-      ON CONFLICT(extension_id,content_key) DO UPDATE SET source_id=excluded.source_id,prepared=excluded.prepared,updated_at=excluded.updated_at`,
-        )
-        .run(
-          sdk.extensionId,
-          prepared.contentKey,
-          JSON.stringify({
-            ...prepared,
-            canonicalSourceId: sourceId,
-            indexedHash: sdk.database
-              .query<{ hash: string }, [string]>(
-                "SELECT hash FROM sources WHERE id=?",
-              )
-              .get(indexedId)!.hash,
-          }),
-          indexedId,
-          Date.now(),
-        );
+    const indexedHash = sdk.database
+      .query<{ hash: string }, [string]>("SELECT hash FROM sources WHERE id=?")
+      .get(indexedId)!.hash;
+    writeCompletedReceipt(sdk, prepared, indexedId, indexedHash, analysis);
     rememberCapture(sdk, prepared, indexedId);
     if (prepared.jobId)
-      finishJob(sdk, prepared.jobId, { sourceId, versionSourceId: indexedId });
+      finishJob(sdk, prepared.jobId, { sourceId });
     else sdk.checkpoint.delete(checkpointId);
     return {
       sourceRes,
@@ -563,4 +529,28 @@ export async function finalizePageVisit(
     topics,
     sessionId: sessionUpdate?.activeSession.sessionId,
   };
+}
+
+function writeCompletedReceipt(
+  sdk: ShaleSDK,
+  prepared: PreparedPageData,
+  sourceId: string,
+  indexedHash: string,
+  analysis: PreparedPageData["analysis"],
+): void {
+  if (!prepared.contentKey) return;
+  const receipt = {
+    cacheState: "complete",
+    sourceFingerprint: prepared.sourceFingerprint,
+    indexedHash,
+    canonicalSourceId: sourceId,
+    captureOrigin: prepared.pageData.captureOrigin ?? "live-dom",
+    extraction: prepared.extraction,
+    graphMetadata: { topics: analysis.topics.slice(0, 20), category: analysis.category },
+  };
+  sdk.database.query(`INSERT INTO browser_content_cache VALUES(?,?,?,?,?)
+    ON CONFLICT(extension_id,content_key) DO UPDATE SET source_id=excluded.source_id,
+    prepared=excluded.prepared,updated_at=excluded.updated_at`)
+    .run(sdk.extensionId, prepared.contentKey, JSON.stringify(receipt), sourceId, Date.now());
+  pruneContentCache(sdk, sourceId);
 }

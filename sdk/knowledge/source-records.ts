@@ -1,8 +1,9 @@
 import type { Database } from 'bun:sqlite';
+import type { PreparedSourceMemory } from '../../lib/memory/types';
 
 export type Source = {id:string;type:string;uri:string;origin:string;created_at:number;title:string;updated_at:number;hash:string};
 export type Chunk = {id:number;source_id:string;chunk_index:number;chunk_type:string;text_content:string};
-export type Snapshot = {source:Source;chunks:Chunk[];links:{chunk_id:number;entity_id:number}[];metadata:Record<string,unknown>};
+export type Snapshot = {source:Source;chunks:Chunk[];links:{chunk_id:number;entity_id:number}[];metadata:Record<string,unknown>;fingerprint?:string;memory?:PreparedSourceMemory};
 
 export class SourceRecords {
   constructor(private db:Database) {}

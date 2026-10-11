@@ -4,5 +4,6 @@
   "backupDir": "./data/backups",
   "filenamePrefix": "production-backup-",
   "maxBackups": 10,
+  "maxAgeDays": 7,
   "timestampFormat": "iso"
 }

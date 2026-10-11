@@ -10,6 +10,7 @@ import {
   extensionNamespaces,
   subscribe_ingest,
   getCheckpointRecoverScript,
+  authProviders,
 } from "./load-extensions";
 import { createExtensionSDK, sdkStorage, findNearestManifest, type ShaleSDK } from "../sdk";
 import { hasQueuedCheckpoints } from "../lib/db";
@@ -256,6 +257,7 @@ if (import.meta.main) {
     rootDir: join(import.meta.dir, ".."),
     crons,
     extensions: extensionNamespaces,
+    auth: authProviders,
     runCron,
     runAllCrons,
     logs,

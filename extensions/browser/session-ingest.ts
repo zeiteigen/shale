@@ -15,7 +15,7 @@ import type {
 import type { BrowserExtensionSettings } from "./settings.types";
 import { synthesizeSessionWithLLM } from "./llm-enricher";
 import { sanitizeTopics, sessionEntityName } from "./identity";
-import { commitSessionGraph, sessionObservationText } from "./session-graph";
+import { commitSessionGraph } from "./session-graph";
 import { sessionChunks } from "./session-chunks";
 
 /**
@@ -119,18 +119,13 @@ export async function finalizeSession(
   const sessionText = [
     `Session: ${synthesis.sessionTitle}`,
     `Summary: ${synthesis.summary}`,
-    `Topics: ${topics.join(", ")}`,
-    `Dominant Domains: ${dominantDomains.join(", ")}`,
-    ...(prepared.threads ?? []).map(
-      (thread) =>
-        `Thread: ${thread.label}${thread.goal ? `\nGoal: ${thread.goal}` : ""}\nTopics: ${thread.topics.join(", ")}`,
-    ),
-    `Pages Visited (${visits.length}):`,
-    ...visits.map((v, i) => `${i + 1}. [${v.domain}] ${v.title} (${v.url})`),
+    ...(topics.length ? [`Topics: ${topics.join(", ")}`] : []),
+    ...(dominantDomains.length
+      ? [`Dominant Domains: ${dominantDomains.join(", ")}`]
+      : []),
   ].join("\n");
 
-  const observationText = sessionObservationText(prepared);
-  const chunks = sessionChunks(sessionText, observationText, settings.chunkSize ?? 1000);
+  const chunks = sessionChunks(sessionText, "", settings.chunkSize ?? 1000);
   const unseen = prepared.collectorId
     ? visits.filter(
         (v) =>
@@ -148,10 +143,14 @@ export async function finalizeSession(
           "SELECT prepared FROM browser_sessions WHERE extension_id=? AND session_id=?",
         )
         .get(sdk.extensionId, sessionId);
+      const currentPrepared = current?.prepared
+        ? JSON.parse(current.prepared)
+        : null;
+      const { settings: _settings, ...preparedForCommit } = prepared;
       if (
-        !current?.prepared ||
-        fingerprint({ ...JSON.parse(current.prepared), type: undefined }) !==
-          fingerprint({ ...prepared, type: undefined })
+        !currentPrepared ||
+        fingerprint({ ...currentPrepared, type: undefined }) !==
+          fingerprint({ ...preparedForCommit, type: undefined })
       )
         throw new Error(
           "Session preparation was superseded; recompute context",
@@ -215,7 +214,7 @@ export async function finalizeSession(
       commitContextGraph(sdk, sourceRes.sourceId, prepared);
       sdk.database
         .query(
-          "UPDATE browser_sessions SET indexed_hash=?,prepared=NULL,error=NULL,attempts=0,next_attempt_at=0 WHERE extension_id=? AND session_id=? AND activity_hash=?",
+          "UPDATE browser_sessions SET indexed_hash=?,prepared=NULL,settings=NULL,prepared_at=NULL,error=NULL,attempts=0,next_attempt_at=0 WHERE extension_id=? AND session_id=? AND activity_hash=?",
         )
         .run(
           prepared.activityHash!,

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { getSDK, type ShaleSDK } from "@shale/sdk";
 import type { DbBackupSettings, BackupResult } from "./settings.types";
@@ -26,15 +26,16 @@ export function formatTimestamp(
 }
 
 /**
- * Prunes older database backups exceeding the maxBackups limit.
+ * Deletes expired matching backups, then prunes the remainder to maxBackups.
  */
 export function pruneOldBackups(
   backupDir: string,
   filenamePrefix: string,
   maxBackups: number,
   logger?: { info: (...args: any[]) => void; warn?: (...args: any[]) => void },
+  maxAgeDays = 7,
 ): number {
-  if (maxBackups <= 0 || !existsSync(backupDir)) {
+  if (!existsSync(backupDir)) {
     return 0;
   }
 
@@ -42,26 +43,42 @@ export function pruneOldBackups(
     const files = readdirSync(backupDir);
     const backupFiles = files
       .filter((f) => f.startsWith(filenamePrefix) && f.endsWith(".db"))
-      .map((filename) => {
+      .flatMap((filename) => {
         const fullPath = join(backupDir, filename);
-        const stats = statSync(fullPath);
-        return {
+        const stats = lstatSync(fullPath);
+        if (!stats.isFile()) return [];
+        return [{
           filename,
           fullPath,
           mtimeMs: stats.mtimeMs,
-        };
+        }];
       })
       .sort((a, b) => b.mtimeMs - a.mtimeMs); // Sort descending: newest first
 
     let pruned = 0;
-    for (let i = maxBackups; i < backupFiles.length; i++) {
+    const cutoff = Date.now() - Math.max(1, maxAgeDays) * 24 * 60 * 60 * 1000;
+    const retained = [];
+    for (const backup of backupFiles) {
+      if (backup.mtimeMs < cutoff) {
+        try {
+          unlinkSync(backup.fullPath);
+          pruned++;
+          logger?.info(`Pruned expired database backup: ${backup.filename}`);
+        } catch (err: any) {
+          logger?.warn?.(`Failed to delete expired backup ${backup.filename}:`, err?.message || err);
+          retained.push(backup);
+        }
+      } else retained.push(backup);
+    }
+
+    if (maxBackups > 0) for (let i = maxBackups; i < retained.length; i++) {
       try {
-        unlinkSync(backupFiles[i].fullPath);
+        unlinkSync(retained[i].fullPath);
         pruned++;
-        logger?.info(`Pruned older database backup: ${backupFiles[i].filename}`);
+        logger?.info(`Pruned older database backup: ${retained[i].filename}`);
       } catch (err: any) {
         logger?.warn?.(
-          `Failed to delete old backup ${backupFiles[i].filename}:`,
+          `Failed to delete old backup ${retained[i].filename}:`,
           err?.message || err,
         );
       }
@@ -88,6 +105,7 @@ export async function executeBackup(
     backupDir: currentSettings.backupDir || "./data/backups",
     filenamePrefix: currentSettings.filenamePrefix || "production-backup-",
     maxBackups: currentSettings.maxBackups ?? 10,
+    maxAgeDays: currentSettings.maxAgeDays ?? 7,
     timestampFormat: currentSettings.timestampFormat || "iso",
     ...options,
   };
@@ -147,6 +165,7 @@ export async function executeBackup(
       settings.filenamePrefix,
       settings.maxBackups,
       sdk.logger,
+      settings.maxAgeDays,
     );
 
     if (prunedCount > 0) {

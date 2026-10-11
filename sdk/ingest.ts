@@ -3,10 +3,16 @@ import { randomUUIDv7 } from "bun";
 import defaultDb from "../lib/db-init";
 import { ensureGraphSchema } from "../lib/graph/schema";
 import { excludedSourceId } from "../lib/knowledge/exclusions";
+import { prepareSourceMemory, memoryChunks, contentFingerprint, validateMemory } from '../lib/memory/prepare';
+import { recordMemory, memoryHash } from './memory/records';
+import { compactMemoryHistory } from './memory/retention';
 import type {
   IngestSourceAndChunksInput,
   IngestSourceAndChunksResult,
 } from "./types";
+import { sourceRefreshScope } from '../lib/memory/refresh-scope';
+import { refineObservedMemory } from '../lib/memory/refine';
+import { SourceMemoryStore } from './memory/store';
 
 export class UnifiedIngestor {
   private readonly db: Database;
@@ -27,7 +33,12 @@ export class UnifiedIngestor {
   sourceAndChunks(
     input: IngestSourceAndChunksInput,
   ): IngestSourceAndChunksResult {
-    const { source, chunks, namespace = this.defaultNamespace } = input;
+    const { source, namespace = this.defaultNamespace } = input;
+    const rawChunks = input.chunks;
+    if (!rawChunks?.length) throw new Error('Cannot ingest source without any chunks.');
+    let memory = input.memory ?? prepareSourceMemory(rawChunks, { title: source.title,
+      structuredObservations:['browser_activity','browser_history','browser_bookmark','web_session'].includes(source.type) });
+    validateMemory(memory);
 
     const skipped = (sourceId: string): IngestSourceAndChunksResult => ({
       sourceId, chunkIds: [], chunksCount: 0, skipped: "excluded",
@@ -35,7 +46,7 @@ export class UnifiedIngestor {
     const excludedId = excludedSourceId(this.db, source.id, source.uri);
     if (excludedId) return skipped(source.id ?? excludedId);
 
-    if (!chunks || chunks.length === 0) {
+    if (!rawChunks || rawChunks.length === 0) {
       throw new Error("Cannot ingest source without any chunks.");
     }
 
@@ -45,15 +56,7 @@ export class UnifiedIngestor {
     const updatedAt = source.updated_at ?? now;
 
     // Compute deterministic content hash if not provided
-    let hash = source.hash;
-    if (!hash) {
-      const hasher = new Bun.CryptoHasher("sha256");
-      hasher.update(source.uri);
-      for (const chunk of chunks) {
-        hasher.update(chunk.text_content);
-      }
-      hash = hasher.digest("hex");
-    }
+    const fingerprint = source.hash ?? contentFingerprint(rawChunks);
 
     const insertSourceStmt = this.db.query(`
       INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
@@ -105,7 +108,30 @@ export class UnifiedIngestor {
         if (!source.id) sourceId = existing.id;
         if (sourceId !== existing.id) this.db.query("DELETE FROM sources WHERE id = ?").run(existing.id);
       }
+      const remembered = this.db.query<{fingerprint:string},[string]>('SELECT fingerprint FROM source_memories WHERE source_id=?').get(sourceId);
+      const refreshing=sourceRefreshScope();
+      const sameContent=remembered?.fingerprint === fingerprint && !!this.db.query('SELECT 1 FROM sources WHERE id=?').get(sourceId);
+      if(sameContent && refreshing && (refreshing.sourceId===sourceId||refreshing.uri===source.uri)) {
+        const current=new SourceMemoryStore(this.db).get(sourceId);
+        memory=refineObservedMemory({summary:current.summary.text,summaryMethod:current.summary.method,
+          snippets:current.snippets,coverage:current.coverage},memory);
+        validateMemory(memory);
+      }
+      const hash=memoryHash(memory,fingerprint);
+      if (sameContent && (!refreshing || (refreshing.sourceId!==sourceId&&refreshing.uri!==source.uri) ||
+        this.db.query<{hash:string},[string]>('SELECT hash FROM sources WHERE id=?').get(sourceId)!.hash===hash)) {
+        this.db.query('UPDATE sources SET title=?,uri=?,type=?,origin=? WHERE id=?').run(source.title,source.uri,source.type,source.origin,sourceId);
+        this.db.query('INSERT INTO source_observations(source_id,fingerprint,captured_at,origin,availability,metadata) VALUES(?,?,?,?,?,?)')
+          .run(sourceId,fingerprint,updatedAt,source.origin,'retained',JSON.stringify({captureOrigin:source.observation?.captureOrigin,quality:source.observation?.quality}));
+        this.db.query(`DELETE FROM source_observations WHERE source_id=? AND id NOT IN
+          (SELECT id FROM source_observations WHERE source_id=? ORDER BY id DESC LIMIT 32)`).run(sourceId,sourceId);
+        const ids = this.db.query<{id:number},[string]>('SELECT id FROM chunks WHERE source_id=? ORDER BY chunk_index').all(sourceId).map(c=>c.id);
+        return {sourceId,chunkIds:ids,chunksCount:ids.length};
+      }
       this.db.query("DELETE FROM chunks WHERE source_id = ?").run(sourceId);
+      // Freshness is about original content, not edits to its remembered summary.
+      this.db.query('UPDATE source_memories SET fingerprint=? WHERE source_id=?').run(fingerprint,sourceId);
+      this.db.query('INSERT INTO source_memory_write_intents VALUES(?,?) ON CONFLICT(source_id) DO UPDATE SET hash=excluded.hash').run(sourceId,hash);
 
       // 1. Insert or replace the source
       insertSourceStmt.run({
@@ -121,6 +147,8 @@ export class UnifiedIngestor {
       this.db.query('DELETE FROM graph_source_archives WHERE source_id=?').run(sourceId);
 
       const chunkIds: number[] = [];
+      const chunks = memoryChunks(memory).map((chunk,index)=>({...chunk,entity_names:index===0?undefined:
+        rawChunks.find((raw,i)=>(raw.chunk_index??i)===memory.snippets[index-1]?.locator.originalChunkIndex)?.entity_names}));
 
       // 2. Insert chunks
       for (let i = 0; i < chunks.length; i++) {
@@ -157,6 +185,12 @@ export class UnifiedIngestor {
           }
         }
       }
+
+      recordMemory(this.db,sourceId,fingerprint,memory,true,source.observation);
+      this.db.query('DELETE FROM source_memory_write_intents WHERE source_id=?').run(sourceId);
+      compactMemoryHistory(this.db,sourceId);
+      this.db.query(`INSERT OR IGNORE INTO chunk_entities(chunk_id,entity_id)
+        SELECT c.id,e.entity_id FROM chunks c JOIN source_entities e ON e.source_id=c.source_id WHERE c.source_id=?`).run(sourceId);
 
       return {
         sourceId,

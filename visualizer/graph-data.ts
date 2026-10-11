@@ -1,8 +1,8 @@
 import type { ShaleSDK } from "../sdk";
 import { sourceIdFromEntity, graphIdentityFromSourceUri } from "../lib/source-identity";
 import type { ClaimFilter, ClaimStatus } from "../sdk/graph/types";
-import { sourceMap } from "./source-map";
-import { graphEdges } from "./graph-edges";
+import { sourceMap, sourceRank } from "./source-map";
+import { graphEdges, MAP_HIDDEN_TYPES } from "./graph-edges";
 import { recentChunksBySource } from './recent-chunks';
 
 export interface GraphData {
@@ -14,6 +14,7 @@ export interface GraphData {
     stableId: string;
     canonicalId: number | null;
     degree: number;
+    sourceId?: string;
     sourceUri?: string;
     sourceTitle?: string;
     chunksCount: number;
@@ -28,22 +29,28 @@ export function getGraphData(sdk: ShaleSDK, filter: ClaimFilter = {}): GraphData
   return sdk.database.transaction(() => graphSnapshot(sdk, filter))();
 }
 
-function sourceRank(s: { uri: string }): number {
-  if (/^https?:\/\//.test(s.uri)) return 4;
-  if (s.uri.startsWith("browser-public:")) return 3;
-  if (s.uri.startsWith("browser-content-version:")) return 2;
-  if (s.uri.startsWith("browser-history:")) return 1;
-  return 0;
-}
-
 function graphSnapshot(sdk: ShaleSDK, filter: ClaimFilter): GraphData {
   const db = sdk.database;
-  const entities = db.query<{ id: number; namespace: string; name: string; identityName: string; type: string; stableId:string;canonicalId:number|null }, []>(
+  const allEntities = db.query<{ id: number; namespace: string; name: string; identityName: string; type: string; stableId:string;canonicalId:number|null }, []>(
     "SELECT id,namespace,name AS identityName,coalesce(display_name,name) AS name,type,stable_id AS stableId,canonical_id AS canonicalId FROM entities ORDER BY id ASC",
   ).all();
+  // Merged identities render once, as their canonical root; hidden types never render.
+  const parentOf = new Map(allEntities.map(e => [e.id, e.canonicalId]));
+  const rootOf = (id: number) => {
+    const seen = new Set<number>();
+    let current = id;
+    for (let next = parentOf.get(current); next != null && !seen.has(next); next = parentOf.get(current)) {
+      seen.add(current);
+      current = next;
+    }
+    return current;
+  };
+  const entities = allEntities.filter(e => e.canonicalId === null && !MAP_HIDDEN_TYPES.has(e.type));
+  const visible = new Set(entities.map(e => e.id));
   const { claims, truncated } = graphEdges(sdk, filter);
-  const edges=claims.filter(c=>c.object!==undefined).map(c=>({id:c.id,source_entity_id:c.subject,
-    target_entity_id:c.object!,relation:c.predicate,weight:c.strength ?? 1,status:c.status,context:c.context}));
+  const edges=claims.filter(c=>c.object!==undefined).map(c=>({id:c.id,source_entity_id:rootOf(c.subject),
+    target_entity_id:rootOf(c.object!),relation:c.predicate,weight:c.strength ?? 1,status:c.status,context:c.context}))
+    .filter(e=>e.source_entity_id!==e.target_entity_id && visible.has(e.source_entity_id) && visible.has(e.target_entity_id));
   const sources = db.query<{ id: string; uri: string; title: string }, []>(
     "SELECT id, uri, title FROM sources",
   ).all();
@@ -88,6 +95,7 @@ function graphSnapshot(sdk: ShaleSDK, filter: ClaimFilter): GraphData {
         ...display,
         name: sourceId && source ? source.title : entity.name,
         degree: degree.get(entity.id) || 0,
+        sourceId: source?.id,
         sourceUri: source?.uri,
         sourceTitle: source?.title,
         chunksCount: source ? chunkCounts.get(source.id) ?? 0 : 0,

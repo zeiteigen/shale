@@ -22,7 +22,7 @@ import { prepareSessionSnapshot, finalizeSession } from "./session-manager";
 export type PreparedBrowserPayload =
   | { type: "pages"; pages: PreparedPageData[] }
   | { type: "session"; session: PreparedSessionData | null }
-  | { type: "history"; payload: HistoryBatchPayload; contents?: Array<HistoryPageContent | null> }
+  | { type: "history"; payload: HistoryBatchPayload; contents?: Array<HistoryPageContent | null>; pages?: PreparedPageData[] }
   | { type: "bookmarks"; payload: BookmarksBatchPayload }
   | { type: "ping" }
   | {
@@ -65,8 +65,20 @@ export async function prepareBrowserPayload(
         type: "session",
         session: await prepareSessionSnapshot(sdk, payload, settings),
       };
-    case "history_batch":
-      return { type: "history", payload, contents: await prepareHistoryContent(sdk, payload, settings) };
+    case "history_batch": {
+      const contents = await prepareHistoryContent(sdk, payload, settings);
+      const pages = [...new Map(contents.flatMap((content) =>
+        content?.preparedPage ? [[content.url, content.preparedPage] as const] : [],
+      )).values()];
+      return {
+        type: "history",
+        payload,
+        contents: contents.map((content) => content
+          ? { url: content.url, fetchedAt: content.fetchedAt, origin: content.origin, extraction: content.extraction }
+          : null),
+        pages,
+      };
+    }
     case "bookmarks_batch":
       return { type: "bookmarks", payload };
     case "activity_event":
@@ -106,6 +118,8 @@ export async function finalizeBrowserPayload(
       );
       break;
     case "history":
+      for (const page of prepared.pages ?? [])
+        await finalizePageVisit(sdk, page, settings, assertOwned);
       await finalizeHistoryBatch(sdk, prepared.payload, settings, () => {
         assertOwned();
         afterCommit();

@@ -4,6 +4,7 @@
     "description": "Indexes notes, images, and document attachments across Obsidian vaults.",
     "namespace": "obsidian",
     "checkpoint_recover": "recover.ts",
+    "setup_script": "refresh.ts",
     "crons": [
         {
             "name": "obsidian-parser-cron",

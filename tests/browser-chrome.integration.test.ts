@@ -208,8 +208,9 @@ integration(
           .map((x) => new URL(x.url).pathname),
       ).toEqual(["/A", "/B", "/A"]);
       expect(new Set(visits.map((x) => x.eventId)).size).toBe(visits.length);
-      expect(fixture.trace).toContain("chat");
-      expect(fixture.trace.every((x) => x === "chat")).toBe(true);
+      // This E2E disables page analysis and the visits have not idled into a
+      // session yet, so ingestion should not call the model at all.
+      expect(fixture.trace).toEqual([]);
       expect(
         (await rows(worker))
           .filter((row: any) => captures.some((x: any) => x.id === row.id))

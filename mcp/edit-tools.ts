@@ -29,12 +29,12 @@ const descriptions: Record<string, string> = {
   remove_chunk: "Remove a chunk from a live source revision while retaining historical revision content and evidence.",
   list_entities: "Find entities by name, type, or namespace with bounded pagination; returns numeric IDs for precise edits.",
   list_connections: "List connections around an entity, filtered by direction, predicate, context, or claim status.",
-  get_source_revision: "Read an immutable historical source revision and its chunks, including archived content cited by evidence.",
+  get_source_revision: "Read an immutable historical retained revision and its chunks; older revisions may contain summaries and selected snippets rather than the complete original body.",
   find_connection_candidates: "Suggest possible connections for review from shared evidence and full-text matches; does not create claims.",
   find_duplicate_entities: "Suggest potentially duplicate entities for inspection and review; does not merge or alter identities.",
   list_sources: "Find live or archived sources by title, URI, origin, type, or namespace with bounded pagination.",
   inspect_source: "Inspect source metadata, lifecycle state, revision references, and reingestion block before editing.",
-  list_chunks: "List current or archived source chunks with IDs and versions for inspection and precise edits.",
+  list_chunks: "List current or archived retained chunks with IDs and versions for inspection and precise edits; retained chunks may not include the complete original source body.",
 };
 
 /** Register the audited editing surface using the SDK's shared validation schemas. */

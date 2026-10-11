@@ -170,15 +170,18 @@ async function pollReceipts() {
         (item) => {
           const receipt = result.records?.find((x) => x.jobId === item.jobId);
           if (!receipt) return item;
-          const state = ["indexed", "skipped", "failed"].includes(
+          let state = ["indexed", "skipped", "failed"].includes(
             receipt.status,
           )
             ? receipt.status
             : "received";
+          if (state === "failed" && /expired/i.test(receipt.reason || ""))
+            state = "expired";
           return {
             ...item,
             state,
-            record: ["indexed", "skipped"].includes(state)
+            record: ["indexed", "skipped"].includes(state) ||
+              state === "expired"
               ? { recordId: item.id }
               : item.record,
             error: receipt.reason || "",

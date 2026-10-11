@@ -155,7 +155,7 @@ it('connects cross-source linker nodes to the connector records they represent',
     relation:'RELATES_TO',reason:'Related content',weight:0.8,textScore:0.9,entityResolutions:[]}],sdk);
   const bindings = sdk.graph.claims.list({predicate:'REPRESENTS'});
   expect(bindings).toHaveLength(2);
-  expect(bindings.every(claim=>claim.status==='accepted' && sdk.graph.entities.get(claim.object!).type==='HistoryRecord')).toBe(true);
+  expect(bindings.every(claim=>claim.status==='accepted' && sdk.graph.entities.get(claim.object!).type==='WebPage')).toBe(true);
   expect(bindings.every(claim=>sdk.graph.evidence.list(claim.id).length===1)).toBe(true);
 });
 

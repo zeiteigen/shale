@@ -1,6 +1,74 @@
-import { SourceGraph, type ShaleSDK } from "@shale/sdk";
+import { SourceGraph, graphIdentity, type ShaleSDK } from "@shale/sdk";
 import { commitPreparedClaims } from "../../sdk/graph/prepared";
+import { normalizeUrl } from "./filter";
 import type { PreparedPageData } from "./types";
+
+const GENERIC_ANCHORS = new Set([
+  "read more",
+  "more",
+  "here",
+  "click here",
+  "next",
+  "previous",
+  "prev",
+  "back",
+  "learn more",
+  "see more",
+  "see all",
+  "view all",
+  "show more",
+  "continue",
+  "continue reading",
+  "details",
+  "link",
+  "source",
+  "top",
+  "back to top",
+  "skip to content",
+  "skip to main content",
+]);
+
+/** Navigation chrome anchors ("Read more", "Next") carry no information about the target. */
+export function isGenericAnchor(text: string | undefined): boolean {
+  const key = (text ?? "")
+    .normalize("NFKC")
+    .replace(/[\s\p{P}\p{S}]+/gu, " ")
+    .trim()
+    .toLocaleLowerCase();
+  return !key || GENERIC_ANCHORS.has(key);
+}
+
+/** Favicons, tracking pixels and icon sprites are page chrome, not page content. */
+export function isDecorativeImage(image: {
+  url: string;
+  width?: number;
+  height?: number;
+}): boolean {
+  if (/^data:/i.test(image.url)) return true;
+  if (
+    /favicon|apple-touch-icon|[?&]type=favicon\b|\/s2\/favicons|faviconv2/i.test(
+      image.url,
+    )
+  )
+    return true;
+  return (
+    (image.width !== undefined && image.width > 0 && image.width < 48) ||
+    (image.height !== undefined && image.height > 0 && image.height < 48)
+  );
+}
+
+/** A page is known once something other than an inbound link asserted it: a visit, history, session or capture. */
+function isKnownPage(sdk: ShaleSDK, namespace: string, url: string): boolean {
+  return Boolean(
+    sdk.database
+      .query(
+        `SELECT 1 FROM entities e WHERE e.stable_id=? AND (
+          EXISTS(SELECT 1 FROM graph_claims c WHERE c.subject_id=e.id AND c.status IN ('accepted','proposed','disputed'))
+          OR EXISTS(SELECT 1 FROM graph_participants p WHERE p.entity_id=e.id))`,
+      )
+      .get(graphIdentity(namespace, "WebPage", url)),
+  );
+}
 
 export function commitPageGraph(
   sdk: ShaleSDK,
@@ -22,7 +90,7 @@ export function commitPageGraph(
     .trim()
     .slice(0, 200);
   const entity = graph.entity(cleanUrl, cleanTitle, "WebPage", cleanUrl);
-  const observed = { evidence: graph.evidence(imageOffset - 1) };
+  const observed = { evidence: graph.evidence(0) };
   graph.claim(entity, "SOURCE_URI", { value: cleanUrl }, observed);
   if (page.captureOrigin)
     graph.claim(
@@ -49,17 +117,6 @@ export function commitPageGraph(
   };
   graph.claim(entity, "SUMMARY", { value: analysis.summary }, interpretation);
   graph.claim(entity, "CATEGORY", { value: analysis.category }, interpretation);
-  if (prepared.contextualSummary)
-    graph.claim(
-      entity,
-      "RETRIEVAL_CONTEXT",
-      { value: prepared.contextualSummary },
-      {
-        ...interpretation,
-        method: prepared.parser?.contextMethod ?? "llm",
-        model: prepared.parser?.contextModel,
-      },
-    );
   for (const topic of topics)
     graph.link(
       entity,
@@ -74,26 +131,33 @@ export function commitPageGraph(
       { value: page.author },
       { evidence: graph.quote(page.author) },
     );
+  const seenLinks = new Set<string>();
   for (const link of page.links ?? []) {
-    let url: string;
+    let norm: ReturnType<typeof normalizeUrl>;
     try {
-      url = new URL(link.url, cleanUrl).href;
-      if (!/^https?:/.test(url)) continue;
+      norm = normalizeUrl(new URL(link.url, cleanUrl).href);
     } catch {
       continue;
     }
-    const linkText = (link.text || "").trim();
-    const cleanLinkTitle = linkText
-      ? linkText.replace(/\s+/g, " ").slice(0, 200)
-      : url;
-    const target = graph.entity(url, cleanLinkTitle, "WebPage", url);
-    graph.link(entity, "REFERENCES", target, {
+    const url = norm.cleanUrl;
+    if (!norm.isValid || url === cleanUrl || seenLinks.has(url)) continue;
+    seenLinks.add(url);
+    const options = {
       method: "dom",
       evidence: graph.quote(link.url),
       qualifiers: { anchor: link.text ?? "", rel: link.rel ?? "" },
-    });
+    };
+    // Only pages Shale already knows become nodes; a node per outbound anchor floods the graph.
+    // The URL is the label so anchor text never renames a page that has its own title.
+    if (isKnownPage(sdk, namespace, url)) {
+      graph.link(entity, "REFERENCES", graph.entity(url, url, "WebPage", url), options);
+      continue;
+    }
+    if (isGenericAnchor(link.text)) continue;
+    graph.claim(entity, "LINKS_TO", { value: url }, options);
   }
   for (const image of page.images ?? []) {
+    if (isDecorativeImage(image)) continue;
     const target = graph.entity(
       image.url,
       (image.alt || image.url).slice(0, 200),
@@ -109,7 +173,8 @@ export function commitPageGraph(
       },
     });
   }
-  for (const image of prepared.parser?.imageKnowledge ?? []) {
+  for (const image of prepared.imageKnowledge ?? []) {
+    if (isDecorativeImage({ url: image.uri })) continue;
     const target = graph.entity(image.uri, image.title, "Image");
     graph.link(entity, "FEATURES_IMAGE", target, { method: "html" });
     commitPreparedClaims(graph, target, image.claims, imageOffset);

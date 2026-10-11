@@ -34,6 +34,8 @@ export {
   eng,
 } from "./search";
 export { SettingsManager } from "./settings";
+export { ExtensionCredentials } from "./credentials";
+export { isAuthProvider, type AuthProvider, type AuthMethod, type AuthField, type AuthStatus } from "./auth";
 export { readRootSettings, getRootSetting, getRootSettingsPath } from "../lib/settings";
 export type { RootSettings } from "../lib/settings.types";
 export {
@@ -51,3 +53,6 @@ export type { ExtensionSDKOptions, ModelProfiles } from "./sdk-options";
 export { ModelCoordinator, modelCoordinator } from "../lib/ai/scheduler";
 
 export type * from "../lib/messages.types";
+export { SourceMemoryStore, type MemoryEdit } from './memory/store';
+export { prepareSourceMemory, memoryChunks } from '../lib/memory/prepare';
+export type { PreparedSourceMemory, PreparedSnippet } from '../lib/memory/types';

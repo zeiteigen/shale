@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { SourceGraph, type ShaleSDK } from "@shale/sdk";
 import { commitPreparedClaims } from "../../sdk/graph/prepared";
 import { fileStateKey } from "./file-state";
 import type { PreparedDirectoryFile } from "./types";
+import { contentFingerprint } from "../../lib/memory/prepare";
 
 /** Source, graph evidence, file watermark, and checkpoint removal commit together. */
 export function commitFile(sdk: ShaleSDK, id: string, file: PreparedDirectoryFile) {
@@ -12,10 +12,10 @@ export function commitFile(sdk: ShaleSDK, id: string, file: PreparedDirectoryFil
     const uri = pathToFileURL(file.filePath).href;
     const result = sdk.ingest.sourceAndChunks({ namespace,
       source: { type: parsed.fileType, uri, origin: "directories", title: parsed.title, updated_at: file.updatedAt,
-        hash: createHash("sha256").update(JSON.stringify([uri, parsed.metadata?.assetHash ?? null,
-          parsed.chunks.map(chunk => chunk.text_content)])).digest("hex") },
+        hash: file.sourceFingerprint ?? contentFingerprint(parsed.chunks) },
       chunks: parsed.chunks.map((chunk, index) => ({ text_content: chunk.text_content, chunk_index: index,
-        chunk_type: chunk.chunk_type ?? "verbatim" })),
+        chunk_type: chunk.chunk_type ?? "verbatim", metadata: chunk.metadata })),
+      memory: file.memory,
     });
     if (result.skipped) {
       sdk.checkpoint.delete(id);
@@ -28,10 +28,6 @@ export function commitFile(sdk: ShaleSDK, id: string, file: PreparedDirectoryFil
     graph.link(subject, "IN_DIRECTORY", directory);
     graph.claim(subject, "SOURCE_URI", { value: uri });
     graph.claim(subject, "TITLE", { value: parsed.title });
-    // Link every chunk to the file entity, including text with no extracted entities.
-    for (let index = 0; index < parsed.chunks.length; index++) {
-      graph.claim(subject, "HAS_CONTENT", { value: index }, { evidence: graph.evidence(index) });
-    }
     const entities = new Map<string, number>([[parsed.title, subject]]);
     for (const entity of parsed.entities) {
       if (entities.has(entity.name)) continue;

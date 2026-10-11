@@ -47,6 +47,15 @@ export class SourceGraph {
   }
 
   evidence(chunkIndex?: number, quote?: string, method = 'connector', stance: EvidenceInput['stance'] = 'supports'): EvidenceInput[] {
+    if (chunkIndex !== undefined && this.db.query('SELECT 1 FROM source_memories WHERE source_id=?').get(this.sourceId)) {
+      const snippets = this.db.query<{chunk_index:number;text_content:string;locator:string},[string]>(`SELECT p.chunk_index,t.text_content,p.locator
+        FROM source_snippets s JOIN graph_revision_passages p ON p.id=s.current_version
+        JOIN graph_memory_texts t ON t.id=p.text_id WHERE s.source_id=? AND s.retired=0 ORDER BY p.chunk_index`).all(this.sourceId);
+      const retained = snippets.find(s => JSON.parse(s.locator).originalChunkIndex === chunkIndex &&
+        (quote === undefined || s.text_content.includes(quote)));
+      if (!retained) return [{sourceId:this.sourceId,method,stance}];
+      chunkIndex = retained.chunk_index;
+    }
     return [{sourceId:this.sourceId,chunkIndex,quote,method,stance}];
   }
 
@@ -55,7 +64,7 @@ export class SourceGraph {
     const chunks = this.db.query<{chunk_index:number;text_content:string}, [string]>(
       'SELECT chunk_index,text_content FROM chunks WHERE source_id=? AND chunk_type=\'verbatim\' ORDER BY chunk_index').all(this.sourceId);
     const chunk = chunks.find(chunk => chunk.text_content.includes(text));
-    return chunk ? this.evidence(chunk.chunk_index,text) : this.evidence();
+    return chunk ? [{sourceId:this.sourceId,chunkIndex:chunk.chunk_index,quote:text,method:'connector'}] : this.evidence();
   }
 
   private linkLiveEvidence(subject: number, object: number | undefined, evidence: EvidenceInput[]) {
@@ -70,7 +79,11 @@ export class SourceGraph {
 
   claim(subject: number, predicate: string, target: {object:number} | {value:GraphValue},
     options: Omit<ClaimInput,'id'|'subject'|'predicate'|'object'|'value'> = {}): string {
-    if (predicate === "SOURCE_URI") this.graph.entities.addAlias(subject,this.sourceId,"source-id");
+    if (predicate === "SOURCE_URI") {
+      this.graph.entities.addAlias(subject,this.sourceId,"source-id");
+      this.db.query('INSERT OR IGNORE INTO source_entities VALUES(?,?)').run(this.sourceId,subject);
+      this.db.query('INSERT OR IGNORE INTO chunk_entities(chunk_id,entity_id) SELECT id,? FROM chunks WHERE source_id=?').run(subject,this.sourceId);
+    }
     const input: ClaimInput = {namespace:this.namespace,context:this.context,observedAt:this.observedAt,
       status:'accepted',method:'connector',evidence:this.evidence(),...options,subject,predicate,...target};
     const id = `source-claim:${createHash('sha256').update(serializeValue([
@@ -100,6 +113,8 @@ export class SourceGraph {
       namespace:this.namespace,context:this.context,status:'accepted',method:'connector',
       evidence:this.evidence(),...input,stableId});
     const evidence = input.evidence ?? this.evidence();
+    this.db.query('INSERT OR IGNORE INTO source_entities VALUES(?,?)').run(this.sourceId,event.entity.id);
+    this.db.query('INSERT OR IGNORE INTO chunk_entities(chunk_id,entity_id) SELECT id,? FROM chunks WHERE source_id=?').run(event.entity.id,this.sourceId);
     this.linkLiveEvidence(event.entity.id,undefined,evidence);
     for (const participant of input.participants) this.linkLiveEvidence(event.entity.id,participant.entity,
       [...evidence,...(participant.evidence ?? [])]);

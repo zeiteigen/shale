@@ -1,7 +1,9 @@
 import type { ShaleSDK } from "@shale/sdk";
 import { pendingJobs } from "./inbox-store";
+import { expirePreparedSessions } from "./session-retention";
 export function browserStatus(sdk: ShaleSDK, ids?: string[]) {
   pendingJobs(sdk, 0);
+  expirePreparedSessions(sdk);
   const counts = Object.fromEntries(
     sdk.database
       .query<{ state: string; count: number }, [string]>(
@@ -49,6 +51,13 @@ export function retryBrowserJobs(sdk: ShaleSDK, ids: string[]) {
           )
           .run(sdk.extensionId, id.slice("browser_session:".length));
       }
+      const expired = sdk.database
+        .query<{ outcome: string | null }, [string, string]>(
+          "SELECT outcome FROM browser_jobs WHERE extension_id=? AND id=? AND state='failed'",
+        )
+        .get(sdk.extensionId, id);
+      if (expired?.outcome && JSON.parse(expired.outcome).expired)
+        throw new Error(`Browser job ${id} expired; resubmit the capture`);
       sdk.database
         .query(
           `UPDATE browser_jobs SET state=CASE WHEN prepared IS NULL THEN 'received' ELSE 'prepared' END,

@@ -1,6 +1,7 @@
 import type { GraphChannelDefinitions } from "./graph-contracts";
 import type { BrowserChannelDefinitions } from "./browser-contracts";
 import type { WebChannelDefinitions } from "./web-contracts";
+import type { MemoryChannelDefinitions } from './memory-contracts';
 export type {
   WebPageParseRequest,
   WebPageParseResponse,
@@ -261,7 +262,8 @@ export interface BuiltinChannelDefinitions
   extends
     GraphChannelDefinitions,
     WebChannelDefinitions,
-    BrowserChannelDefinitions {
+    BrowserChannelDefinitions,
+    MemoryChannelDefinitions {
   "file:process": {
     type: "request";
     request: ProcessFileRequest;

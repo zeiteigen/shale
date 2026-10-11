@@ -45,8 +45,8 @@ it("processes documents across configured vaults with isolated graph identities"
     const noteVault = sdk.graph.claims.list({ subject: note.id, predicate: "IN_VAULT" })[0].object;
     for (const reference of references) expect(sdk.graph.claims.list({ subject: reference.object!, predicate: "IN_VAULT" })[0].object).toBe(noteVault);
   }
-  const locations = sdk.graph.claims.list({ predicate: "CHUNK_LOCATION" });
-  expect(locations.some(claim => (claim.value as Record<string, unknown>).pageNumber === 2)).toBe(true);
+  const locations = sdk.database.query<{ locator: string }, []>("SELECT locator FROM graph_revision_passages WHERE locator != '{}'").all();
+  expect(locations.some(row => JSON.parse(row.locator).pageNumber === 2)).toBe(true);
   const summaries = sdk.graph.claims.list({ predicate: "DOCUMENT_SUMMARY" });
   expect(summaries).toHaveLength(4);
   expect(summaries.every(claim => claim.status === "proposed")).toBe(true);

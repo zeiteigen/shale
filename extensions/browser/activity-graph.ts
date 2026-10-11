@@ -1,7 +1,7 @@
 import type { ActivityEventPayload } from "../../lib/browser-contract";
 import type { BrowserExtensionSettings } from "./settings.types";
 import { normalizeUrl } from "./filter";
-import { SourceGraph, type ShaleSDK } from "@shale/sdk";
+import { SourceGraph, graphIdentity, type ShaleSDK } from "@shale/sdk";
 import type { PreparedSessionData, SessionVisitRecord } from "./types";
 import { fingerprint } from "./inbox-store";
 import { isSourceExcluded } from "../../lib/knowledge/exclusions";
@@ -73,21 +73,39 @@ export function visitObservation(sdk: ShaleSDK, visit: SessionVisitRecord) {
       "SELECT payload FROM browser_activity WHERE extension_id=? AND collector_id=? AND event_id=?",
     )
     .get(sdk.extensionId, visit.collectorId ?? "legacy", visit.eventId ?? "");
-  return (
-    original?.payload ??
-    JSON.stringify({
-      eventId: visit.eventId,
-      collectorId: visit.collectorId,
-      url: visit.url,
-      title: visit.title,
-      visitedAt: visit.visitedAt,
-      tabId: visit.tabId,
-      windowId: visit.windowId,
-      openerTabId: visit.openerTabId,
-      transitionType: visit.transitionType,
-      sequence: visit.sequence,
-    })
-  );
+  const observed = original?.payload ? JSON.parse(original.payload) : visit;
+  const title = String(observed.title ?? visit.title ?? visit.url).slice(0, 160);
+  const url = String(observed.url ?? visit.url).slice(0, 500);
+  const at = Number(observed.visitedAt ?? visit.visitedAt);
+  return `Visit: ${title}\nURL: ${url}\nVisited: ${new Date(at).toISOString()}`;
+}
+
+/** Activity kinds recorded as measurements of a visit rather than as events of their own. */
+const ACTIVITY_MEASURES = {
+  attention: "ATTENTION_MS",
+  activation: "ACTIVATED_AT",
+  close: "CLOSED_AT",
+} as const;
+
+/** The page_visit event of the navigation this activity belongs to, when it was already committed. */
+function parentVisit(
+  sdk: ShaleSDK,
+  namespace: string,
+  event: ActivityEventPayload,
+): number | undefined {
+  if (!event.navigationEventId) return undefined;
+  const parent = visitSource({
+    collectorId: event.collectorId,
+    eventId: event.navigationEventId,
+  } as SessionVisitRecord);
+  const source = sdk.database
+    .query<{ hash: string }, [string]>("SELECT hash FROM sources WHERE id=?")
+    .get(parent.id);
+  if (!source) return undefined;
+  return sdk.database
+    .query<{ id: number }, [string]>("SELECT id FROM entities WHERE stable_id=?")
+    .get(graphIdentity(namespace, "Event", `${parent.id}:${source.hash}:visit`))
+    ?.id;
 }
 
 /** Activity receipts become indexed independently of idle-session synthesis. */
@@ -140,6 +158,29 @@ export async function finalizeActivity(
       "WebPage",
       event.url,
     );
+    if (event.kind in ACTIVITY_MEASURES) {
+      // Focus/attention/close refine a visit; as separate events they were 30% of all nodes.
+      const subject = parentVisit(sdk, namespace, event) ?? page;
+      const predicate =
+        ACTIVITY_MEASURES[event.kind as keyof typeof ACTIVITY_MEASURES];
+      const qualifiers = {
+        observedAt: event.visitedAt,
+        ...(event.tabId === undefined ? {} : { tabId: event.tabId }),
+        ...(event.documentId === undefined ? {} : { documentId: event.documentId }),
+        ...(event.attended === undefined ? {} : { attended: event.attended }),
+      };
+      graph.claim(
+        subject,
+        predicate,
+        {
+          value:
+            event.kind === "attention" ? (event.durationMs ?? 0) : event.visitedAt,
+        },
+        { qualifiers },
+      );
+      afterCommit();
+      return;
+    }
     const occurrence = graph.event("visit", {
       name: `${event.kind}: ${event.title || event.url}`,
       kind:

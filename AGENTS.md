@@ -31,12 +31,15 @@ shale/
 │   ├── search.ts            # Full-text search engine (BM25 + keyword rank fusion)
 │   ├── messages.ts          # Type-safe messaging interface for extensions
 │   ├── llm.ts               # LLM querying interface with thinking tokens & multimodal support
-│   └── checkpoint.ts        # Recovery checkpoint manager for multi-phase tasks
+│   ├── checkpoint.ts        # Recovery checkpoint manager for multi-phase tasks
+│   └── chat/                # Shared chat-connector toolkit: message store, time windows, transcripts, summaries, graph commit
 ├── extensions/              # Autonomous modular extensions
 │   ├── obsidian/            # Obsidian vault ingestion, frontmatter/wikilink parsing, note chunking
 │   ├── browser/             # Chrome browser tab sync, session clustering, history/bookmarks ingestion
 │   ├── process-image/       # Multimodal visual extraction (layout, OCR, synthetic meaning chunks)
 │   ├── source-linker/       # Cross-source entity discovery and knowledge graph linker
+│   ├── discord/             # Discord ingestion via DiscordChatExporter JSON (import folder + optional sync)
+│   ├── instagram/           # Instagram DM ingestion via official data export (+ optional instagrapi sidecar)
 │   └── db-backup/           # Automated background SQLite database hot backups
 ├── main/                    # Host daemon and orchestration
 │   ├── index.ts             # Main process entry, Bun.serve HTTP server, startup runner
@@ -81,11 +84,23 @@ extensions/<name>/
     }
   ],
   "checkpoint_recover": "recover.ts",
+  "auth_script": "auth.ts",
+  "install_script": "install.ts",
   "hooks": {
     "ingest": "index.ts"
   }
 }
 ```
+
+### One-time Setup (`install_script`)
+
+`bun run setup` installs Bun dependencies (root and `visualizer/`), then runs every extension's `install_script`. This covers dependencies Bun can't provide, such as a Python virtualenv under `data/<extension>/`. `bun run setup <extension>…` runs only those installers. Installers must be idempotent and should leave the extension working without manual settings changes.
+
+### Accounts & Credentials (`auth_script`)
+
+Extensions that need a login declare `auth_script` in their manifest. The module exports an `AuthProvider` (`sdk/auth.ts`) as `auth` or as its default export. The provider supplies a title, an optional ToS/risk `warning`, sign-in `methods` with their fields, `status`, `connect`, an optional multi-step `submit` (2FA codes and so on), optional `verify`, and `disconnect`.
+- **Generic host and UI.** The host lists providers at `GET /api/auth` and routes `POST /api/auth/<extension>/{connect,submit,verify,disconnect}`. The web interface's **Accounts** page renders whatever providers declare. Never add service-specific code to the host or the React app.
+- **Where secrets live.** Use `sdk.credentials` (`get`, `set`, `resolve(key, envFallback)`, `clear`). It is backed by `data/credentials.json` (mode 0600, read fresh on every call; override the path with `SHALE_CREDENTIALS_PATH`). Secrets are write-only from the browser: providers return only status and account labels.
 
 ---
 
@@ -150,6 +165,12 @@ bun run settings describe obsidian includeImages
 bun run settings set obsidian includeImages true
 ```
 
+### First-time Setup
+```bash
+bun run setup               # bun install + every extension's install_script
+bun run setup instagram     # just one extension (e.g. its Python sidecar)
+```
+
 ### Launch Host & Interactive Daemon CLI
 When starting the host daemon, an interactive CLI runs over `process.stdin`:
 ```bash
@@ -198,4 +219,6 @@ bun run scripts/serve-visualizer.ts
 - **`extensions/browser`**: Syncs Chrome browser tabs and visits. Aggregates tabs into browsing sessions, generates synthetic narrative summaries, and stores web history/bookmarks as verbatim chunks.
 - **`extensions/process-image`**: Multimodal image processing service. Deconstructs diagrams, charts, and photos into verbatim visual layout and synthetic conceptual meaning chunks. Handles `file:process`, `files:process`, and `files:can-process`.
 - **`extensions/source-linker`**: Cross-source graph linker. Discovers unlinked entity references across disparate sources and generates semantic edges.
+- **`extensions/discord`**: Ingests Discord channels, threads, and DMs from DiscordChatExporter JSON exports dropped into `data/discord/import`. The optional `discord-sync` cron runs the exporter with the account connected on the web interface's Accounts page (user or bot token). Messages are split into conversation windows (one source each) with LLM summaries, and authors become `Person` entities with `external:discord` aliases.
+- **`extensions/instagram`**: Ingests Instagram DMs from the official "Download your information" JSON export (`data/instagram/import`), repairing the export's mojibake. An optional `instagram-sync` cron runs a Python instagrapi sidecar (`sidecar/ig_sync.py`), signed in from the Accounts page (password with 2FA/challenge codes, or a session cookie), that merges into the same threads without duplicates. Uses the same windowing as Discord.
 - **`extensions/db-backup`**: Hot backup utility. Uses SQLite backup APIs to create consistent database snapshots without stopping host operations.

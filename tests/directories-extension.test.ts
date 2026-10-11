@@ -87,7 +87,7 @@ describe("directory ingestion", () => {
     expect(database.query("SELECT 1 FROM sources WHERE origin='directories'").get()).toBeTruthy();
     expect(database.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM entities WHERE namespace='research' AND type='Document'").get()!.count).toBe(2);
     expect(database.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM edges WHERE relation='IN_DIRECTORY'").get()!.count).toBe(2);
-    expect(database.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM chunk_entities").get()!.count).toBe(4);
+    expect(database.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM chunk_entities").get()!.count).toBe(6);
     expect(database.query("SELECT 1 FROM graph_claims WHERE predicate='SUMMARY' AND status='proposed'").get()).toBeTruthy();
     expect(sdk.hasCheckpoints()).toBe(false);
   });
@@ -162,6 +162,9 @@ describe("directory ingestion", () => {
     }) as typeof sdk.ingest.sourceAndChunks;
     expect((await run(sdk))[0].errors).toHaveLength(1);
     expect(sdk.hasCheckpoints()).toBe(true);
+    const checkpoint = sdk.getCheckpoints()[0].data as { parsed: { chunks: Array<{ text_content: string }> }; memory: { summary: string }; sourceFingerprint: string };
+    expect(checkpoint.sourceFingerprint).toBeTruthy();
+    expect(checkpoint.parsed.chunks[0].text_content).toBe(checkpoint.memory.summary);
     expect(sourceCount()).toBe(0);
     expect(sdk.state.getWatermark(fileStateKey("directories", file))).toBeNull();
     calls.length = 0;

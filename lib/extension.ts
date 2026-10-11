@@ -17,6 +17,10 @@ export type ExtensionManifest = {
   subscribe_ingest?: string;
   subscribe_messages?: string;
   checkpoint_recover?: string;
+  /** Module exporting an AuthProvider (`auth` or default) for connecting accounts in the web UI. */
+  auth_script?: string;
+  /** One-time dependency installer run by `bun run setup` (e.g. a Python virtualenv). */
+  install_script?: string;
   crons?: CronExtension[];
 };
 
@@ -39,6 +43,10 @@ export function isTExtensionManifest(obj: any): obj is ExtensionManifest {
       typeof (obj as any).subscribe_hook === "string") &&
     ((obj as any).checkpoint_recover === undefined ||
       typeof (obj as any).checkpoint_recover === "string") &&
+    ((obj as any).auth_script === undefined ||
+      typeof (obj as any).auth_script === "string") &&
+    ((obj as any).install_script === undefined ||
+      typeof (obj as any).install_script === "string") &&
     ((obj as any).crons === undefined ||
       (Array.isArray((obj as any).crons) &&
         ((obj as any).crons as any[]).every(

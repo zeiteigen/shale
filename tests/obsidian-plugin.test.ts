@@ -413,7 +413,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       });
 
       expect(result.notesProcessed).toBe(1);
-      expect(result.chunksCreated).toBe(1);
+      expect(result.chunksCreated).toBe(2);
 
       const source = db
         .query<{
@@ -477,7 +477,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
       const result = await ingestFile(notePath, "Vault: TestVault", sdk);
       expect(result.filePath).toBe(notePath);
       expect(result.noteTitle).toBe("IngestDoc");
-      expect(result.chunksCreated).toBe(1);
+      expect(result.chunksCreated).toBe(2);
       expect(result.entities.some((e) => e.name === "IngestDoc")).toBe(true);
       expect(result.entities.some((e) => e.name === "LinkedDoc")).toBe(true);
       expect(
@@ -576,7 +576,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
         "Vault: ChemistryVault",
         sdk,
       );
-      expect(result.chunksCreated).toBe(2);
+      expect(result.chunksCreated).toBe(3);
       expect(result.noteTitle).toBe("alkyne");
 
       // Also verify completely blank note
@@ -587,7 +587,7 @@ We conclude with a synthesis of modern governance frameworks and multilateral tr
         "Vault: ChemistryVault",
         sdk,
       );
-      expect(blankResult.chunksCreated).toBe(1);
+      expect(blankResult.chunksCreated).toBe(2);
       expect(blankResult.noteTitle).toBe("Blank");
     });
   });
@@ -705,7 +705,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
         sdk,
       );
       expect(imgResult.imageTitle).toBe("architecture.png");
-      expect(imgResult.chunksCreated).toBe(2);
+      expect(imgResult.chunksCreated).toBe(3);
 
       // Verify Chat model prompt covered both physical layout and underlying explanation/meaning
       expect(capturedChatPrompt).toContain(
@@ -749,11 +749,10 @@ Vector clocks and conflict-free replicated data types track causality across asy
           "SELECT chunk_index, chunk_type, text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'architecture.png') ORDER BY chunk_index ASC",
         )
         .all();
-      expect(chunks.length).toBe(2);
+      expect(chunks.length).toBe(3);
       expect(chunks[0].chunk_type).toBe("synthetic");
       expect(chunks[0].text_content).toContain("Central node A");
-      expect(chunks[1].chunk_type).toBe("synthetic");
-      expect(chunks[1].text_content).toContain("Byzantine fault tolerance");
+      expect(chunks.slice(1).some(chunk => chunk.text_content.includes("Byzantine fault tolerance"))).toBe(true);
     });
 
     it("connects notes to images with FEATURES_IMAGE edge when referenced in notes", async () => {
@@ -865,7 +864,7 @@ Vector clocks and conflict-free replicated data types track causality across asy
       const ingestRes = await ingestFile(notePath, "Vault: PolSci", sdk, {
         expandAtomicNotes: true,
       });
-      expect(ingestRes.chunksCreated).toBe(2);
+      expect(ingestRes.chunksCreated).toBe(3);
 
       const storedChunks = db
         .query<{
@@ -876,15 +875,10 @@ Vector clocks and conflict-free replicated data types track causality across asy
           "SELECT chunk_index, chunk_type, text_content FROM chunks WHERE source_id IN (SELECT id FROM sources WHERE title = 'Legitimacy') ORDER BY chunk_index ASC",
         )
         .all();
-      expect(storedChunks.length).toBe(2);
-      expect(storedChunks[0].chunk_type).toBe("verbatim");
-      expect(storedChunks[0].text_content).toContain(
-        "Legitimacy is the popular acceptance",
-      );
-      expect(storedChunks[1].chunk_type).toBe("synthetic");
-      expect(storedChunks[1].text_content).toContain(
-        "Max Weber's authority types",
-      );
+      expect(storedChunks.length).toBe(3);
+      expect(storedChunks[0].chunk_type).toBe("synthetic");
+      expect(storedChunks[0].text_content).toContain("Legitimacy");
+      expect(storedChunks.slice(1).some(chunk => chunk.text_content.includes("Max Weber's authority types"))).toBe(true);
 
       // Verify dynamic tokens requested in system prompt
       expect(capturedPrompt).toContain(

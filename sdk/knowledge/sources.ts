@@ -7,6 +7,11 @@ import { mutationSchemas, type MutationName } from './schemas';
 import { checkVersion, recordVersion } from './version';
 import { SourceRecords, type Source, type Chunk, type Snapshot } from './source-records';
 import { KnowledgeSourceReads } from './source-reads';
+import { UnifiedIngestor } from '../ingest';
+import { SourceMemoryStore } from '../memory/store';
+import { prepareSourceMemory } from '../../lib/memory/prepare';
+import { recordMemory } from '../memory/records';
+import type { PreparedSourceMemory } from '../../lib/memory/types';
 
 const staleNotice = 'Source revision changes conservatively mark supported claims stale; review them explicitly.';
 const split = (text:string,size:number) => Array.from({length:Math.ceil(text.length/size)},(_,i)=>text.slice(i*size,(i+1)*size));
@@ -25,15 +30,16 @@ export class KnowledgeSources {
         if(this.db.query('SELECT 1 FROM sources WHERE id=?').get(id) || this.db.query('SELECT 1 FROM graph_source_archives WHERE source_id=?').get(id)) throw new Error(`Source identity already exists: ${id}`);
         this.checkIdentity(id,a.uri);
         const chunks=split(a.text,a.chunkSize).map((text_content,chunk_index)=>({text_content,chunk_index,chunk_type:'verbatim'}));
-        this.db.query('INSERT INTO sources(id,type,uri,origin,created_at,title,updated_at,hash) VALUES(?,?,?,?,?,?,?,?)')
-          .run(id,a.type,a.uri,a.origin,now,a.title,now,hash(a.uri,chunks));
+        const ingested=new UnifiedIngestor(a.namespace ?? this.namespace,this.db).sourceAndChunks({
+          source:{id,type:a.type,uri:a.uri,origin:a.origin,title:a.title},chunks:chunks.map(c=>({...c,chunk_type:'verbatim'}))});
         this.metadata(id,{...a.metadata,namespace:a.namespace ?? this.namespace});
-        const chunkIds=chunks.map((c,i)=>this.insertChunk(id,c));
+        const chunkIds=ingested.chunkIds;
         this.snapshotRevision(id);
         const entity=this.graph.entities.create({stableId:`knowledge-source:${id}`,namespace:a.namespace ?? this.namespace,
           name:a.title,type:'Source',aliases:[{name:id,scope:'source-id'},{name:a.uri,scope:'source-uri'}]});
         this.addBackingClaim(id,entity.id,'TITLE',a.title); this.addBackingClaim(id,entity.id,'SOURCE_URI',a.uri);
-        for(const chunk of this.records.chunks(id)) this.addBackingClaim(id,entity.id,'HAS_CONTENT',chunk.text_content,chunk);
+        this.db.query('INSERT OR IGNORE INTO source_entities VALUES(?,?)').run(id,entity.id);
+        this.db.query('INSERT OR IGNORE INTO chunk_entities(chunk_id,entity_id) SELECT id,? FROM chunks WHERE source_id=?').run(entity.id,id);
         return {sourceId:id,entityId:entity.id,chunkIds,version:recordVersion(this.db,'source',id),namespace:a.namespace ?? this.namespace};
       }
       case 'update_source': {
@@ -52,8 +58,16 @@ export class KnowledgeSources {
       case 'remove_source': {
         const a=mutationSchemas.remove_source.parse(args), source=this.records.source(a.sourceId);
         checkVersion(this.db,'source',source.id,a.expectedVersion);
+        const storedMemory=this.db.query('SELECT 1 FROM source_memories WHERE source_id=?').get(source.id)
+          ? new SourceMemoryStore(this.db).get(source.id):undefined;
+        const memory:PreparedSourceMemory|undefined=storedMemory ? {
+          summary:storedMemory.summary.text,summaryMethod:storedMemory.summary.method,
+          snippets:storedMemory.snippets.map(({id,text,kind,locator,purpose})=>({id,text,kind,locator,purpose})),
+          coverage:storedMemory.coverage,
+        }:undefined;
         const snapshot:Snapshot={source,chunks:this.records.chunks(source.id),links:this.db.query<{chunk_id:number;entity_id:number},[string]>(
-          'SELECT ce.* FROM chunk_entities ce JOIN chunks c ON c.id=ce.chunk_id WHERE c.source_id=?').all(source.id),metadata:this.records.getMetadata(source.id)};
+          'SELECT ce.* FROM chunk_entities ce JOIN chunks c ON c.id=ce.chunk_id WHERE c.source_id=?').all(source.id),metadata:this.records.getMetadata(source.id),
+          fingerprint:storedMemory?.freshness.fingerprint,memory};
         this.db.query(`INSERT INTO graph_source_archives(source_id,snapshot,actor,reason,removed_at) VALUES(?,?,?,?,?)
           ON CONFLICT(source_id) DO UPDATE SET snapshot=excluded.snapshot,actor=excluded.actor,reason=excluded.reason,removed_at=excluded.removed_at`)
           .run(source.id,JSON.stringify(snapshot),actor,reason,Date.now());
@@ -81,29 +95,42 @@ export class KnowledgeSources {
         for(const link of archived.links) if(this.db.query('SELECT 1 FROM entities WHERE id=?').get(link.entity_id))
           this.db.query('INSERT OR IGNORE INTO chunk_entities(chunk_id,entity_id) VALUES(?,?)').run(ids.get(link.chunk_id)!,link.entity_id);
         this.snapshotRevision(source.id);
+        if(archived.memory) {
+          recordMemory(this.db,source.id,archived.fingerprint ?? source.hash,archived.memory,false);
+        } else if(!this.db.query('SELECT 1 FROM source_memories WHERE source_id=?').get(source.id)) {
+          const summary=archived.chunks.find(c=>c.chunk_index===0 && c.chunk_type==='synthetic');
+          const memory=summary ? {summary:summary.text_content,summaryMethod:'agent' as const,
+            snippets:archived.chunks.filter(c=>c!==summary).map(c=>({text:c.text_content,kind:c.chunk_type==='verbatim'?'excerpt' as const:'derived' as const,
+              locator:{originalChunkIndex:c.chunk_index},purpose:'restored memory'})),
+            coverage:{inputCharacters:0,sections:archived.chunks.length-1,summarizedSections:0,method:'restored'}}
+            : prepareSourceMemory(archived.chunks.map(c=>({...c,chunk_type:c.chunk_type==='verbatim'?'verbatim':'synthetic'})),{title:source.title});
+          recordMemory(this.db,source.id,archived.fingerprint ?? source.hash,memory,false);
+        }
         this.db.query('DELETE FROM graph_source_archives WHERE source_id=?').run(source.id);
         return {sourceId:source.id,restored:true,chunkIds:[...ids.values()],chunkIdMap:Object.fromEntries(ids),version:recordVersion(this.db,'source',source.id),notice:'Restoring a source does not automatically accept stale claims.'};
       }
       case 'add_chunk': {
         const a=mutationSchemas.add_chunk.parse(args); const source=this.records.source(a.sourceId); checkVersion(this.db,'source',a.sourceId,a.expectedVersion);
-        const chunk_index=this.db.query<{max:number|null},[string,string]>(`SELECT max(chunk_index) AS max FROM (
-          SELECT chunk_index FROM chunks WHERE source_id=? UNION ALL SELECT c.chunk_index FROM graph_revision_chunks c
-          JOIN graph_source_revisions r ON r.id=c.revision_id WHERE r.source_id=?)`).get(a.sourceId,a.sourceId)!.max ?? -1;
-        const nextIndex=chunk_index+1;
-        const next={chunk_index:nextIndex,text_content:a.text,chunk_type:a.chunkType};
-        // Set the new revision first so the chunk INSERT trigger cannot alter the old snapshot.
-        this.db.query('UPDATE sources SET hash=?,updated_at=? WHERE id=?').run(hash(source.uri,[...this.records.chunks(a.sourceId),next]),Date.now(),a.sourceId);
-        const chunkId=this.insertChunk(a.sourceId,next);
-        this.snapshotRevision(a.sourceId); this.assign(a.sourceId,chunkId,a.entityIds,a.claimIds,actor,reason);
-        return {sourceId:a.sourceId,chunkId,version:recordVersion(this.db,'chunk',chunkId),sourceVersion:recordVersion(this.db,'source',a.sourceId),notice:staleNotice};
+        const store=new SourceMemoryStore(this.db),current=store.get(a.sourceId);
+        store.edit({sourceId:a.sourceId,expectedVersion:current.version,actor,reason,
+          add:[{text:a.text,kind:a.chunkType==='verbatim'?'excerpt':'derived',locator:{},purpose:'agent addition'}]});
+        const added=this.records.chunks(a.sourceId).find(c=>c.text_content===a.text)!;
+        this.assign(a.sourceId,added.id,a.entityIds,a.claimIds,actor,reason);
+        return {sourceId:a.sourceId,chunkId:added.id,version:recordVersion(this.db,'chunk',added.id),sourceVersion:recordVersion(this.db,'source',a.sourceId)};
       }
       case 'revise_chunk': {
         const a=mutationSchemas.revise_chunk.parse(args), chunk=this.records.chunk(a.sourceId,a.chunkId);
         if(a.text===undefined && a.chunkType===undefined && a.entityIds===undefined && a.claimIds===undefined) throw new Error('Chunk revision requires text, type, entities, or claims');
         checkVersion(this.db,'chunk',chunk.id,a.expectedVersion); checkVersion(this.db,'source',a.sourceId,a.expectedSourceVersion);
         if(a.text!==undefined || a.chunkType!==undefined) {
-          this.db.query('UPDATE chunks SET text_content=?,chunk_type=? WHERE id=?').run(a.text ?? chunk.text_content,a.chunkType ?? chunk.chunk_type,chunk.id);
-          this.refresh(a.sourceId);
+          const store=new SourceMemoryStore(this.db),current=store.get(a.sourceId);
+          if(chunk.chunk_index===0) store.edit({sourceId:a.sourceId,expectedVersion:current.version,actor,reason,summary:a.text ?? chunk.text_content});
+          else {
+            const snippet=current.snippets[chunk.chunk_index-1];
+            if(!snippet) throw new Error('Unknown active snippet');
+            store.edit({sourceId:a.sourceId,expectedVersion:current.version,actor,reason,
+              revise:[{id:snippet.id,text:a.text ?? chunk.text_content,kind:a.chunkType===undefined ? snippet.kind : a.chunkType==='verbatim'?'excerpt':'derived'}]});
+          }
         }
         this.assign(a.sourceId,chunk.id,a.entityIds,a.claimIds,actor,reason);
         return {sourceId:a.sourceId,chunkId:chunk.id,version:recordVersion(this.db,'chunk',chunk.id),sourceVersion:recordVersion(this.db,'source',a.sourceId),notice:staleNotice};
@@ -111,7 +138,9 @@ export class KnowledgeSources {
       case 'remove_chunk': {
         const a=mutationSchemas.remove_chunk.parse(args), chunk=this.records.chunk(a.sourceId,a.chunkId);
         checkVersion(this.db,'chunk',chunk.id,a.expectedVersion); checkVersion(this.db,'source',a.sourceId,a.expectedSourceVersion);
-        this.db.query('DELETE FROM chunks WHERE id=?').run(chunk.id); this.refresh(a.sourceId);
+        if(chunk.chunk_index===0) throw new Error('A source requires a summary; revise it or remove the source');
+        const store=new SourceMemoryStore(this.db),current=store.get(a.sourceId);
+        store.edit({sourceId:a.sourceId,expectedVersion:current.version,actor,reason,retire:[current.snippets[chunk.chunk_index-1]!.id]});
         return {sourceId:a.sourceId,chunkId:chunk.id,removed:true,version:recordVersion(this.db,'chunk',chunk.id),sourceVersion:recordVersion(this.db,'source',a.sourceId),notice:staleNotice};
       }
       default: throw new Error(`Unsupported source mutation: ${name}`);

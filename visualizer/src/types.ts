@@ -8,11 +8,14 @@ export interface GraphNode {
   stableId: string;
   canonicalId: number | null;
   degree: number;
+  sourceId?: string;
   sourceUri?: string;
   sourceTitle?: string;
   chunksCount: number;
   chunks: Array<{ id: number; chunk_index: number; text_content: string }>;
 }
+
+export type SourceMemory = import('../../lib/memory/types').SourceMemoryRecord;
 
 export interface GraphEdge {
   id: string;

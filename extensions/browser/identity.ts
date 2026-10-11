@@ -31,6 +31,58 @@ function comparable(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
+/** App-chrome page titles that LLMs and title heuristics mistake for subjects. */
+const UI_CHROME_TOPICS = new Set([
+  "home",
+  "homepage",
+  "home page",
+  "course home",
+  "dashboard",
+  "upgrade",
+  "pricing",
+  "plans",
+  "billing",
+  "api keys",
+  "api key",
+  "account",
+  "my account",
+  "account settings",
+  "settings",
+  "preferences",
+  "profile",
+  "notifications",
+  "inbox",
+  "login",
+  "log in",
+  "sign in",
+  "sign up",
+  "signup",
+  "register",
+  "logout",
+  "log out",
+  "new session",
+  "new chat",
+  "new tab",
+  "new conversation",
+  "untitled",
+  "welcome",
+  "loading",
+  "page not found",
+  "not found",
+  "404",
+  "error",
+]);
+
+/** True for labels that name a screen of an app rather than a subject. */
+export function isUiChromeTopic(value: string): boolean {
+  return UI_CHROME_TOPICS.has(comparable(cleanTopic(value)));
+}
+
+/** Topics equal to a thread or page label duplicate that node under another type. */
+export function sameLabel(a: string, b: string): boolean {
+  return comparable(cleanTopic(a)) === comparable(cleanTopic(b));
+}
+
 /** Stable graph identity for a page. Titles are display metadata, not identifiers. */
 export function pageEntityName(cleanUrl: string): string {
   return cleanUrl;
@@ -84,7 +136,7 @@ export function sanitizeTopics(
     if (!key || key === title || key === domain || seen.has(key)) continue;
     if (topic.length > 100 || topic.split(/\s+/).length > 10) continue;
     if (/^(?:https?:\/\/|www\.)/i.test(topic) || /^[\w.-]+\.[a-z]{2,}$/i.test(topic)) continue;
-    if (STANDALONE_TOPIC_STOPWORDS.has(key)) continue;
+    if (STANDALONE_TOPIC_STOPWORDS.has(key) || UI_CHROME_TOPICS.has(key)) continue;
     if (/^\d+$/.test(topic)) continue;
     if (topic.length < 3 && !/^(?:ai|c\+\+)$/i.test(topic)) continue;
 

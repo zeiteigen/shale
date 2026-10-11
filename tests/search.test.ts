@@ -40,7 +40,8 @@ it("extracts unique keywords and removes stopwords with supported options", () =
 it("searches with BM25, returning matched chunks, snippets, and scores", async () => {
   const { sdk } = fixture();
   const results = await sdk.search.bm25({ query: "SQLite", limit: 5 });
-  expect(results).toHaveLength(2);
+  expect(results).toHaveLength(3);
+  expect(results.some(result => result.chunk_index === 0 && result.text_content.startsWith("Extractive overview"))).toBe(true);
   expect(results.map(result => result.text_content).join(" ")).toContain("database");
   expect(results[0].bm25Score).toBeDefined();
   expect(results[0].preview).toContain("<mark>");

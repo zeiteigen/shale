@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ShaleSDK } from "../../sdk";
 import type { ClaimStatus } from "../../sdk/graph/types";
 import { resolveEntityId, formatToolResponse, formatToolError } from "../types";
+import { registerMemoryTools } from "./memory";
 
 const ClaimStatusEnum = z.enum([
   "proposed",
@@ -16,6 +17,7 @@ const ClaimStatusEnum = z.enum([
 
 export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
   const graph = sdk.graph;
+  registerMemoryTools(mcp, sdk);
 
   // ==========================================
   // 1. Search & Traversal Tools
@@ -23,21 +25,26 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
 
   mcp.tool(
     "search_graph",
-    "Searches the knowledge graph and source text chunks using BM25 retrieval, returning matching chunks expanded with their graph neighborhoods and evidence.",
+    "Search retained source memories with BM25. Returns up to five distinct sources by default, with one summary or snippet preview and stable memory citation IDs per source. Graph expansion is optional and off by default; original full source content may have been discarded.",
     {
       query: z.string().describe("Search query text or keywords"),
       mode: z
         .enum(["bm25"])
         .default("bm25")
         .describe("Full-text retrieval mode"),
-      limit: z.number().int().min(1).max(100).default(10).describe("Maximum chunks to return"),
+      limit: z.number().int().min(1).max(100).default(5).describe("Maximum distinct sources to return"),
+      offset: z.number().int().min(0).default(0).describe("Source result offset for continuation"),
+      origin: z.string().optional().describe("Filter by source origin"),
+      type: z.string().optional().describe("Filter by source type"),
+      sourceId: z.string().optional().describe("Filter by source ID or URI"),
+      maxChars: z.number().int().min(1000).max(64000).default(16000).describe("Maximum serialized response size"),
       maxSeeds: z
         .number()
         .int()
-        .min(1)
+        .min(0)
         .max(20)
-        .default(5)
-        .describe("Maximum chunks to expand into graph neighborhoods"),
+        .default(0)
+        .describe("Maximum chunks to expand into graph neighborhoods; zero disables graph expansion"),
       maxDepth: z.number().int().min(1).max(5).default(2).describe("Neighborhood traversal depth"),
       maxNeighbors: z
         .number()
@@ -51,18 +58,26 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async (args) => {
       try {
-        const results = await sdk.search.graph({
-          query: args.query,
-          mode: args.mode,
-          limit: args.limit,
-          maxSeeds: args.maxSeeds,
-          minScore: args.minScore,
-          graph: {
-            maxDepth: args.maxDepth,
-            maxNodes: args.maxNeighbors,
-          },
-        });
-        return formatToolResponse(results);
+        const grouped = sdk.memory.search({query:args.query,limit:args.limit,offset:args.offset,origin:args.origin,type:args.type,sourceId:args.sourceId});
+        const neighborhoods=[];
+        const evidence=new Map<string, unknown>();
+        const passages=new Map<string, unknown>();
+        let remainingNodes=args.maxNeighbors;
+        let remainingClaims=100;
+        let graphTruncated=false;
+        if(args.maxSeeds>0) for(const hit of grouped.hits.slice(0,args.maxSeeds)) {
+          if(remainingNodes<=0 || remainingClaims<=0) { graphTruncated=true; break; }
+          const result=await sdk.search.graph({query:args.query,mode:args.mode,limit:100,maxSeeds:1,minScore:args.minScore,
+            filterSourceId:hit.sourceId,maxRetrieved:100,graph:{maxDepth:args.maxDepth,maxNodes:remainingNodes,maxClaims:remainingClaims}});
+          neighborhoods.push(...result.neighborhoods);
+          remainingNodes=Math.max(0,remainingNodes-result.neighborhoods.reduce((n,item)=>n+item.entities.length,0));
+          remainingClaims=Math.max(0,remainingClaims-result.neighborhoods.reduce((n,item)=>n+item.claims.length,0));
+          for(const item of result.evidence) evidence.set(item.id, item);
+          for(const item of result.relatedPassages) passages.set(`${item.revisionId}:${item.chunkIndex}`,item);
+          graphTruncated ||= result.truncated;
+        }
+        if(grouped.hits.length>args.maxSeeds && args.maxSeeds>0) graphTruncated=true;
+        return formatToolResponse({...grouped, neighborhoods, evidence:[...evidence.values()].slice(0,100), relatedPassages:[...passages.values()].slice(0,100), graphTruncated},args.maxChars);
       } catch (err) {
         return formatToolError(err);
       }
@@ -88,15 +103,16 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
         .int()
         .min(1)
         .max(500)
-        .default(100)
-        .describe("Maximum nodes to retain (default: 100)"),
+        .default(20)
+        .describe("Maximum nodes to retain (default: 20)"),
       maxClaims: z
         .number()
         .int()
         .min(1)
         .max(1000)
-        .default(200)
-        .describe("Maximum claims to examine (default: 200)"),
+        .default(30)
+        .describe("Maximum claims to examine (default: 30)"),
+      maxChars: z.number().int().min(1000).max(64000).default(16000).describe("Maximum serialized response size"),
       direction: z
         .enum(["out", "in", "both"])
         .default("both")
@@ -125,7 +141,7 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
           context: args.context,
           statuses: args.statuses as ClaimStatus[] | undefined,
         });
-        return formatToolResponse(result);
+        return formatToolResponse(compactTraversal(result,args.maxNodes,args.maxClaims,args.maxChars),args.maxChars);
       } catch (err) {
         return formatToolError(err);
       }
@@ -183,4 +199,31 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
       }
     },
   );
+}
+
+export function compactTraversal(result:import('../../sdk/graph/types').GraphTraversal,maxNodes:number,maxClaims:number,maxChars:number) {
+  const boundedValue=(value:unknown) => {
+    if(value===undefined) return undefined;
+    const encoded=JSON.stringify(value);
+    return encoded.length<=400 ? value : {valuePreview:encoded.slice(0,380),valueTruncated:true};
+  };
+  const output:any={
+    entities:result.entities.map(({id,name,type,namespace})=>({id,name,type,namespace})),
+    claims:result.claims.map(({id,subject,predicate,object,value,status,context})=>({id,subject,predicate,object,value:boundedValue(value),status,context})),
+    paths:result.paths.map(({entityId,depth,entityIds,claimIds})=>({entityId,depth,entityIds,claimIds})),
+    counts:{entities:result.entities.length,claims:result.claims.length,paths:result.paths.length},
+    limits:{maxNodes,maxClaims},truncated:result.truncated,
+    continuationGuidance:'To explore another part of the graph, change the start entity, direction, predicates, context, statuses, or depth; traversal does not expose an offset cursor.',
+  };
+  let omitted={entities:0,claims:0,paths:0};
+  const fits=()=>JSON.stringify(output).length<=maxChars;
+  while(!fits()) {
+    const key=['paths','claims','entities'].find(candidate=>output[candidate].length>0);
+    if(!key) break;
+    output[key].pop(); omitted[key as keyof typeof omitted]++;
+    output.truncated=true;
+  }
+  if(omitted.entities||omitted.claims||omitted.paths) output.omitted=omitted;
+  return fits() ? output : {entities:[],claims:[],paths:[],counts:output.counts,limits:output.limits,truncated:true,
+    omitted:{entities:result.entities.length,claims:result.claims.length,paths:result.paths.length},continuationGuidance:output.continuationGuidance};
 }

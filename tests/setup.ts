@@ -8,6 +8,7 @@ import { SettingsManager } from "../sdk/settings";
 const directory = mkdtempSync(join(tmpdir(), "shale-tests-"));
 process.env.SHALE_DB_PATH = join(directory, "test.db");
 process.env.SHALE_SETTINGS_PATH = join(directory, "settings.json");
+process.env.SHALE_CREDENTIALS_PATH = join(directory, "credentials.json");
 writeFileSync(process.env.SHALE_SETTINGS_PATH, "{}\n");
 
 // Host imports initialize db-backup, even though the database itself is isolated.

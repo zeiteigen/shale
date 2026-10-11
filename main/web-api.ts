@@ -1,6 +1,7 @@
 import type { CronExtension } from "../lib/extension";
 import type { CliCommandResult } from "./cli";
 import { settingsApi } from "./settings-api";
+import { authApi, type AuthRegistry } from "./auth-api";
 import { WebLogs } from "./web-logs";
 import { WebTasks } from "./web-tasks";
 import { getCronRun } from "./cron-runs";
@@ -15,6 +16,8 @@ export interface WebContext {
   shutdown: () => void;
   port: () => number;
   logs: WebLogs;
+  /** Account providers declared by extension manifests (`auth_script`). */
+  auth?: AuthRegistry;
 }
 
 export function createWebApi(context: WebContext) {
@@ -22,6 +25,8 @@ export function createWebApi(context: WebContext) {
   return async (req: Request, url: URL): Promise<Response | undefined> => {
     const settings = await settingsApi(req, url, context.rootDir);
     if (settings) return settings;
+    const auth = await authApi(req, url, context.auth ?? new Map());
+    if (auth) return auth;
     if (req.method === "GET" && url.pathname === "/api/host") {
       return Response.json({ status: "running", port: context.port(), uptime: Math.floor(process.uptime()),
         memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),

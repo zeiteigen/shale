@@ -109,6 +109,7 @@ export interface SourceInput {
   created_at?: number;
   updated_at?: number;
   hash?: string;
+  observation?: import('../lib/memory/types').SourceObservationMetadata;
 }
 
 export interface ChunkInput {
@@ -116,12 +117,15 @@ export interface ChunkInput {
   chunk_index?: number;
   chunk_type?: ChunkType;
   entity_names?: string[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface IngestSourceAndChunksInput {
   source: SourceInput;
   chunks: ChunkInput[];
   namespace?: string;
+  /** Prepared bounded memory. Raw chunks are transient input only. */
+  memory?: import('../lib/memory/types').PreparedSourceMemory;
 }
 
 export interface IngestSourceAndChunksResult {

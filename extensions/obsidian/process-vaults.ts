@@ -3,6 +3,7 @@ import { createNoteIndex } from "./link-targets";
 import { findDocumentFiles } from "./document-files";
 import { documentWatermarkKey, finalizeDocument, prepareVaultDocuments } from "./document-vault";
 import { unfinishedFiles } from "./file-progress";
+import { compactParsedFile, compactParsedImage } from "./memory";
 import type { ParsedDocument } from "./parse-document";
 import { join } from "node:path";
 import { readdirSync, statSync } from "node:fs";
@@ -335,7 +336,7 @@ export async function prepareVault(
             vault: { name: vault.name, path: vault.path },
             filePath,
             noteTitle: fileResult.parsedFile.noteTitle,
-            parsedFile: fileResult.parsedFile,
+            parsedFile: compactParsedFile(fileResult.parsedFile),
             entities: [
               { name: vaultEntityName, type: "Vault" },
               ...fileResult.entities,
@@ -388,7 +389,7 @@ export async function prepareVault(
         namespace:prepared.namespace,
         vault: { name: vault.name, path: vault.path },
         filePath: image.filePath,
-        parsedImage: image.parsedImage,
+        parsedImage: compactParsedImage(image.parsedImage),
         entities: image.entities,
         edges: image.edges,
         mtime: statSync(image.filePath).mtimeMs,

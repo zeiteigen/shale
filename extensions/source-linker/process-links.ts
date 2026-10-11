@@ -6,7 +6,7 @@ import { findCandidatePairs } from "./candidate-finder";
 import { analyzeSourcePairWithLLM } from "./llm-analyzer";
 import type { DiscoveredLink, ProcessLinksResult, RunOptions } from "./types";
 import { sourceEntityName } from "../../lib/source-identity";
-import { WATERMARK_KEY, BATCH_ID, readLinkBatch, completeLinkPairs, pairCheckpointId } from "./link-batch";
+import { WATERMARK_KEY, readLinkBatch, enqueueLinkBatch, nextLinkPairs, completeLinkPairs, pairCheckpointId } from "./link-batch";
 export { WATERMARK_KEY } from "./link-batch";
 
 /**
@@ -140,7 +140,7 @@ async function analyzeAndCommitSourceLinks(
     `Starting source-linker analysis (last watermark: ${lastWatermark}, forceAll: ${isForce})`,
   );
 
-  let batch = readLinkBatch(sdk);
+  let batch = readLinkBatch(sdk, 0);
   const targetSources = batch ? [] : isForce
     ? sdk.context.getAllSources()
     : sdk.context.getSources({ since: lastWatermark });
@@ -155,18 +155,24 @@ async function analyzeAndCommitSourceLinks(
       candidatesPerChunk: options?.candidatesPerChunk,
       maxPairsPerRun: Number.MAX_SAFE_INTEGER,
     });
-    batch = {
-      type: "link_batch",
+    const nextBatch = {
       sourcesAnalyzed: targetSources.length,
       maxUpdatedAt: targetSources.reduce((max, source) => Math.max(max, source.updated_at), lastWatermark),
-      pairs,
     };
-    sdk.saveCheckpoint(batch, { id: BATCH_ID, key: BATCH_ID });
+    enqueueLinkBatch(sdk, { type: "link_batch", ...nextBatch }, pairs);
+    batch = { type: "link_batch", ...nextBatch, pairs };
   }
   const limit = options?.maxPairsPerRun ?? sdk.settings.get<number>("maxPairsPerRun") ?? 20;
   if (!Number.isInteger(limit) || limit < 1)
     throw new Error("maxPairsPerRun must be a positive integer");
-  const candidatePairs = batch.pairs.slice(0, limit);
+  const candidatePairs = batch.pairs.length ? batch.pairs.slice(0, limit) : nextLinkPairs(sdk, limit);
+  if (!candidatePairs.length) {
+    // Empty batches still need to advance their completed discovery watermark.
+    completeLinkPairs(sdk, new Set());
+    const watermarkAdvancedTo = Number(sdk.state.getWatermark(WATERMARK_KEY) ?? "0");
+    return { sourcesAnalyzed: batch.sourcesAnalyzed, candidatePairsEvaluated: 0, linksCreated: 0,
+      edgesCommitted: 0, watermarkAdvancedTo, checkpointsResolved: 0 };
+  }
   const discoveredLinks = (await sdk.models.mapChat(candidatePairs,
     pair => analyzeSourcePairWithLLM(pair, sdk))).filter((link): link is DiscoveredLink => !!link);
   const namespace = sdk.settings.get<string>("namespace") ?? "source-linker";
@@ -179,7 +185,7 @@ async function analyzeAndCommitSourceLinks(
     return edges;
   })();
   sdk.logger.log(
-    `Source linking: ${candidatePairs.length} pairs evaluated, ${edgesCommitted} edges committed; ${readLinkBatch(sdk)?.pairs.length ?? 0} pairs pending.`,
+    `Source linking: ${candidatePairs.length} pairs evaluated, ${edgesCommitted} edges committed; ${readLinkBatch(sdk, 100)?.pairs.length ?? 0} pairs pending.`,
   );
   return {
     sourcesAnalyzed: batch.sourcesAnalyzed,

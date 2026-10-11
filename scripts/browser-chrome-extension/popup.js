@@ -52,7 +52,7 @@ async function refresh() {
   el("totalIngestedCount").textContent =
     (status.totalIngestedCount || 0) + box.sentCount;
   el("deliverySummary").textContent =
-    `${c.pending || 0} captured locally · ${c.received || 0} indexing · ${c.indexed || 0} indexed · ${c.skipped || 0} skipped · ${c.failed || 0} failed. Oldest unsent: ${Math.round(box.oldestUnsentAgeMs / 60000)} min.`;
+    `${c.pending || 0} captured locally · ${c.received || 0} indexing · ${c.indexed || 0} indexed · ${c.skipped || 0} skipped · ${c.failed || 0} failed · ${c.expired || 0} expired (resubmit). Oldest unsent: ${Math.round(box.oldestUnsentAgeMs / 60000)} min.`;
   el("deliveryError").textContent =
     box.lastError || status.lastCaptureError || "";
   el("onboardingBanner").classList.toggle(

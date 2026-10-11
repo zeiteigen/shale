@@ -6,6 +6,7 @@ import { CheckpointManager } from "./checkpoint";
 import { GraphIngestor } from "./graph";
 import { KnowledgeEditor } from './knowledge/changes';
 import { UnifiedIngestor } from "./ingest";
+import { SourceMemoryStore } from './memory/store';
 import {
   LLMClient,
   type LLMOptions,
@@ -14,6 +15,7 @@ import {
 } from "./llm";
 import { ChunkSearcher } from "./search";
 import { SettingsManager } from "./settings";
+import { ExtensionCredentials } from "./credentials";
 import { ModelBatches } from "./models";
 import { modelBatchStore } from "./model-batch-store";
 import type { ExtensionSDKOptions } from "./sdk-options";
@@ -35,11 +37,13 @@ export class ShaleSDK {
   readonly graph: GraphIngestor;
   readonly knowledge: KnowledgeEditor;
   readonly ingest: UnifiedIngestor;
+  readonly memory: SourceMemoryStore;
   readonly llm: LLMClient;
   readonly models: ModelBatches;
   readonly search: ChunkSearcher;
   readonly logger: Logger;
   readonly settings: SettingsManager;
+  readonly credentials: ExtensionCredentials;
   readonly messages: ExtensionMessages;
   readonly extensionId: string;
   readonly extensionName: string;
@@ -75,6 +79,7 @@ export class ShaleSDK {
     this.namespace =
       (typeof namespace === "string" && namespace) || extensionId;
     this.database = database ?? defaultDb;
+    this.memory = new SourceMemoryStore(this.database);
     this.extensionDir = extensionDir;
 
     this.logger = new Logger(this.extensionName);
@@ -89,6 +94,7 @@ export class ShaleSDK {
       undefined,
       this.logger,
     );
+    this.credentials = new ExtensionCredentials(this.extensionId);
     this.state = new StateManager(this.extensionId, this.database);
     this.context = new ContextHydrator(this.database);
     this.checkpoint = new CheckpointManager(this.extensionId, this.database);

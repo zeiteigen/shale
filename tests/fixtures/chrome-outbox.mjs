@@ -64,6 +64,12 @@ assert.equal(offline.state, "pending");
 assert.equal(offline.attempts, 1);
 assert.equal(offline.record.textContent, record.textContent);
 assert.ok(offline.nextAttemptAt > Date.now());
+await enqueueRecords([{ ...record, recordId: "expired-offline" }], config);
+await updateItems(["expired-offline"], (row) => ({ ...row, createdAt: Date.now() - 25 * 60 * 60 * 1000 }));
+const expiredOffline = (await outboxItems()).find((row) => row.id === "expired-offline");
+assert.equal(expiredOffline.state, "expired");
+assert.deepEqual(expiredOffline.record, { recordId: "expired-offline" });
+assert.match(expiredOffline.error, /without terminal indexing/);
 await updateItems(["stable", "other"], (row) => ({ ...row, nextAttemptAt: 0 }));
 globalThis.fetch = async (url, options) => {
   if (options?.method === "POST") {

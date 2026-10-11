@@ -241,11 +241,11 @@ export async function analyzeSourcePairWithLLM(
     sdk.settings.get<number>("maxEntityResolutionsPerPair") ??
     10;
 
-  const contextA = linkContext(sdk, pair.sourceA.id, pair.sourceA.hash, chunksCount);
-  const contextB = linkContext(sdk, pair.sourceB.id, pair.sourceB.hash, chunksCount);
+  const contextA = linkContext(sdk, pair.sourceA.id, pair.sourceA.hash, chunksCount, maxChars, checkpointId);
+  const contextB = linkContext(sdk, pair.sourceB.id, pair.sourceB.hash, chunksCount, maxChars, checkpointId);
 
-  const excerptA = contextA.combinedText.slice(0, maxChars);
-  const excerptB = contextB.combinedText.slice(0, maxChars);
+  const excerptA = contextA.combinedText;
+  const excerptB = contextB.combinedText;
   const evidenceA = linkEvidence(sdk,pair.sourceA.id,pair.sourceA.hash,contextA.chunks,maxChars);
   const evidenceB = linkEvidence(sdk,pair.sourceB.id,pair.sourceB.hash,contextB.chunks,maxChars);
 

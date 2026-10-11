@@ -18,7 +18,10 @@ export async function findCandidatePairs(sources: Source[], sdk: ShaleSDK, optio
   for (const source of sources) {
     for (const chunk of sdk.context.getRecentChunks(source.id, 50)) {
       if (++searches % 8 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0));
-      const keywords = extractKeywords(chunk.text_content).slice(0, 32);
+      const candidateText = chunk.chunk_index === 0
+        ? chunk.text_content.replace(/^Extractive overview of [^\n]*:\s*/i, "")
+        : chunk.text_content;
+      const keywords = extractKeywords(candidateText).slice(0, 32);
       if (!keywords.length) continue;
       const matches = await sdk.search.bm25({ keywords, limit, excludeSourceId: source.id });
       let selected = 0;

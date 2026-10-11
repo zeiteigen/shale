@@ -16,18 +16,6 @@ export function commitDocumentGraph(
   graph.claim(entity, "DOCUMENT_METADATA", {
     value: JSON.parse(JSON.stringify(document.metadata)) as GraphValue,
   }, { method: "document-parser" });
-  for (const chunk of document.contextualChunks) {
-    if (!chunk.metadata) continue;
-    const location = Object.fromEntries(
-      ["pageNumber", "slideNumber", "sheetName", "closestHeading"]
-        .filter(key => chunk.metadata![key] !== undefined).map(key => [key, chunk.metadata![key]]),
-    );
-    if (Object.keys(location).length) {
-      graph.claim(entity, "CHUNK_LOCATION", { value: location as GraphValue }, {
-        method: "document-parser", evidence: graph.evidence(chunk.chunk_index),
-      });
-    }
-  }
   commitPreparedClaims(graph, entity, document.knowledge);
   return graph;
 }

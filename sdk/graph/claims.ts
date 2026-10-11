@@ -73,6 +73,10 @@ export class GraphClaims {
       if (!filter.predicates.length) return [];
       where.push(`predicate IN (${filter.predicates.map(()=>'?').join(',')})`); params.push(...filter.predicates);
     }
+    for (const predicate of filter.excludePredicates ?? []) {
+      if (predicate.endsWith('*')) { where.push("substr(predicate,1,?)!=?"); params.push(predicate.length-1,predicate.slice(0,-1)); }
+      else { where.push('predicate!=?'); params.push(predicate); }
+    }
     const statusExpression = filter.knownAt === undefined ? 'status' :
       `(SELECT h.status FROM graph_status_history h WHERE h.claim_id=graph_claims.id AND h.changed_at<=${Math.trunc(filter.knownAt)} ORDER BY h.changed_at DESC,h.id DESC LIMIT 1)`;
     if (filter.knownAt !== undefined && !Number.isSafeInteger(filter.knownAt)) throw new Error('Invalid knowledge timestamp');

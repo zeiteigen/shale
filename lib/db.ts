@@ -2,6 +2,7 @@ import db from "./db-init";
 import { excludedSourceId } from "./knowledge/exclusions";
 
 import { randomUUIDv7 } from "bun";
+import { UnifiedIngestor } from "../sdk/ingest";
 
 export { randomUUIDv7 as dbUUID };
 
@@ -102,98 +103,18 @@ export function addSource(source: Source) {
 
 // 2. Chunks
 export function addChunks(chunks: Chunk[]) {
-  const insertChunk = db.query<
-    { id: number },
-    { $source_id: string; $chunk_index: number; $chunk_type: string; $text_content: string }
-  >(`
-    INSERT INTO chunks (source_id, chunk_index, chunk_type, text_content) 
-    VALUES ($source_id, $chunk_index, $chunk_type, $text_content)
-    RETURNING id
-  `);
-
-  const txn = db.transaction((items: Chunk[]) => {
-    for (const chunk of items) {
-      const uri = db.query<{ uri: string }, [string]>("SELECT uri FROM sources WHERE id=?").get(chunk.source_id)?.uri;
-      if (excludedSourceId(db, chunk.source_id, uri ?? "")) continue;
-      const res = insertChunk.get({
-        $source_id: chunk.source_id,
-        $chunk_index: chunk.chunk_index,
-        $chunk_type: chunk.chunk_type ?? "verbatim",
-        $text_content: chunk.text_content,
-      });
-
-      if (!res) continue;
-    }
-  });
-
-  txn(chunks);
+  const grouped = Map.groupBy(chunks, chunk => chunk.source_id);
+  for (const [sourceId, additions] of grouped) {
+    const source = db.query<Source,[string]>('SELECT * FROM sources WHERE id=?').get(sourceId);
+    if (!source) throw new Error(`Unknown source ${sourceId}`);
+    const existing = db.query<Chunk,[string]>('SELECT * FROM chunks WHERE source_id=? ORDER BY chunk_index').all(sourceId);
+    new UnifiedIngestor('default',db).sourceAndChunks({source:{...source,hash:undefined},chunks:[...existing,...additions]});
+  }
 }
 
-// 3. Unified Atomic Ingestion (Source + Chunks)
-export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {
-  sourceId: string;
-  chunkIds: number[];
-} {
-  const { source, chunks } = options;
-  if (excludedSourceId(db, source.id, source.uri)) return { sourceId: source.id, chunkIds: [] };
-
-  const insertSource = db.query(`
-    INSERT INTO sources (id, type, uri, origin, created_at, title, updated_at, hash)
-    VALUES ($id, $type, $uri, $origin, $created_at, $title, $updated_at, $hash)
-    ON CONFLICT(id) DO UPDATE SET type=excluded.type,uri=excluded.uri,origin=excluded.origin,
-      title=excluded.title,updated_at=excluded.updated_at,hash=excluded.hash
-  `);
-
-  const insertChunk = db.query<
-    { id: number },
-    { $source_id: string; $chunk_index: number; $chunk_type: string; $text_content: string }
-  >(`
-    INSERT INTO chunks (source_id, chunk_index, chunk_type, text_content) 
-    VALUES ($source_id, $chunk_index, $chunk_type, $text_content)
-    RETURNING id
-  `);
-
-  const txn = db.transaction(() => {
-    if (excludedSourceId(db, source.id, source.uri)) return { sourceId: source.id, chunkIds: [] };
-    db.query("DELETE FROM chunks WHERE source_id=?").run(source.id);
-    insertSource.run({
-      $id: source.id,
-      $type: source.type,
-      $uri: source.uri,
-      $origin: source.origin,
-      $created_at: source.created_at,
-      $title: source.title,
-      $updated_at: source.updated_at,
-      $hash: source.hash,
-    });
-
-    const chunkIds: number[] = [];
-
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      const chunkIndex = chunk.chunk_index ?? i;
-
-      const res = insertChunk.get({
-        $source_id: source.id,
-        $chunk_index: chunkIndex,
-        $chunk_type: chunk.chunk_type ?? "verbatim",
-        $text_content: chunk.text_content,
-      });
-
-      if (!res) {
-        throw new Error(`Failed to insert chunk at index ${chunkIndex}`);
-      }
-
-      chunkIds.push(res.id);
-    }
-
-    return {
-      sourceId: source.id,
-      chunkIds,
-    };
-  });
-
-  return txn();
+// Legacy entry point shares the bounded source-memory writer.
+export function addSourceWithChunks(options: IngestSourceAndChunksOptions): {sourceId:string;chunkIds:number[]} {
+  return new UnifiedIngestor('default',db).sourceAndChunks(options);
 }
 
 // 4. Graph Data (with Entity Namespacing)

@@ -13,5 +13,5 @@
       "@shale/sdk/*": ["./sdk/*"]
     }
   },
-  "include": ["lib/**/*.ts", "sdk/**/*.ts", "main/**/*.ts", "extensions/**/*.ts", "scripts/*.ts", "visualizer/server.ts", "visualizer/graph-data.ts"]
+  "include": ["setup.ts", "lib/**/*.ts", "sdk/**/*.ts", "main/**/*.ts", "extensions/**/*.ts", "scripts/*.ts", "visualizer/server.ts", "visualizer/graph-data.ts"]
 }

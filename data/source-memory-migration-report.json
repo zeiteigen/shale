@@ -1,0 +1,22 @@
+{
+  "alreadyMigrated": false,
+  "before": {
+    "sources": 2313,
+    "currentCharacters": 11329443,
+    "historicalCharacters": 11944432,
+    "evidence": 28180,
+    "claims": 21106,
+    "pageBytes": 115286016
+  },
+  "after": {
+    "sources": 2165,
+    "currentCharacters": 3174306,
+    "historicalCharacters": 3474536,
+    "evidence": 28180,
+    "claims": 21106,
+    "pageBytes": 75784192
+  },
+  "regroundedEvidence": 11252,
+  "discardedEvidence": 8401,
+  "removedVersionSources": 148
+}

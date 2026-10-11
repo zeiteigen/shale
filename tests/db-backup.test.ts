@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -88,12 +89,14 @@ describe("db-backup Extension", () => {
     expect(typeof settings.backupDir).toBe("string");
     expect(typeof settings.filenamePrefix).toBe("string");
     expect(typeof settings.maxBackups).toBe("number");
+    expect(settings.maxAgeDays).toBe(7);
 
     expect(help.extension).toBe("db-backup");
     expect(help.settings.enabled).toBeDefined();
     expect(help.settings.backupOnStartup).toBeDefined();
     expect(help.settings.backupDir).toBeDefined();
     expect(help.settings.maxBackups).toBeDefined();
+    expect(help.settings.maxAgeDays.default).toBe(7);
   });
 
   it("formats timestamps properly", () => {
@@ -173,6 +176,26 @@ describe("db-backup Extension", () => {
     expect(remaining).toContain("test-backup-4.db");
     expect(remaining).not.toContain("test-backup-1.db");
     expect(remaining).not.toContain("test-backup-2.db");
+  });
+
+  it("expires only matching backup files when count retention is unlimited", () => {
+    const backupDir = join(tempDir, "age-prune-test");
+    mkdirSync(backupDir, { recursive: true });
+    const expired = join(backupDir, "rollback-snapshot-before-cutover.db");
+    const recent = join(backupDir, "rollback-snapshot-current.db");
+    const unrelated = join(backupDir, "notes.db");
+    const wrongExtension = join(backupDir, "rollback-snapshot-old.txt");
+    for (const path of [expired, recent, unrelated, wrongExtension]) writeFileSync(path, "fixture");
+    const old = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000;
+    utimesSync(expired, old, old);
+    utimesSync(unrelated, old, old);
+    utimesSync(wrongExtension, old, old);
+
+    expect(pruneOldBackups(backupDir, "rollback-snapshot-", 0, undefined, 7)).toBe(1);
+    expect(existsSync(expired)).toBe(false);
+    expect(existsSync(recent)).toBe(true);
+    expect(existsSync(unrelated)).toBe(true);
+    expect(existsSync(wrongExtension)).toBe(true);
   });
 
   it("skips backup when enabled is false", async () => {

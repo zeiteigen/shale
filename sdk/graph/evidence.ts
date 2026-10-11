@@ -1,6 +1,7 @@
 import { randomUUIDv7 } from "bun";
 import type { Database } from "bun:sqlite";
 import type { Evidence, EvidenceInput } from "./types";
+import { currentRevisionSQL } from '../../lib/memory/freshness';
 
 export class GraphEvidence {
   constructor(private db: Database) {}
@@ -42,8 +43,7 @@ export class GraphEvidence {
       (id,claim_id,revision_id,chunk_index,stance,locator,quote,method,model,confidence,created_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(id,claimId,revision.id,input.chunkIndex ?? null,input.stance ?? 'supports',
         JSON.stringify(locator),input.quote ?? null,input.method ?? 'manual',input.model ?? null,input.confidence ?? null,Date.now());
-    if ((input.stance ?? 'supports') === 'supports' && !this.db.query(`SELECT 1 FROM sources s
-        JOIN graph_source_revisions r ON r.source_id=s.id AND r.hash=s.hash WHERE r.id=?`).get(revision.id))
+    if ((input.stance ?? 'supports') === 'supports' && !this.db.query(`SELECT 1 FROM graph_source_revisions r WHERE r.id=? AND ${currentRevisionSQL()}`).get(revision.id))
       this.db.query("UPDATE graph_claims SET status='stale' WHERE id=? AND status IN ('accepted','proposed','disputed')").run(claimId);
     if (input.chunkIndex !== undefined && this.db.query("SELECT 1 FROM sqlite_master WHERE name='chunk_entities'").get()) {
       this.db.query(`INSERT OR IGNORE INTO chunk_entities(chunk_id,entity_id)
@@ -58,22 +58,28 @@ export class GraphEvidence {
   list(claimId: string): Evidence[] {
     if (!this.db.query("SELECT 1 FROM sqlite_master WHERE name='sources'").get()) return [];
     const historyExists = this.db.query("SELECT 1 FROM sqlite_master WHERE name='graph_evidence_history'").get();
-    const rows = this.db.query<Record<string,unknown>, [string]>(`SELECT e.*,r.source_id,r.hash,r.uri,r.title,
+    const rows = this.db.query<Record<string,unknown>, [string]>(`SELECT e.*,r.source_id,coalesce(r.original_hash,r.hash) AS hash,r.original_source_id,r.uri,r.title,
+      (SELECT fingerprint FROM source_revision_fingerprints f WHERE f.revision_id=r.id) AS source_fingerprint,
       ${historyExists ? '(SELECT withdrawn_at FROM graph_evidence_history h WHERE h.evidence_id=e.id)' : 'NULL'} AS withdrawn_at,
       ${historyExists ? '(SELECT replacement_id FROM graph_evidence_history h WHERE h.evidence_id=e.id)' : 'NULL'} AS replacement_id,
-      NOT EXISTS(SELECT 1 FROM sources s WHERE s.id=r.source_id AND s.hash=r.hash) AS stale
+      NOT ${currentRevisionSQL()} AS stale,
+      CASE WHEN e.chunk_index IS NULL THEN 'source-only' WHEN EXISTS(SELECT 1 FROM graph_revision_passages p
+        WHERE p.revision_id=e.revision_id AND p.chunk_index=e.chunk_index) THEN 'retained' ELSE 'discarded' END AS availability
       FROM graph_evidence e JOIN graph_source_revisions r ON r.id=e.revision_id WHERE e.claim_id=? ORDER BY e.created_at,e.id`).all(claimId);
     return rows.map(r => ({id:r.id as string,claimId,revisionId:r.revision_id as number,
       sourceId:r.source_id as string,sourceHash:r.hash as string,uri:r.uri as string,title:r.title as string,
+      originalSourceId:r.original_source_id as string ?? undefined,sourceFingerprint:r.source_fingerprint as string ?? undefined,
       chunkIndex:r.chunk_index as number ?? undefined,stance:r.stance as Evidence['stance'],locator:JSON.parse(r.locator as string),
       quote:r.quote as string ?? undefined,method:r.method as string,model:r.model as string ?? undefined,
       confidence:r.confidence as number ?? undefined,createdAt:r.created_at as number,stale:Boolean(r.stale),
-      withdrawnAt:r.withdrawn_at as number ?? undefined,replacementId:r.replacement_id as string ?? undefined}));
+      withdrawnAt:r.withdrawn_at as number ?? undefined,replacementId:r.replacement_id as string ?? undefined,
+      availability:r.availability as Evidence['availability']}));
   }
 
   revision(revisionId: number) {
     const revision = this.db.query('SELECT * FROM graph_source_revisions WHERE id=?').get(revisionId);
     if (!revision) throw new Error('Unknown source revision');
-    return {revision,chunks:this.db.query('SELECT * FROM graph_revision_chunks WHERE revision_id=? ORDER BY chunk_index').all(revisionId)};
+    return {revision,chunks:this.db.query('SELECT * FROM graph_revision_chunks WHERE revision_id=? ORDER BY chunk_index').all(revisionId),
+      completeOriginal:false,description:'Only retained summaries and excerpts are available; original bodies are discarded.'};
   }
 }

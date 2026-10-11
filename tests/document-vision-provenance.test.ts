@@ -21,9 +21,9 @@ it("retains page locations and proposed model provenance for vision text alongsi
       updatedAt: 100, metadata: {}, knowledge, contextualChunks: chunks }, { name: "Vault", path: "/vault" });
     const claim = sdk.graph.claims.list({ predicate: "VISION_TRANSCRIPTION" })[0];
     expect(claim).toMatchObject({ status: "proposed", model: "vision-test", method: "vision" });
-    expect(sdk.graph.evidence.list(claim.id).some(e => e.chunkIndex === 0)).toBe(true);
-    expect(sdk.graph.claims.list({ predicate: "CHUNK_LOCATION" }).map(c => c.value)).toEqual(expect.arrayContaining([{ pageNumber: 2 }, { pageNumber: 3 }]));
-    expect(sdk.graph.claims.list({ predicate: "CHUNK_LOCATION" })).toHaveLength(2);
+    expect(sdk.graph.evidence.list(claim.id).some(e => e.chunkIndex === 1)).toBe(true);
+    const locators=database.query<{locator:string}, []>("SELECT locator FROM graph_revision_passages WHERE locator != '{}' ").all().map(row=>JSON.parse(row.locator));
+    expect(locators.map((locator:any)=>locator.pageNumber)).toEqual(expect.arrayContaining([2,3]));
   } finally { database.close(); }
 });
 

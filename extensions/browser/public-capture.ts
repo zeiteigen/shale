@@ -54,6 +54,6 @@ export async function preparePublicCapture(
       visitedAt: Date.now(),
     },
     settings,
-    { ...options, managed: true },
+    { ...options, managed: true, parsed },
   );
 }

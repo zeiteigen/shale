@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Activity, Network, Settings, Square } from "lucide-react";
+import { Activity, KeyRound, Network, Settings, Square } from "lucide-react";
 import { HostPanel } from "./HostPanel";
 import { SettingsPanel } from "./SettingsPanel";
+import { AccountsPanel } from "./AccountsPanel";
 import Notebook from "./Notebook";
 import { usePoll } from "./use-poll";
 import { post } from "./control-api";
@@ -12,6 +13,7 @@ import {getGraph} from './api';
 const pages = [
   { id: "overview", title: "Overview", icon: Activity },
   { id: "settings", title: "Settings", icon: Settings },
+  { id: "accounts", title: "Accounts", icon: KeyRound },
   { id: "knowledge", title: "Knowledge", icon: Network },
 ] as const;
 function currentPage() {
@@ -49,6 +51,6 @@ export default function App() {
     <button className="stop-button" onClick={stop} disabled={stopped || stopping || !!error || !host}><Square size={13} /> Stop host</button></header>
     {!stopped && (error || stopError) && <div className="connection-error" role="alert">{stopError ?? `Cannot reach the Shale host: ${error}`}<button className="text-button" onClick={refresh}>Retry</button></div>}
     {stopped ? <main className="control-page"><h1>Shale has stopped.</h1><p>Start Shale again to resume your workspace, then reload this page.</p></main>
-      : page === "settings" ? <SettingsPanel /> : page === "knowledge" ? <Notebook /> : <HostPanel host={host} onChanged={refresh} />}
+      : page === "settings" ? <SettingsPanel /> : page === "accounts" ? <AccountsPanel /> : page === "knowledge" ? <Notebook /> : <HostPanel host={host} onChanged={refresh} />}
   </div>;
 }

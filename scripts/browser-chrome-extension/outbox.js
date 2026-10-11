@@ -98,15 +98,27 @@ export async function enqueueRecords(records, config) {
     }
     // Preserve recent receipts; pruning does not change durable lifetime counters.
     const terminal = current
-      .filter((x) => ["indexed", "skipped"].includes(x.state))
+      .filter((x) => ["indexed", "skipped", "expired"].includes(x.state))
       .sort((a, b) => b.createdAt - a.createdAt);
     for (const old of terminal.slice(1000)) store.delete(old.id);
   });
 }
 export async function outboxItems() {
-  return transaction(["outbox"], "readonly", (tx) =>
-    request(tx.objectStore("outbox").getAll()),
-  );
+  const now = Date.now();
+  return transaction(["outbox"], "readwrite", async (tx) => {
+    const store = tx.objectStore("outbox");
+    const rows = await request(store.getAll());
+    for (const item of rows) {
+      if (!["pending", "received", "failed"].includes(item.state) || now - item.createdAt < 86400000) continue;
+      const error = "Capture expired after 24 hours without terminal indexing; resubmit to retry";
+      store.put({ ...item, state: "expired", record: { recordId: item.id }, bytes: 0, error, updatedAt: now });
+      item.state = "expired";
+      item.record = { recordId: item.id };
+      item.bytes = 0;
+      item.error = error;
+    }
+    return rows;
+  });
 }
 export async function hasRecord(id) {
   return transaction(["outbox"], "readonly", (tx) =>
@@ -163,6 +175,10 @@ export async function outboxSummary() {
         )[0]?.error || "",
     failures: rows
       .filter((x) => x.state === "failed")
+      .map((x) => ({ id: x.id, error: x.error }))
+      .slice(0, 20),
+    expired: rows
+      .filter((x) => x.state === "expired")
       .map((x) => ({ id: x.id, error: x.error }))
       .slice(0, 20),
   };

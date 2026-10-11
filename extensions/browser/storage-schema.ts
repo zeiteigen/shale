@@ -34,7 +34,7 @@ export function ensureBrowserSchema(db: Database): void {
       extension_id TEXT NOT NULL, session_id TEXT NOT NULL, collector_id TEXT NOT NULL,
       activity_hash TEXT NOT NULL, start_time INTEGER NOT NULL, end_time INTEGER NOT NULL,
       boundary_reason TEXT NOT NULL, prepared TEXT, settings TEXT, indexed_hash TEXT,
-      attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER NOT NULL DEFAULT 0,error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER NOT NULL DEFAULT 0,error TEXT,prepared_at INTEGER,
       PRIMARY KEY(extension_id,session_id)
     ) STRICT;
     CREATE TABLE IF NOT EXISTS browser_threads (
@@ -85,6 +85,7 @@ export function ensureBrowserSchema(db: Database): void {
     ["attempts", "INTEGER NOT NULL DEFAULT 0"],
     ["next_attempt_at", "INTEGER NOT NULL DEFAULT 0"],
     ["error", "TEXT"],
+    ["prepared_at", "INTEGER"],
   ])
     if (!columns.has(name!))
       db.run(`ALTER TABLE browser_sessions ADD COLUMN ${name} ${type}`);

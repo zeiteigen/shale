@@ -217,7 +217,8 @@ it('rejects ungrounded quotes before saving checkpoints or writing knowledge',as
 });
 
 it('keeps checkpoint evidence on the original revision when a source changes during chat',async()=> {
-  const {sdk,extraction}=fixture();
+  const {db,sdk,extraction}=fixture();
+  const originalHash=db.query<{hash:string},[string]>("SELECT hash FROM graph_source_revisions WHERE source_id=? ORDER BY id DESC LIMIT 1").get('source-0')!.hash;
   sdk.queryLLM=(async()=> {
     sdk.ingest.sourceAndChunks({source:{id:'source-0',uri:'file:///source-0.md',title:'Changed',origin:'test',type:'note',hash:'v2'},
       chunks:[{text_content:'Bob recommended PostgreSQL.'}]});
@@ -225,7 +226,7 @@ it('keeps checkpoint evidence on the original revision when a source changes dur
   }) as unknown as typeof sdk.queryLLM;
   await run(sdk);
   const claims=sdk.graph.claims.list();expect(claims.every(c=>c.status==='stale')).toBe(true);
-  expect(sdk.graph.evidence.list(claims[0].id)[0]).toMatchObject({sourceHash:'v1-0',quote:'Alice recommended SQLite for Atlas.',stale:true});
+  expect(sdk.graph.evidence.list(claims[0].id)[0]).toMatchObject({sourceHash:originalHash,quote:'Alice recommended SQLite for Atlas.',stale:true});
 });
 
 it('does not adopt model-supplied review status, namespace, or dependency IDs',()=> {

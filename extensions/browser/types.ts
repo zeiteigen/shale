@@ -1,5 +1,6 @@
 import type { BrowserExtensionSettings } from "./settings.types";
 import type { WebPageParseResponse } from "../../lib/messages/web-contracts";
+import type { PreparedSourceMemory } from "../../lib/memory/prepare";
 /**
  * Type definitions for the Shale Browser Ingestion Extension.
  */
@@ -24,25 +25,22 @@ export interface PreparedPageData {
   jobId?: string;
   contentKey?: string;
   indexedHash?: string;
+  sourceFingerprint?: string;
   canonicalSourceId?: string;
   reused?: boolean;
-  settings?: Partial<BrowserExtensionSettings>;
   sessionUpdate?: Awaited<
     ReturnType<typeof import("./session-manager").recordSessionVisit>
   > | null;
   pageData: WebPageData;
   analysis: LLMPageAnalysis;
+  memory: PreparedSourceMemory;
   cleanUrl: string;
   domain: string;
   checkpointId: string;
   namespace: string;
-  parser?: WebPageParseResponse;
-  parsedChunks?: string[];
-  contextualSummary?: string;
-  imageChunks?: Array<{
-    text_content: string;
-    chunk_type: "verbatim" | "synthetic";
-  }>;
+  extraction?: WebPageParseResponse["extraction"];
+  imageKnowledge?: WebPageParseResponse["imageKnowledge"];
+  imageOffset?: number;
 }
 
 export interface PreparedSessionData {

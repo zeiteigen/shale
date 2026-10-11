@@ -52,6 +52,22 @@ const TRACKING_PARAMS = new Set([
   "session_id",
 ]);
 
+/** Google search presentation params split one query into several page identities. */
+const GOOGLE_NOISE_PARAMS = new Set([
+  "ie",
+  "oe",
+  "udm",
+  "sa",
+  "gs_lp",
+  "sclient",
+  "uact",
+  "iflsig",
+  "rlz",
+  "lei",
+  "newwindow",
+]);
+const GOOGLE_HOST = /(?:^|\.)google\.[a-z]{2,3}(?:\.[a-z]{2})?$/;
+
 /**
  * Normalizes a URL by stripping tracking parameters, hash fragments, and standardizing hostnames.
  */
@@ -79,13 +95,15 @@ export function normalizeUrl(rawUrl: string): {
     const domain = parsed.hostname.toLowerCase().replace(/^\.+|\.+$/g, "");
 
     // Strip tracking parameters
+    const google = GOOGLE_HOST.test(domain);
     const keysToRemove: string[] = [];
     for (const key of parsed.searchParams.keys()) {
       const lowerKey = key.toLowerCase();
       if (
         TRACKING_PARAMS.has(lowerKey) ||
         lowerKey.startsWith("utm_") ||
-        lowerKey.startsWith("fb_")
+        lowerKey.startsWith("fb_") ||
+        (google && GOOGLE_NOISE_PARAMS.has(lowerKey))
       ) {
         keysToRemove.push(key);
       }
@@ -94,8 +112,11 @@ export function normalizeUrl(rawUrl: string): {
       parsed.searchParams.delete(key);
     }
 
-    // Strip hash fragment
-    if (!/^#(?:!\/|\/)/.test(parsed.hash)) parsed.hash = "";
+    // Strip hash fragments; SPA routes stay, but Chrome text-highlight directives never do.
+    const route = /^#(?:!\/|\/)/.test(parsed.hash)
+      ? parsed.hash.replace(/:~:.*$/, "")
+      : "";
+    parsed.hash = route;
 
     return {
       cleanUrl: parsed.toString(),
@@ -113,6 +134,11 @@ export function normalizeUrl(rawUrl: string): {
       protocol: "",
     };
   }
+}
+
+/** Graph identity for a URL; invalid or non-web URLs are returned unchanged. */
+export function canonicalUrl(rawUrl: string): string {
+  return normalizeUrl(rawUrl).cleanUrl;
 }
 
 /**

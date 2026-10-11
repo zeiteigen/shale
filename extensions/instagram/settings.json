@@ -1,0 +1,19 @@
+{
+  "importDir": "./data/instagram/import",
+  "syncEnabled": false,
+  "pythonBin": "",
+  "sessionFile": "./data/instagram/session.json",
+  "usernameEnv": "INSTAGRAM_USERNAME",
+  "passwordEnv": "INSTAGRAM_PASSWORD",
+  "maxThreadsPerSync": 20,
+  "maxMessagesPerThread": 200,
+  "syncTimeoutMinutes": 20,
+  "gapMinutes": 30,
+  "maxWindowMessages": 120,
+  "maxWindowChars": 11000,
+  "idleMinutes": 60,
+  "maxWindowsPerRun": 50,
+  "summarize": true,
+  "llmModel": "",
+  "namespace": "instagram"
+}

@@ -35,3 +35,22 @@ export interface SettingSchema {
   format?: string;
 }
 export interface SettingsDocument { name: string; values: Record<string, unknown>; schema: Record<string, SettingSchema> }
+export interface AuthField { key: string; label: string; type: "text" | "password"; required?: boolean; placeholder?: string; help?: string }
+export interface AuthMethod { id: string; label: string; description?: string; fields: AuthField[] }
+export interface AuthStatus {
+  connected: boolean;
+  account?: string;
+  detail?: string;
+  checkedAt?: number;
+  pending?: { prompt: string; field: AuthField };
+  error?: string;
+}
+export interface AuthAccount {
+  extension: string;
+  title: string;
+  description?: string;
+  warning?: string;
+  methods: AuthMethod[];
+  canVerify: boolean;
+  status: AuthStatus;
+}

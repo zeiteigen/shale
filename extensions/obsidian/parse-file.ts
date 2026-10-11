@@ -5,6 +5,8 @@ import type { ChunkType } from "../../lib/db";
 import { parseNoteContent, type ParsedNote } from "./parser";
 import { dynamicChunkNote, type MarkdownChunk } from "./chunker";
 import { expansionPrompt } from "./expansion-prompt";
+import { fingerprintText } from "../../lib/memory/fingerprint";
+import { prepareSourceMemory, type PreparedSourceMemory } from "../../lib/memory/prepare";
 
 export interface ContextualChunk {
   metadata?: Record<string, unknown>;
@@ -24,6 +26,8 @@ export interface ParsedFile {
   documentTargets?: Record<string,string>;
   chunks: MarkdownChunk[];
   contextualChunks: ContextualChunk[];
+  memory?: PreparedSourceMemory;
+  sourceFingerprint?: string;
 }
 
 export interface ParseFileOptions {
@@ -302,6 +306,8 @@ export async function parseFile(
   const frontmatter = /^---\r?\n[\s\S]*?\r?\n---/.exec(rawContent)?.[0];
   if (frontmatter) contextualChunks.push({chunk_index:contextualChunks.length,
     chunk_type:"verbatim",text_content:frontmatter,metadata:{origin:"frontmatter"}});
+  const expansion = contextualChunks.find(chunk => chunk.metadata?.origin === "llm")?.text_content;
+  const memory = prepareSourceMemory(contextualChunks, { title: noteTitle, summary: expansion });
 
   return {
     filePath,
@@ -311,6 +317,8 @@ export async function parseFile(
     parsed,
     chunks,
     contextualChunks,
+    memory,
+    sourceFingerprint: fingerprintText(rawContent),
   };
 }
 

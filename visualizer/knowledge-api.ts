@@ -3,10 +3,15 @@ import type { ClaimFilter, ClaimStatus, TraversalOptions } from "../sdk/graph/ty
 
 /** Local graph inspection/correction endpoints, guarded by the server's origin checks. */
 export async function knowledgeApi(req: Request, url: URL, sdk: ShaleSDK): Promise<Response | undefined> {
-  const match = url.pathname.match(/^\/api\/knowledge\/(claims|inspect|review|traverse|entity|merge|unmerge|event|revision)$/);
+  const match = url.pathname.match(/^\/api\/knowledge\/(claims|inspect|review|traverse|entity|merge|unmerge|event|revision|memory)$/);
   if (!match) return;
   try {
     if (req.method === 'GET') {
+      if (match[1] === 'memory') {
+        const sourceId = url.searchParams.get('sourceId');
+        if (!sourceId) throw new Error('A source ID is required');
+        return Response.json(sdk.memory.get(sourceId));
+      }
       if (match[1] === 'entity') return Response.json(sdk.graph.entities.inspect(Number(url.searchParams.get('id'))));
       if (match[1] === 'claims') {
         const entityId=url.searchParams.has('entityId') ? Number(url.searchParams.get('entityId')) : undefined;

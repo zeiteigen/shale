@@ -30,13 +30,17 @@ export interface EvidenceInput {
   method?: string; model?: string; confidence?: number;
 }
 export interface Evidence extends EvidenceInput {
+  availability?: 'retained' | 'source-only' | 'discarded';
   id: string; claimId: string; revisionId: number; sourceId: string; sourceHash: string;
+  originalSourceId?:string; sourceFingerprint?:string;
   uri: string; title: string; createdAt: number; stale: boolean; withdrawnAt?: number; replacementId?: string;
 }
 export interface ClaimFilter {
   entityId?: number; subject?: number; object?: number; predicate?: string; namespace?: string; context?: string;
   statuses?: ClaimStatus[]; at?: number; knownAt?: number; limit?: number; offset?: number;
   polarity?: 1 | -1; predicates?: string[];
+  /** Predicates to omit; an entry ending in `*` omits every predicate with that prefix. */
+  excludePredicates?: string[];
   objectOnly?: boolean;
 }
 export interface TraversalOptions extends ClaimFilter {

@@ -8,6 +8,9 @@ import { createTestDatabase } from "./fixtures/database";
 import { startMcpServer, type RunningMcpServer } from "../mcp";
 import { startWebServer } from "../main/web-server";
 import { WebLogs } from "../main/web-logs";
+import { formatToolResponse } from "../mcp/types";
+import { refreshSourceMemory } from "../mcp/tools/memory";
+import { compactTraversal } from "../mcp/tools/search";
 
 const databases: Database[] = [];
 const servers: RunningMcpServer[] = [];
@@ -31,6 +34,103 @@ afterEach(async () => {
   }
 });
 
+describe("MCP response bounds", () => {
+  it("keeps oversized tool results valid JSON within the requested character budget", () => {
+    const response = formatToolResponse({items:Array.from({length:1000},(_,i)=>({id:i,text:"x".repeat(200)}))}, 1000);
+    const serialized=(response.content[0] as {text:string}).text;
+    expect(serialized.length).toBeLessThanOrEqual(1000);
+    const parsed=JSON.parse(serialized);
+    expect(parsed.truncated).toBe(true);
+  });
+
+  it("keeps a continuation cursor aligned when a paged hit array is shortened", () => {
+    const response=formatToolResponse({hits:Array.from({length:20},(_,i)=>({id:i,text:"y".repeat(200)})),offset:10,limit:20,totalSources:100,nextOffset:30},1000);
+    const parsed=JSON.parse((response.content[0] as {text:string}).text);
+    expect(parsed.hits.length).toBe(parsed.limit);
+    expect(parsed.nextOffset).toBe(10+parsed.hits.length);
+    expect(parsed.truncated).toBe(true);
+  });
+
+  it("preserves paged source hits while omitting oversized graph expansion items", () => {
+    const response=formatToolResponse({hits:[{sourceId:'a',preview:'a'.repeat(200)},{sourceId:'b',preview:'b'.repeat(200)}],
+      offset:5,limit:2,totalSources:20,nextOffset:7,truncated:true,graphTruncated:false,
+      relatedPassages:Array.from({length:10},(_,i)=>({revisionId:i,text:'p'.repeat(300)})),
+      evidence:Array.from({length:5},(_,i)=>({id:`e${i}`,quote:'q'.repeat(200)})),
+      neighborhoods:Array.from({length:5},(_,i)=>({entities:[{name:`n${i}`}],claims:Array.from({length:10},()=>({text:'c'.repeat(100)}))}))},1000);
+    const serialized=(response.content[0] as {text:string}).text;
+    const parsed=JSON.parse(serialized);
+    expect(serialized.length).toBeLessThanOrEqual(1000);
+    expect(parsed.hits.length).toBeGreaterThan(0);
+    expect(parsed.hits.length).toBe(parsed.limit);
+    expect(parsed.nextOffset).toBe(5+parsed.hits.length);
+    expect(parsed.graphTruncated).toBe(true);
+    expect(Object.keys(parsed.omittedGraphItems)).toEqual(['relatedPassages','evidence','neighborhoods']);
+    expect(Object.values(parsed.omittedGraphItems as Record<string,number>).some(count=>count>0)).toBe(true);
+  });
+
+  it("groups retained-memory matches by source and returns version citations", async () => {
+    const db=createTestDatabase();
+    databases.push(db);
+    const sdk=createExtensionSDK("memory-search-test",{database:db,namespace:"knowledge"});
+    await sdk.ingest.sourceAndChunks({source:{id:"grouped-source",uri:"file:///grouped.md",title:"Grouped",origin:"test",type:"note",hash:"grouped-v1"},chunks:[
+      {text_content:"Project Cedar has a distinct archived retrieval token."},
+      {text_content:"Project Cedar uses that retrieval token for the second section."},
+    ]});
+    const result=sdk.memory.search({query:"retrieval token",limit:5});
+    expect(result.hits).toHaveLength(1);
+    expect(result.hits[0]?.sourceId).toBe("grouped-source");
+    expect(result.hits[0]?.memoryVersion).toBe(1);
+    expect(result.hits[0]?.snippetVersionId).toBeGreaterThan(0);
+    expect(result.hits[0]?.preview.length).toBeLessThanOrEqual(600);
+  });
+
+  it("applies filters before ranking and paginates beyond the first five hundred sources", () => {
+    const db=createTestDatabase();
+    databases.push(db);
+    const insertSource=db.query('INSERT INTO sources(id,type,uri,origin,created_at,title,updated_at,hash) VALUES(?,?,?,?,?,?,?,?)');
+    const insertChunk=db.query('INSERT INTO chunks(source_id,chunk_index,text_content,chunk_type) VALUES(?,0,?,\'verbatim\')');
+    for(let i=0;i<501;i++) {
+      const id=`ranked-${i}`;
+      insertSource.run(id,'note',`file:///${id}.md`,i===500?'target-origin':'other-origin',i,`Source ${i}`,i,`hash-${i}`);
+      insertChunk.run(id,'shared continuation needle');
+    }
+    insertSource.run('session-result','web_session','https://example.invalid/session','browser',600,'Browsing Session',600,'hash-session');
+    insertChunk.run('session-result','shared continuation needle');
+    const sdk=createExtensionSDK("bounded-search-test",{database:db,namespace:"knowledge"});
+    const filtered=sdk.memory.search({query:"continuation needle",origin:"target-origin",limit:5});
+    expect(filtered.totalSources).toBe(1);
+    expect(filtered.hits[0]?.sourceId).toBe('ranked-500');
+    const page=sdk.memory.search({query:"continuation needle",limit:5,offset:500});
+    expect(page.totalSources).toBe(501);
+    expect(page.hits).toHaveLength(1);
+    expect(page.nextOffset).toBeNull();
+    expect(sdk.memory.search({query:"continuation needle",type:"web_session",limit:5}).hits[0]?.sourceId).toBe('session-result');
+  });
+
+  it("returns unavailable for an unowned source without attempting a fetch", async () => {
+    const db=createTestDatabase();
+    databases.push(db);
+    const sdk=createExtensionSDK("refresh-test",{database:db,namespace:"knowledge"});
+    db.query('INSERT INTO sources(id,type,uri,origin,created_at,title,updated_at,hash) VALUES(?,?,?,?,?,?,?,?)')
+      .run('unowned','note','https://example.invalid/page','unconfigured-owner',1,'Unowned',1,'hash');
+    expect(sdk.messages.hasHandler('source:refresh')).toBe(false);
+    const response=await refreshSourceMemory(sdk,{sourceId:'unowned',actor:'tester',reason:'explicit refresh request'});
+    expect(response.status).toBe('unavailable');
+    expect(response.sourceId).toBe('unowned');
+  });
+
+  it("keeps traversal output compact and reports omitted counts", () => {
+    const result=compactTraversal({entities:Array.from({length:40},(_,id)=>({id,stableId:`s${id}`,namespace:'n',name:`Entity ${id}`,type:'Thing',canonicalId:null})),
+      claims:Array.from({length:60},(_,id)=>({id:`c${id}`,namespace:'n',subject:id,predicate:'RELATED_TO',object:id+1,value:'z'.repeat(800),status:'accepted' as const,recordedAt:id})),
+      paths:[],truncated:true},40,60,1000);
+    expect(JSON.stringify(result).length).toBeLessThanOrEqual(1000);
+    expect(result.truncated).toBe(true);
+    expect(result.counts.entities).toBe(40);
+    expect(result.omitted.claims).toBeGreaterThan(0);
+    expect(result.continuationGuidance).toContain('start entity');
+  });
+});
+
 async function setupServer() {
   const db = createTestDatabase();
   databases.push(db);
@@ -52,6 +152,30 @@ async function setupServer() {
 }
 
 describe("MCP Knowledge Graph HTTP Server", () => {
+  it('edits retained memory through the MCP protocol without reconstructing discarded originals',async()=>{
+    const {sdk,url}=await setupServer();
+    sdk.ingest.sourceAndChunks({source:{id:'memory-protocol',title:'Polar guide',uri:'test://polar',origin:'unconfigured-owner',type:'note'},
+      chunks:[{text_content:'Polar coordinates use radius and angle.'}]});
+    const client=new Client({name:'memory-protocol-test',version:'1.0.0'});clients.push(client);
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`)));
+    const call=async(name:string,args:Record<string,unknown>)=>client.callTool({name,arguments:args});
+    const decode=(response:any)=>JSON.parse(response.content[0].text);
+    const before=decode(await call('get_source_memory',{sourceId:'memory-protocol'}));
+    expect(before.completeOriginal).toBe(false);
+    const version=decode(await call('get_snippet',{versionId:before.snippets[0].versionId}));
+    expect(version.text).toBe('Polar coordinates use radius and angle.');
+    const edit={sourceId:'memory-protocol',expectedVersion:before.version,actor:'test-agent',reason:'Add an interpretation',requestId:'memory-protocol-edit',
+      add:[{text:'Radial symmetry often makes polar coordinates useful.',kind:'derived',purpose:'application'}]};
+    const receipt=decode(await call('edit_source_memory',edit));
+    expect(receipt.version).toBe(before.version+1);
+    expect(decode(await call('edit_source_memory',edit))).toEqual(receipt);
+    expect((await call('edit_source_memory',{...edit,requestId:'different-request'})).isError).toBe(true);
+    const after=decode(await call('get_source_memory',{sourceId:'memory-protocol'}));
+    expect(after.snippets.some((s:any)=>s.kind==='derived'&&s.text.includes('Radial symmetry'))).toBe(true);
+    expect(decode(await call('get_snippet',{versionId:before.snippets[0].versionId})).text).toBe(version.text);
+    expect(decode(await call('refresh_source',{sourceId:'memory-protocol',actor:'test-agent',reason:'Recover omitted detail',topic:'examples'})).status).toBe('unavailable');
+  });
+
   it("serves HTTP health check, root metadata, and CORS preflights", async () => {
     const { url } = await setupServer();
 
@@ -103,6 +227,9 @@ describe("MCP Knowledge Graph HTTP Server", () => {
     const toolNames = tools.tools.map((t) => t.name);
 
     expect(toolNames).toContain("search_graph");
+    expect(toolNames).toContain("get_source_memory");
+    expect(toolNames).toContain("get_snippet");
+    expect(toolNames).toContain("edit_source_memory");
     expect(toolNames).toContain("traverse_graph");
     expect(toolNames).toContain("find_path");
     expect(toolNames).toContain("get_entity");
@@ -160,6 +287,10 @@ describe("MCP Knowledge Graph HTTP Server", () => {
     expect(promptRes.messages).toHaveLength(1);
     const messageContent = promptRes.messages[0].content as { text: string };
     expect(messageContent.text).toContain("Alice");
+    const factCheckPrompt=await client.getPrompt({name:"fact-check",arguments:{statement:"A test statement"}});
+    const factCheckText=(factCheckPrompt.messages[0].content as {text:string}).text;
+    expect(factCheckText).toContain("summaryVersionId");
+    expect(factCheckText).toContain("refresh_source");
   });
 
   it("performs full knowledge graph entity, claim, event, and traversal workflows via MCP tools", async () => {
@@ -338,8 +469,22 @@ describe("MCP Knowledge Graph HTTP Server", () => {
       },
     });
     const searchData = JSON.parse((searchRes.content as any)[0].text);
-    expect(searchData.results.length).toBeGreaterThan(0);
-    expect(searchData.results[0].text_content).toContain("Alice leads the Atlas project");
+    expect(searchData.hits.length).toBeGreaterThan(0);
+    expect(searchData.hits[0].sourceId).toBe("source-1");
+    expect(searchData.hits[0].preview).toContain("Alice leads the Atlas project");
+    expect(searchData.hits[0].memoryVersion).toBe(1);
+    expect(searchData.hits[0].snippetVersionId).toBeGreaterThan(0);
+
+    const memoryRes = await client.callTool({name:"get_source_memory",arguments:{sourceId:"source-1"}});
+    const memory = JSON.parse((memoryRes.content as any)[0].text);
+    expect(memory.completeOriginal).toBe(false);
+    expect(memory.snippets).toHaveLength(1);
+    const snippetRes = await client.callTool({name:"get_snippet",arguments:{versionId:memory.snippets[0].versionId}});
+    expect(JSON.parse((snippetRes.content as any)[0].text).completeOriginal).toBe(false);
+    const memoryResource=await client.readResource({uri:"graph://sources/source-1/memory/0"});
+    const memoryResourceData=JSON.parse((memoryResource.contents[0] as {text:string}).text);
+    expect(memoryResourceData.completeOriginal).toBe(false);
+    expect(memoryResourceData.snippets[0].versionId).toBe(memory.snippets[0].versionId);
 
     // 12. Create & query events
     const createEventRes = await client.callTool({
