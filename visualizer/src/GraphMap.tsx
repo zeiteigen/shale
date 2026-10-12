@@ -5,13 +5,13 @@ import { graphAdjacency, graphLayout } from './graph-layout';
 import { mapTransform, paintGraph, type MapView } from './graph-paint';
 export {colorFor} from './graph-paint';
 
-export const GraphMap=memo(function GraphMap({data,selected,visibleTypes,focusSelection,connectionDepth,onSelect}: {
-  data:GraphData;selected:GraphNode|null;visibleTypes:Set<string>;focusSelection:boolean;connectionDepth:number;onSelect:(node:GraphNode)=>void;
+export const GraphMap=memo(function GraphMap({data,selected,visibleTypes,focusSelection,connectionDepth,onSelect,viewState}: {
+  data:GraphData;selected:GraphNode|null;visibleTypes:Set<string>;focusSelection:boolean;connectionDepth:number;onSelect:(node:GraphNode)=>void;viewState?:MapView;
 }) {
   const canvas=useRef<HTMLCanvasElement>(null),frame=useRef<number|undefined>(undefined);
-  const view=useRef<MapView>({width:1,height:1,zoom:1,x:0,y:0});
+  const view=useRef<MapView>(viewState ?? {width:1,height:1,zoom:1,x:0,y:0});
   const drag=useRef<{x:number;y:number;offsetX:number;offsetY:number;moved:boolean}|null>(null);
-  const [zoom,setZoom]=useState(1),[hover,setHover]=useState('');
+  const [zoom,setZoom]=useState(view.current.zoom),[hover,setHover]=useState('');
   const adjacency=useMemo(()=>graphAdjacency(data),[data]);
   const layout=useMemo(()=>graphLayout(data,adjacency,visibleTypes,selected?.id,focusSelection,connectionDepth),[data,adjacency,visibleTypes,selected?.id,focusSelection,connectionDepth]);
   const draw=useCallback(()=> {
@@ -41,7 +41,7 @@ export const GraphMap=memo(function GraphMap({data,selected,visibleTypes,focusSe
       <button onClick={()=>changeZoom(Math.max(.35,view.current.zoom/1.2))} aria-label="Zoom out"><Minus size={16}/></button>
       <button onClick={()=>{Object.assign(view.current,{zoom:1,x:0,y:0});setZoom(1);draw();}} aria-label="Reset graph view"><RotateCcw size={14}/></button><span>{Math.round(zoom*100)}%</span>
     </div>
-    <canvas ref={canvas} className="graph-map" role="img" tabIndex={0} aria-label="Knowledge graph map. Scroll to zoom, drag to pan, click an entry to inspect it. Use arrow keys to select entries."
+    <canvas ref={canvas} className="graph-map" data-layout="classic" data-node-count={layout.nodes.length} role="img" tabIndex={0} aria-label="Knowledge graph map. Scroll to zoom, drag to pan, click an entry to inspect it. Use arrow keys to select entries."
       onPointerDown={event=>{const p=point(event);drag.current={...p,offsetX:view.current.x,offsetY:view.current.y,moved:false};event.currentTarget.setPointerCapture(event.pointerId);}}
       onPointerMove={event=>{const p=point(event),start=drag.current;if(start){if(Math.hypot(p.x-start.x,p.y-start.y)>4)start.moved=true;if(start.moved){view.current.x=start.offsetX+p.x-start.x;view.current.y=start.offsetY+p.y-start.y;draw();}}else{const node=hit(event);setHover(node?`${node.name} · ${node.type}`:'');}}}
       onPointerUp={event=>{if(drag.current&&!drag.current.moved){const node=hit(event);if(node)onSelect(node);}drag.current=null;}}

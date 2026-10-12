@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   Layers3,
@@ -11,6 +11,11 @@ import { NodeReader } from './NodeReader';
 import { searchPreview } from './search-preview';
 import { GraphMap, colorFor } from './GraphMap';
 import {useDebouncedValue} from './use-debounced-value';
+import { OrganicGraphMap } from './OrganicGraphMap';
+import { GraphForces } from './GraphForces';
+import { readGraphPreferences, saveGraphPreferences } from './graph-preferences';
+import { createOrganicSession } from './use-force-layout';
+import './graph-view.css';
 
 function Notebook() {
   const [data, setData] = useState<GraphData | null>(null);
@@ -26,6 +31,10 @@ function Notebook() {
   const [graphContext,setGraphContext]=useState('');
   const appliedContext=useDebouncedValue(graphContext);
   const [graphDate,setGraphDate]=useState('');
+  const [graphPreferences, setGraphPreferences] = useState(readGraphPreferences);
+  const [organicSession] = useState(createOrganicSession);
+  const classicCamera = useRef({ width: 1, height: 1, zoom: 1, x: 0, y: 0 });
+  useEffect(() => { saveGraphPreferences(graphPreferences); }, [graphPreferences]);
   const sourceResults = useMemo(() => {
     const bySource = new Map<string, SearchResult>();
     for (const result of results) if (!bySource.has(result.source_id)) bySource.set(result.source_id, result);
@@ -142,8 +151,14 @@ function Notebook() {
         </aside>
 
         <section className="map-pane">
-          <div className="map-heading"><div><p className="eyebrow"><Network size={14} /> relationships</p><h1>Map of the collection</h1></div><span className="entry-count">{!data ? 'Loading graph…' : focusSelection && selected ? `${connectionDepth}-hop focus` : `${visibleCount} visible`}</span></div>
-          {error ? <div className="error-note">{error}</div> : data ? <GraphMap data={data} selected={selected} visibleTypes={visibleTypes} focusSelection={focusSelection} connectionDepth={connectionDepth} onSelect={setSelected} /> : <div className="map-loading" role="status">Loading relationships… Search and navigation are available.</div>}
+          <div className="map-heading"><div><p className="eyebrow"><Network size={14} /> relationships</p><h1>Map of the collection</h1></div><div className="map-heading-actions"><span className="entry-count">{!data ? 'Loading graph…' : focusSelection && selected ? `${connectionDepth}-hop focus` : `${visibleCount} visible`}</span><div className="graph-mode-toggle" role="group" aria-label="Graph view">
+            {(['organic', 'classic'] as const).map(view => <button key={view} type="button" aria-pressed={graphPreferences.mode === view} onClick={() => setGraphPreferences(current => ({ ...current, mode: view }))}>{view === 'organic' ? 'Organic' : 'Classic'}</button>)}
+          </div></div></div>
+          {error ? <div className="error-note">{error}</div> : data ? graphPreferences.mode === 'classic'
+            ? <GraphMap data={data} selected={selected} visibleTypes={visibleTypes} focusSelection={focusSelection} connectionDepth={connectionDepth} onSelect={setSelected} viewState={classicCamera.current} />
+            : <OrganicGraphMap data={data} selected={selected} visibleTypes={visibleTypes} focusSelection={focusSelection} connectionDepth={connectionDepth} onSelect={setSelected} forces={graphPreferences.forces} session={organicSession} />
+            : <div className="map-loading" role="status">Loading relationships… Search and navigation are available.</div>}
+          {graphPreferences.mode === 'organic' && <GraphForces value={graphPreferences.forces} onChange={forces => setGraphPreferences(current => ({ ...current, forces }))} />}
           <p className="map-caption">Each dot is an entry. Select one to read its summary and snippets. Dashed connections await review or are disputed.</p>
         </section>
 

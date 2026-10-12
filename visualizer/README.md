@@ -18,6 +18,8 @@ Open **http://localhost:7425**. `bun run start` builds the interface before star
 
 Summaries, expanded snippets, and evidence quotes render Markdown and mathematical notation. The formatter loads when retained text is opened. Equations, code blocks, and tables stay within the reader on small screens. Source images are explicit links, so reading a snippet does not fetch external images.
 
+The Knowledge map defaults to **Organic**, a force graph with connected clusters and collision spacing. Drag empty space to pan, scroll to zoom, click an entry to read it, or drag a node and release it to let it settle. **Forces** adjusts center attraction, repulsion, link strength, and link distance; Restore defaults resets those controls. **Classic** restores the original rectangular map. The view and force settings are remembered in this browser; switching views keeps the current reader and filters and restores each view's camera. Reduced-motion preferences show the settled layout without progressive animation.
+
 The daemon starts without terminal input by default. `--cli` opts into the legacy terminal console; `--no-cli` remains accepted. Existing settings commands are retained for scripts. Stop host in the web header confirms shutdown, including interruption of running jobs.
 
 `bun run visualizer` and `bun scripts/serve-visualizer.ts` also launch the unified daemon. They do not start a separate visualizer service. The exported `startVisualizerServer` function remains available for legacy graph API consumers; use the daemon for the complete interface.

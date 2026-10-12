@@ -9,9 +9,9 @@ export function mapTransform(layout:MapLayout,view:MapView) {
 }
 
 /** Batch paths into a few canvas strokes instead of thousands of DOM elements. */
-export function paintGraph(canvas:HTMLCanvasElement,layout:MapLayout,view:MapView,selected:number|undefined) {
+export function paintGraph(canvas:HTMLCanvasElement,layout:MapLayout,view:MapView,selected:number|undefined,options?:{transform:ReturnType<typeof mapTransform>;hover?:number}) {
   const ctx=canvas.getContext('2d');if(!ctx)return;
-  const dpr=canvas.width/Math.max(1,view.width),t=mapTransform(layout,view);
+  const dpr=canvas.width/Math.max(1,view.width),t=options?.transform ?? mapTransform(layout,view);
   ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,view.width,view.height);
   ctx.translate(t.x,t.y);ctx.scale(t.scale,t.scale);
   const bounds={left:-t.x/t.scale,right:(view.width-t.x)/t.scale,top:-t.y/t.scale,bottom:(view.height-t.y)/t.scale};
@@ -20,12 +20,13 @@ export function paintGraph(canvas:HTMLCanvasElement,layout:MapLayout,view:MapVie
     if (edge.source === selected) neighbors.add(edge.target);
     if (edge.target === selected) neighbors.add(edge.source);
   }
-  for(const group of ['accepted','pending','selected']) {
-    ctx.beginPath();ctx.setLineDash(group==='pending' ? [4/t.scale,3/t.scale] : []);
-    ctx.strokeStyle=group==='selected' ? '#716552' : '#bab2a5';ctx.globalAlpha=group==='selected' ? .85 : selected === undefined ? .28 : .07;ctx.lineWidth=(group==='selected'?1.5:.6)/t.scale;
+  for(const group of options ? ['accepted','pending','selected','selected-pending'] : ['accepted','pending','selected']) {
+    const highlighted=group.startsWith('selected');
+    ctx.beginPath();ctx.setLineDash(group.includes('pending') ? [4/t.scale,3/t.scale] : []);
+    ctx.strokeStyle=highlighted ? '#716552' : '#bab2a5';ctx.globalAlpha=highlighted ? .85 : selected === undefined ? .28 : .07;ctx.lineWidth=(highlighted?1.5:.6)/t.scale;
     for(const edge of layout.edges) {
       const active=selected===edge.source || selected===edge.target;
-      if((active?'selected':edge.status==='accepted'?'accepted':'pending')!==group)continue;
+      if((active?options && edge.status!=='accepted'?'selected-pending':'selected':edge.status==='accepted'?'accepted':'pending')!==group)continue;
       const a=layout.points.get(edge.source)!,b=layout.points.get(edge.target)!;
       if(Math.max(a.x,b.x)<bounds.left || Math.min(a.x,b.x)>bounds.right || Math.max(a.y,b.y)<bounds.top || Math.min(a.y,b.y)>bounds.bottom)continue;
       ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
@@ -42,19 +43,20 @@ export function paintGraph(canvas:HTMLCanvasElement,layout:MapLayout,view:MapVie
   for(const [key,points] of groups) {const [color,muted]=JSON.parse(key);ctx.fillStyle=color;ctx.globalAlpha=muted?.23:1;ctx.beginPath();for(const p of points){ctx.moveTo(p.x+p.radius,p.y);ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);}ctx.fill();}
   ctx.globalAlpha=1;
   const labelBounds:Array<{left:number;right:number;top:number;bottom:number}>=[];
-  const points=[...layout.points.values()].sort((a,b)=>Number(b.node.id===selected)-Number(a.node.id===selected) || Number(neighbors.has(b.node.id))-Number(neighbors.has(a.node.id)) || b.node.degree-a.node.degree);
+  const points=[...layout.points.values()].sort((a,b)=>Number(b.node.id===selected)-Number(a.node.id===selected) || Number(b.node.id===options?.hover)-Number(a.node.id===options?.hover) || Number(neighbors.has(b.node.id))-Number(neighbors.has(a.node.id)) || b.node.degree-a.node.degree);
   for(const p of points) {
-    const active=p.node.id===selected;
-    if(active){ctx.strokeStyle=colorFor(p.node.type);ctx.lineWidth=1.5/t.scale;ctx.beginPath();ctx.arc(p.x,p.y,p.radius+4/t.scale,0,Math.PI*2);ctx.stroke();}
+    const active=p.node.id===selected,hovered=p.node.id===options?.hover;
+    if(active || hovered){ctx.strokeStyle=colorFor(p.node.type);ctx.lineWidth=1.5/t.scale;ctx.beginPath();ctx.arc(p.x,p.y,p.radius+4/t.scale,0,Math.PI*2);ctx.stroke();}
     const connected=neighbors.has(p.node.id);
-    if(!active && (selected!==undefined ? !connected : t.scale<.6 || p.node.degree<8))continue;
-    if(!active && labelBounds.length>=40)continue;
+    if(!active && !hovered && (selected!==undefined ? !connected : options ? t.scale<.15 || t.scale<.45 && p.node.degree<3 : t.scale<.6 || p.node.degree<8))continue;
+    if(!active && !hovered && labelBounds.length>=(options && t.scale>=1?100:40))continue;
     if(p.x<bounds.left || p.x>bounds.right || p.y<bounds.top || p.y>bounds.bottom)continue;
     ctx.font=`${active?'600 ':''}${11/t.scale}px system-ui`;
     const label=p.node.name.length>32?p.node.name.slice(0,32)+'…':p.node.name;
-    const x=p.x+p.radius+6/t.scale,y=p.y+4/t.scale;
-    const box={left:x-3/t.scale,right:x+ctx.measureText(label).width+3/t.scale,top:y-13/t.scale,bottom:y+4/t.scale};
-    if(!active && labelBounds.some(other=>box.left<other.right && box.right>other.left && box.top<other.bottom && box.bottom>other.top))continue;
+    const textWidth=ctx.measureText(label).width;
+    const x=options?Math.max(bounds.left+6/t.scale,Math.min(p.x+p.radius+6/t.scale,bounds.right-textWidth-6/t.scale)):p.x+p.radius+6/t.scale,y=p.y+4/t.scale;
+    const box={left:x-3/t.scale,right:x+textWidth+3/t.scale,top:y-13/t.scale,bottom:y+4/t.scale};
+    if(!active && !hovered && labelBounds.some(other=>box.left<other.right && box.right>other.left && box.top<other.bottom && box.bottom>other.top))continue;
     labelBounds.push(box);ctx.fillStyle='#f6f2e9';ctx.fillRect(box.left,box.top,box.right-box.left,box.bottom-box.top);ctx.fillStyle=active?'#393c31':'#726958';ctx.fillText(label,x,y);
   }
 }
