@@ -65,7 +65,7 @@ Restricted profiles see no rows in any other table, including extension state, c
 {
   "defaultTier": "personal",
   "unauthenticatedProfile": "local",
-  "originTiers": { "discord": "private", "instagram": "private" },
+  "originTiers": { "discord": "private", "instagram": "private", "email": "private" },
   "tierRules": [{ "match": { "uri": "*bank*" }, "tier": "secret" }],
   "profiles": {
     "local": { "clearance": "secret", "write": true },

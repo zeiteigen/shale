@@ -43,7 +43,7 @@ export interface ResolvedProfile extends AccessProfile {
 export const DEFAULT_POLICY: AccessPolicy = {
   defaultTier: "personal",
   unauthenticatedProfile: "local",
-  originTiers: { discord: "private", instagram: "private" },
+  originTiers: { discord: "private", instagram: "private", email: "private" },
   tierRules: [],
   profiles: {
     local: { description: "Agents running on this machine", clearance: "secret", write: true },

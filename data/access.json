@@ -1,0 +1,26 @@
+{
+  "defaultTier": "personal",
+  "unauthenticatedProfile": "local",
+  "originTiers": {
+    "discord": "private",
+    "instagram": "private",
+    "email": "private"
+  },
+  "tierRules": [],
+  "profiles": {
+    "local": {
+      "description": "Agents running on this machine",
+      "clearance": "secret",
+      "allow": [],
+      "deny": [],
+      "write": true
+    },
+    "cloud": {
+      "description": "Hosted agents; personal data only, no private messages",
+      "clearance": "personal",
+      "allow": [],
+      "deny": [],
+      "write": true
+    }
+  }
+}

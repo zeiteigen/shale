@@ -1,0 +1,22 @@
+{
+  "importDir": "./data/email/import",
+  "syncEnabled": true,
+  "host": "",
+  "port": 993,
+  "username": "",
+  "passwordEnv": "EMAIL_PASSWORD",
+  "mailboxes": ["INBOX"],
+  "initialSyncDays": 0,
+  "maxMessagesPerMailbox": 200,
+  "pythonBin": "python3",
+  "syncTimeoutMinutes": 10,
+  "namespace": "email",
+  "gapMinutes": 1440,
+  "maxWindowMessages": 50,
+  "maxWindowChars": 11000,
+  "idleMinutes": 0,
+  "maxWindowsPerRun": 50,
+  "summarize": true,
+  "llmModel": "",
+  "excludeBots": false
+}

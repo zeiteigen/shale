@@ -7,7 +7,7 @@ bun run setup   # bun install (root + visualizer) and each extension's installer
 bun run start
 ```
 
-Open **http://localhost:7425**. Use Overview to run background jobs and follow output, Settings to configure the host and extensions, Accounts to connect services such as Discord and Instagram, and Knowledge to explore sources and review claims.
+Open **http://localhost:7425**. Use Overview to run background jobs and follow output, Settings to configure the host and extensions, Accounts to connect services such as Discord, Instagram, and [email](extensions/email/README.md), and Knowledge to explore sources and review claims.
 
 The daemon serves the interface and ingestion API together. Settings are read fresh from disk; port and database changes require a restart. Host settings and their schema live in `data/settings.json` and `data/settings.help.json`. The default database is `data/production.db`, with backups in `data/backups/`. API keys live in `data/.env`, loaded at startup without overriding existing environment variables. Example configuration files are also in `data/`. Terminal commands remain available for automation, with `--cli` enabling the legacy interactive console.
 

@@ -16,6 +16,7 @@ import { PASSTHROUGH_TABLES, virtualTableStorage } from "../lib/access/scoped-da
 import { createToken, profileForRequest } from "../lib/access/tokens";
 import { readAccessPolicy, validateAccessPolicy, writeAccessPolicy } from "../lib/access/policy";
 import { WRITE_REFERENCES } from "../lib/access/write-guard";
+import { ChatStore } from "../sdk/chat/store";
 
 const directory = mkdtempSync(join(tmpdir(), "shale-access-"));
 const policyPath = process.env.SHALE_ACCESS_PATH!;
@@ -110,6 +111,21 @@ describe("access policy", () => {
 });
 
 describe("scoped database", () => {
+  it("keeps email private with an older policy and hides its raw connector tables", () => {
+    ingest("email-update", "email", "email://thread/1", "Project Cedar update.");
+    const store = new ChatStore(db, sdk.extensionId, "email");
+    store.ingest({ conversationId: "thread", title: "Update", kind: "thread", uri: "email://thread/1" },
+      [{ messageId: "one", authorId: "alice", authorName: "Alice", sentAt: 1, text: "Private mail", attachments: [] }]);
+    const { read } = createScopedSDK("cloud", sdk);
+    const source = db.query<SourceContent, []>("SELECT id,hash,title,uri,origin,type FROM sources WHERE id='email-update'").get()!;
+    // The model cannot declassify mail automatically, even before an existing policy adds an email origin floor.
+    setLabel(db, "source", "email-update", "llm", 0, { contentHash: sourceContentHash(source), reason: "test declassification" });
+    expect(read.context.getSource("email-update")).toBeNull();
+    expect(read.database.query("SELECT count(*) AS n FROM email_messages").get()).toEqual({ n: 0 });
+    expect(read.database.query("SELECT count(*) AS n FROM email_conversations").get()).toEqual({ n: 0 });
+    expect(read.database.query("SELECT count(*) AS n FROM email_windows").get()).toEqual({ n: 0 });
+  });
+
   it("hides sources by tier, origin floor, rules, and deny lists, along with their derived records", () => {
     const { read } = createScopedSDK("cloud", sdk);
     const visible = read.database.query<{ id: string }, []>("SELECT id FROM sources ORDER BY id").all().map(r => r.id);

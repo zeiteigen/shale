@@ -3,7 +3,7 @@ import { TIERS } from "./policy";
 /** Tier indexes: 0 public, 1 personal, 2 private, 3 secret. */
 export interface Classification {
   tier: number;
-  /** Credentials and financial identifiers: the LLM may not lower these. */
+  /** Credentials, financial identifiers, and private email: the LLM may not lower these. */
   hard: boolean;
   reason: string;
 }
@@ -98,6 +98,7 @@ export function maxClassification(...items: Classification[]): Classification {
 
 export function classifySource(source: { title: string; uri: string; origin: string; type: string; text: string }): Classification {
   const parts: Classification[] = [classifyText(`${source.title}\n${source.text}`)];
+  if (source.origin === "email") parts.push({ tier: PRIVATE, hard: true, reason: "private email" });
   if (PRIVATE_URI.test(source.uri)) parts.push({ tier: PRIVATE, hard: false, reason: "private web service" });
   if (DIRECT_MESSAGE.test(source.uri) || DIRECT_MESSAGE.test(source.type)) parts.push({ tier: PRIVATE, hard: false, reason: "direct messages" });
   return maxClassification(...parts);
