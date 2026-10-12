@@ -6,6 +6,11 @@ import {
 } from "@shale/sdk";
 import { commitNote, commitImage } from "./commit";
 import { documentWatermarkKey, finalizeDocument } from "./document-vault";
+import { noteNeedsImageCleanup } from './note-relevance';
+import { ingestFile } from './ingest-file';
+import { withSourceRefresh } from '../../lib/memory/refresh-scope';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 
 export interface RecoverResult {
   recoveredNotes: number;
@@ -76,9 +81,14 @@ export async function run(
         `[Recovery] Finalizing note "${parsed.noteTitle ?? parsed.imageTitle}" with cached AI summary...`,
       );
 
-      const vaultContext = vault ?? {name:"Vault",path:parsed.filePath.substring(0,parsed.filePath.lastIndexOf("/"))};
+      const filePath = parsed.filePath ?? fileURLToPath(parsed.noteUri ?? parsed.imageUri);
+      const vaultContext = vault ?? {name:"Vault",path:dirname(filePath)};
       const namespace = data.namespace ?? sdk.settings.get<string>("namespace") ?? sdk.namespace ?? "obsidian";
-      if (parsedFile) commitNote(sdk,parsedFile,vaultContext,namespace,cp.id);
+      if (parsedFile && noteNeedsImageCleanup(parsedFile)) {
+        await withSourceRefresh({sourceId:'',uri:parsedFile.noteUri,mode:'rebuild-generated'},
+          () => ingestFile(filePath,vaultContext.name,sdk,{vaultPath:vaultContext.path,namespace,expandAtomicNotes:false}));
+      }
+      else if (parsedFile) commitNote(sdk,parsedFile,vaultContext,namespace,cp.id);
       else commitImage(sdk,data.parsedImage,vaultContext,namespace,cp.id);
 
       // Track watermark advancement for this vault

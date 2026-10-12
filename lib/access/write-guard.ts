@@ -62,6 +62,7 @@ export const WRITE_REFERENCES: Record<string, Spec> = {
   // Source memory tools
   edit_source_memory: [["sourceId", "source"]],
   refresh_source: [["sourceId", "source"]],
+  repair_source_memory: [["sourceId", "source"], ["claims[].claimId", "claim"]],
 };
 
 export class AccessScopeError extends Error {

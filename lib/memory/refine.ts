@@ -2,8 +2,9 @@ import type { PreparedSourceMemory } from './types';
 import { MEMORY_LIMITS } from './types';
 
 /** Keep agent work, then select fresh observed excerpts within the active memory budget. */
-export function refineObservedMemory(current:PreparedSourceMemory, observed:PreparedSourceMemory):PreparedSourceMemory {
-  const pinned=current.snippets.filter(s=>s.kind==='derived'||s.purpose!=='source coverage');
+export function refineObservedMemory(current:PreparedSourceMemory, observed:PreparedSourceMemory,
+  mode: 'refine' | 'rebuild-generated' = 'refine'):PreparedSourceMemory {
+  const pinned=current.snippets.filter(s=>s.purpose!=='source coverage'||(mode==='refine'&&s.kind==='derived'));
   const snippets=[...pinned];
   let characters=pinned.reduce((n,s)=>n+s.text.length,0);
   for(const candidate of observed.snippets) {
@@ -12,5 +13,7 @@ export function refineObservedMemory(current:PreparedSourceMemory, observed:Prep
     const prior=current.snippets.find(s=>s.kind===candidate.kind&&s.text===candidate.text);
     snippets.push(prior?{...candidate,id:prior.id}:candidate);characters+=candidate.text.length;
   }
-  return {...observed,summary:current.summary,summaryMethod:current.summaryMethod,snippets};
+  const keepSummary=mode==='refine'||current.summaryMethod==='agent';
+  return {...observed,summary:keepSummary?current.summary:observed.summary,
+    summaryMethod:keepSummary?current.summaryMethod:observed.summaryMethod,snippets};
 }

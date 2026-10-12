@@ -1,6 +1,7 @@
 import type { ShaleSDK } from "@shale/sdk";
 import type { ProcessFileResponse } from "../../lib/messages.types";
 import type { WebPageParseRequest, WebPageParseResponse } from "./types";
+import { isDecorativeImageUrl } from "../../lib/decorative-images";
 
 import { parseHtmlSnapshot } from "./readability";
 import { chunkBlocks } from "./chunk-blocks";
@@ -89,7 +90,8 @@ export async function parseWebPage(
   const maxImages = settings.maxImages ?? 8;
   const imageUrls = [
     ...new Set([
-      ...(request.imageUrls ?? []).filter((url) => /^https?:/i.test(url)),
+      ...(request.imageUrls ?? []).filter((url) =>
+        /^https?:/i.test(url) && !isDecorativeImageUrl(url)),
       ...(html ? extractImageUrls(html, request.url, maxImages) : []),
     ]),
   ].slice(0, maxImages);

@@ -2,6 +2,12 @@ import { SourceGraph, graphIdentity, type ShaleSDK } from "@shale/sdk";
 import { commitPreparedClaims } from "../../sdk/graph/prepared";
 import { normalizeUrl } from "./filter";
 import type { PreparedPageData } from "./types";
+import { isDecorativeImage as decorativeImage, type ImageCandidate } from "../../lib/decorative-images";
+
+/** Preserve the browser graph's unsupported data-URL behavior. */
+export function isDecorativeImage(image: ImageCandidate): boolean {
+  return /^data:/i.test(image.url) || decorativeImage(image);
+}
 
 const GENERIC_ANCHORS = new Set([
   "read more",
@@ -36,25 +42,6 @@ export function isGenericAnchor(text: string | undefined): boolean {
     .trim()
     .toLocaleLowerCase();
   return !key || GENERIC_ANCHORS.has(key);
-}
-
-/** Favicons, tracking pixels and icon sprites are page chrome, not page content. */
-export function isDecorativeImage(image: {
-  url: string;
-  width?: number;
-  height?: number;
-}): boolean {
-  if (/^data:/i.test(image.url)) return true;
-  if (
-    /favicon|apple-touch-icon|[?&]type=favicon\b|\/s2\/favicons|faviconv2/i.test(
-      image.url,
-    )
-  )
-    return true;
-  return (
-    (image.width !== undefined && image.width > 0 && image.width < 48) ||
-    (image.height !== undefined && image.height > 0 && image.height < 48)
-  );
 }
 
 /** A page is known once something other than an inbound link asserted it: a visit, history, session or capture. */

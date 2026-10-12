@@ -4,6 +4,7 @@ import { commitPreparedClaims } from '../../sdk/graph/prepared';
 import type { ParsedFile } from './parse-file';
 import type { ParsedImage } from './parse-image';
 import { prepareSourceMemory } from '../../lib/memory/prepare';
+import { isDecorativeImageUrl } from '../../lib/decorative-images';
 
 export interface VaultContext { name: string; path: string }
 
@@ -46,6 +47,7 @@ export function commitNoteGraph(sdk: ShaleSDK, sourceId: string, namespace: stri
         ...JSON.parse(JSON.stringify(reference))}});
   }
   for (const image of parsed.images) {
+    if (isDecorativeImageUrl(image)) continue;
     const uri = file.assetTargets?.[image] ?? (/^https?:\/\//.test(image) ? image : undefined);
     const key = uri ?? `${file.noteUri}#asset-reference:${image}`;
     graph.link(note,'FEATURES_IMAGE',graph.entity(key,basename(image),uri ? 'Image' : 'ImageReference'),

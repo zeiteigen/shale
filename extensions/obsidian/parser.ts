@@ -1,5 +1,7 @@
 import { parseDocumentReferences, type DocumentReference } from "./document-references";
 import { isDocumentFile } from "./document-files";
+import { isDecorativeImageUrl } from "../../lib/decorative-images";
+import { markdownImages, omitMarkdownImages } from "../../lib/markdown-images";
 
 export interface ParsedNote {
   title: string;
@@ -110,21 +112,13 @@ export function parseNoteContent(
     }
   }
 
-  // 2. Extract embedded images: ![[Image.png|alt]] and standard markdown: ![alt](image.png)
+  // Ignore imported citation icons before chunking, without changing the original file.
+  body = omitMarkdownImages(body, isDecorativeImageUrl);
+
+  // 2. Extract substantive images outside code examples.
   const images = new Set<string>();
-
-  const embedRegex = /!\[\[(.*?)\]\]/g;
   let match: RegExpExecArray | null;
-  while ((match = embedRegex.exec(body)) !== null) {
-    const rawTarget = match[1].split("|")[0].trim();
-    if (isImageFile(rawTarget)) {
-      images.add(rawTarget);
-    }
-  }
-
-  const mdImageRegex = /!\[(.*?)\]\((.*?)\)/g;
-  while ((match = mdImageRegex.exec(body)) !== null) {
-    const imgUrl = match[2].trim();
+  for (const {target: imgUrl} of markdownImages(body)) {
     if (
       isImageFile(imgUrl) ||
       imgUrl.startsWith("http://") ||

@@ -4,10 +4,12 @@ import type { ParsedImage } from './parse-image';
 import { commitImageGraph, commitNoteGraph, type VaultContext } from './graph';
 import { recordCommittedFile } from './file-progress';
 import { contentFingerprint, memoryChunks, prepareSourceMemory } from '../../lib/memory/prepare';
+import { noteNeedsImageCleanup } from './note-relevance';
 
 /** All durable source, evidence, graph, and checkpoint changes commit together. */
 export function commitNote(sdk: ShaleSDK, file: ParsedFile,
   vault: VaultContext, namespace = 'obsidian', checkpointId?: string) {
+  if (noteNeedsImageCleanup(file)) throw new Error('Decorative images in cached note; reprepare the original file before committing');
   return sdk.database.transaction(() => {
     const memory = file.memory ?? prepareSourceMemory(file.contextualChunks, { title: file.noteTitle });
     const result = sdk.ingest.sourceAndChunks({namespace,source:{type:'markdown_note',

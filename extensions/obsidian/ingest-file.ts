@@ -4,6 +4,8 @@ import { createNoteIndex, indexVault, resolveNoteLinks } from './link-targets';
 import { getSDK, logger, getSetting, type ShaleSDK } from "@shale/sdk";
 import { parseFile, type ParsedFile, type ContextualChunk } from "./parse-file";
 import { parseImageFile, type ParsedImage } from "./parse-image";
+import { isDecorativeImageUrl } from "../../lib/decorative-images";
+import { noteNeedsImageCleanup } from "./note-relevance";
 
 export interface NoteGraphElements {
   entities: Array<{ name: string; type: string }>;
@@ -75,6 +77,7 @@ export function buildNoteGraphElements(
   }
 
   for (const imgName of images) {
+    if (isDecorativeImageUrl(imgName)) continue;
     entities.push({ name: imgName, type: "Image" });
     edges.push({
       source: noteTitle,
@@ -102,7 +105,8 @@ export async function ingestFile(
   const sdk = sdkOverride ?? getSDK();
 
   const prepare = async () => {
-    const file = options?.parsedFile ?? await parseFile(filePath, sdk, {
+    const cached = options?.parsedFile;
+    const file = cached && !noteNeedsImageCleanup(cached) ? cached : await parseFile(filePath, sdk, {
       expandAtomicNotes: options?.expandAtomicNotes,
     });
     if (!file.linkTargets) {

@@ -1,4 +1,5 @@
 import type { BrowserExtensionSettings } from "./settings.types";
+import { isDecorativeImageUrl } from "../../lib/decorative-images";
 
 export interface FilterResult {
   allowed: boolean;
@@ -218,6 +219,16 @@ export function evaluateUrl(
     return {
       allowed: false,
       reason: `Unsupported protocol (${norm.protocol || "invalid url"})`,
+      cleanUrl: norm.cleanUrl,
+      domain: norm.domain,
+      pathname: norm.pathname,
+    };
+  }
+
+  if (isDecorativeImageUrl(norm.cleanUrl)) {
+    return {
+      allowed: false,
+      reason: "Decorative image asset",
       cleanUrl: norm.cleanUrl,
       domain: norm.domain,
       pathname: norm.pathname,

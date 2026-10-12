@@ -17,6 +17,7 @@
     "mcp": "bun mcp/cli.ts",
     "test:mcp": "bun test tests/mcp-server.test.ts tests/knowledge-editing.test.ts tests/mcp-errors.test.ts",
     "queue:view": "bun run scripts/browser-queue-viewer.ts",
+    "repair:images": "bun scripts/repair-decorative-images.ts",
     "visualizer": "bun run start",
     "browser:build": "bun scripts/build-browser-contract.ts && bun scripts/build-browser-content.ts",
     "browser:check": "bun scripts/build-browser-contract.ts --check && bun scripts/build-browser-content.ts --check",

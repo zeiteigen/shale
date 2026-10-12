@@ -10,6 +10,7 @@ import { readdirSync, statSync } from "node:fs";
 import { getSDK, logger, getSetting, type ShaleSDK } from "@shale/sdk";
 import { type VaultInfo } from "./vault-finder";
 import { isImageFile } from "./parser";
+import { isDecorativeImageUrl } from "../../lib/decorative-images";
 import {
   parseFile,
   buildContextualChunks,
@@ -162,7 +163,7 @@ export function findImageFiles(
 
       if (entry.isDirectory()) {
         files.push(...findImageFiles(fullPath, baseDir, ignoredDirs));
-      } else if (entry.isFile() && isImageFile(entry.name)) {
+      } else if (entry.isFile() && isImageFile(entry.name) && !isDecorativeImageUrl(fullPath)) {
         files.push(fullPath);
       }
     }

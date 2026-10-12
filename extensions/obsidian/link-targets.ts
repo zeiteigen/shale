@@ -2,6 +2,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { readdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type { ParsedFile } from './parse-file';
+import { isDecorativeImageUrl } from '../../lib/decorative-images';
 
 /** Build once per discovery batch; retain resolutions in the checkpoint. */
 export function createNoteIndex(paths: string[]) {
@@ -41,6 +42,7 @@ export function resolveNoteLinks(file: ParsedFile, vaultPath: string, index: Ret
   file.linkTargets = targets;
   file.assetTargets = {};
   for (const target of file.parsed.images) {
+    if (isDecorativeImageUrl(target)) continue;
     if (/^https?:\/\//.test(target)) { file.assetTargets[target] = target; continue; }
     const candidates = [...new Set([resolve(dirname(file.filePath),target),resolve(vaultPath,target)])]
       .filter(path=>index.files.has(path));

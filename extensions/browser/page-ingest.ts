@@ -19,6 +19,9 @@ import { finalizeSession } from "./session-ingest";
 import { commitPageGraph } from "./page-graph";
 import { isSourceExcluded } from "../../lib/knowledge/exclusions";
 import { sourceRefreshScope } from '../../lib/memory/refresh-scope';
+import { isDecorativeImage } from "../../lib/decorative-images";
+import { isMetadataOnlyPage } from "./page-content";
+import { filterPageImages, sanitizePreparedPageImages } from "./page-images";
 
 /**
  * Prepare a web page using chat analysis and checkpoints.
@@ -36,6 +39,10 @@ export async function preparePageVisit(
     sdk.logger.debug(`Excluded page "${payload.url}": ${filter.reason}`);
     return null;
   }
+  if (isMetadataOnlyPage(payload)) {
+    sdk.logger.debug(`Skipping tab metadata without page content: ${filter.cleanUrl}`);
+    return null;
+  }
 
   const title = (payload.title || filter.domain || "Untitled Page").trim();
   sdk.logger.info(
@@ -43,7 +50,7 @@ export async function preparePageVisit(
   );
   ensureBrowserSchema(sdk.database);
   const contentKey = fingerprint([
-    "page-analysis-v2",
+    "page-analysis-v3",
     filter.cleanUrl,
     payload.textContent,
     payload.blocks,
@@ -114,7 +121,7 @@ export async function preparePageVisit(
         title,
         textContent: rawContent,
         html: payload.html,
-        imageUrls: payload.images?.map((image) => image.url),
+        imageUrls: payload.images?.filter((image) => !isDecorativeImage(image)).map((image) => image.url),
         includeImages: settings.enableImageAnalysis === true,
         enableLlmContext: false,
         blocks: payload.blocks,
@@ -133,6 +140,7 @@ export async function preparePageVisit(
       `Web-page parser unavailable for ${filter.cleanUrl}; using browser content: ${String(error)}`,
     );
   }
+  if (parser) parser = filterPageImages(parser, payload);
   if (cached) {
     const previous = stagedData;
     const previousMemory = cachedMemory ?? previous!.memory;
@@ -175,7 +183,7 @@ export async function preparePageVisit(
       text: link.text?.slice(0, 300),
       rel: link.rel?.slice(0, 80),
     })),
-    images: payload.images?.slice(0, 8).map((image) => ({
+    images: payload.images?.filter((image) => !isDecorativeImage(image)).slice(0, 8).map((image) => ({
       url: image.url.slice(0, 2000),
       alt: image.alt?.slice(0, 300),
       width: image.width,
@@ -322,7 +330,7 @@ export async function finalizePageVisit(
   prepared: PreparedPageData,
   settings: Partial<BrowserExtensionSettings>,
   assertOwned: () => void = () => {},
-): Promise<IngestedPageResult> {
+): Promise<IngestedPageResult | null> {
   const legacy = prepared as PreparedPageData & {
     parsedChunks?: string[];
     parser?: WebPageParseResponse;
@@ -355,10 +363,21 @@ export async function finalizePageVisit(
     delete (prepared as any).contextualSummary;
     delete (prepared as any).imageChunks;
   }
+  const sanitizedImages = sanitizePreparedPageImages(prepared);
   const { pageData, analysis, cleanUrl, domain, checkpointId, namespace } =
     prepared;
   const sourceId = browserSourceId("web", cleanUrl);
   const sourceUri = cleanUrl;
+  const finalPolicy = evaluateUrl(cleanUrl, settings);
+  if (!finalPolicy.allowed || isMetadataOnlyPage({ ...pageData, extraction: prepared.extraction })) {
+    assertOwned();
+    if (prepared.contentKey) sdk.database.query(
+      "DELETE FROM browser_content_cache WHERE extension_id=? AND content_key=?",
+    ).run(sdk.extensionId, prepared.contentKey);
+    if (prepared.jobId) finishJob(sdk, prepared.jobId, { skipped: finalPolicy.allowed ? "tab-metadata" : finalPolicy.reason });
+    else sdk.checkpoint.delete(checkpointId);
+    return null;
+  }
   if (
     isSourceExcluded(sdk.database, sourceId, sourceUri)
   ) {
@@ -419,7 +438,7 @@ export async function finalizePageVisit(
   const lowerQuality = !!currentQuality &&
     (qualityRank[currentQuality as keyof typeof qualityRank] ?? 0) >
       qualityRank[incomingQuality];
-  if (cachedHash && cachedHash === currentHash && cache?.source_id === sourceId) {
+  if (!sanitizedImages && cachedHash && cachedHash === currentHash && cache?.source_id === sourceId) {
     assertOwned();
     writeCompletedReceipt(sdk, prepared, sourceId, currentHash!, analysis);
     rememberCapture(sdk, prepared, sourceId);
