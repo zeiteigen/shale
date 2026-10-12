@@ -49,3 +49,11 @@ codex mcp get shale
 This adds an enabled `shale` server to `~/.codex/config.toml`. Start a new Codex session to load it, then ask Codex to use Shale's knowledge graph tools. No sign-in is required. Use the alternate URLs described above if you change the host port or run the standalone MCP server.
 
 Remove the connection with `codex mcp remove shale`. See [OpenAI's MCP setup instructions](https://developers.openai.com/learn/docs-mcp) for the CLI registration workflow.
+
+## Limit what an agent can see
+
+Every source, entity, and claim gets a sensitivity tier: `public`, `personal`, `private`, or `secret`. Tiers are assigned automatically; heuristics run immediately and the `access-classifier` extension refines them with the chat model. Access profiles in `data/access.json` set each agent's clearance. Unauthenticated requests use the `local` profile, which sees everything, so existing connections keep working.
+
+To give a hosted agent less, open **Access** in the web interface and create a token for the `cloud` profile (personal clearance, so no private messages or credentials). Configure the agent's MCP connection to send it as an `Authorization: Bearer <token>` header. Each session is bound to the profile of the token that opened it.
+
+Before exposing Shale through a tunnel, set **Requests without a token** to a restricted profile or to *Reject*. `bun run mcp --profile cloud` runs a listener that serves only one profile, without tokens. See [docs/access-control.md](docs/access-control.md) for how tiers and profiles work.

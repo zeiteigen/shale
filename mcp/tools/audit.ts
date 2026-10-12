@@ -14,5 +14,5 @@ export function recordToolMutation<T extends { actor: string; reason: string; re
 ) {
   const { actor, reason, requestId, ...input } = args;
   const context = { actor, reason, requestId };
-  return sdk.knowledge.record(action, input, context, () => work(input, context));
+  return sdk.knowledge.record(action, input, context, (prepared) => work(prepared as typeof input, context));
 }

@@ -2,7 +2,9 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import type { ShaleSDK } from "../sdk";
+import { createExtensionSDK, type ShaleSDK } from "../sdk";
+import { createScopedSDK, type ScopedSDK } from "../sdk/access";
+import { profileForRequest } from "../lib/access/tokens";
 import { createKnowledgeGraphMcpServer } from "./server";
 
 export interface McpHttpServerOptions {
@@ -12,6 +14,8 @@ export interface McpHttpServerOptions {
   namespace?: string;
   name?: string;
   version?: string;
+  /** Serve every request as this access profile without a token (a listener dedicated to one profile). */
+  profile?: string;
 }
 
 export interface RunningMcpServer {
@@ -24,21 +28,43 @@ export interface RunningMcpServer {
 
 export function createMcpHttpHandler(options: McpHttpServerOptions = {}) {
   const sseTransports = new Map<string, SSEServerTransport>();
+  const sseAccess = new Map<string, ScopedSDK>();
   const streamableSessions = new Map<
     string,
-    { mcp: ReturnType<typeof createKnowledgeGraphMcpServer>; transport: StreamableHTTPServerTransport }
+    { mcp: ReturnType<typeof createKnowledgeGraphMcpServer>; transport: StreamableHTTPServerTransport; access: ScopedSDK }
   >();
 
   const serverName = options.name ?? "shale-knowledge-graph";
   const serverVersion = options.version ?? "1.0.0";
+  let base: ShaleSDK | undefined;
 
-  function createServerInstance() {
+  /** Each request names its profile by token; sessions stay bound to the profile that opened them. */
+  function accessFor(req: http.IncomingMessage): ScopedSDK {
+    const profile = options.profile ?? profileForRequest(req.headers.authorization);
+    base ??= options.sdk ?? createExtensionSDK("mcp-server", { namespace: options.namespace ?? "knowledge" });
+    const access = createScopedSDK(profile, base);
+    access.refresh();
+    return access;
+  }
+
+  /** A session must keep its profile, and a policy edit that changes how the profile is served ends it. */
+  function sameAccess(session: ScopedSDK, current: ScopedSDK) {
+    return session.profile.name === current.profile.name && session.read === current.read;
+  }
+
+  function createServerInstance(access: ScopedSDK) {
     return createKnowledgeGraphMcpServer({
       name: serverName,
       version: serverVersion,
-      sdk: options.sdk,
+      sdk: base,
       namespace: options.namespace,
+      access,
     });
+  }
+
+  function reject(res: http.ServerResponse, status: number, message: string) {
+    res.writeHead(status, { "Content-Type": "application/json", ...(status === 401 ? { "WWW-Authenticate": "Bearer" } : {}) });
+    res.end(JSON.stringify({ error: message }));
   }
 
   const handler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
@@ -89,15 +115,28 @@ export function createMcpHttpHandler(options: McpHttpServerOptions = {}) {
       return;
     }
 
+    const isMcpEndpoint = url.pathname === "/sse" || url.pathname === "/messages" || url.pathname === "/mcp";
+    let access: ScopedSDK | undefined;
+    if (isMcpEndpoint) {
+      try {
+        access = accessFor(req);
+      } catch (err: any) {
+        reject(res, err?.status ?? 500, err?.message || "Access denied");
+        return;
+      }
+    }
+
     // 1. SSE Transport: GET /sse
     if (url.pathname === "/sse" && req.method === "GET") {
       try {
-        const mcp = createServerInstance();
+        const mcp = createServerInstance(access!);
         const transport = new SSEServerTransport("/messages", res);
         sseTransports.set(transport.sessionId, transport);
+        sseAccess.set(transport.sessionId, access!);
 
         transport.onclose = () => {
           sseTransports.delete(transport.sessionId);
+          sseAccess.delete(transport.sessionId);
         };
 
         await mcp.connect(transport);
@@ -125,6 +164,10 @@ export function createMcpHttpHandler(options: McpHttpServerOptions = {}) {
         res.end(JSON.stringify({ error: `Session not found: ${sessionId}` }));
         return;
       }
+      if (!sameAccess(sseAccess.get(sessionId)!, access!)) {
+        reject(res, 403, "This session belongs to a different access profile, or the profile changed; reconnect");
+        return;
+      }
 
       await transport.handlePostMessage(req, res);
       return;
@@ -140,14 +183,18 @@ export function createMcpHttpHandler(options: McpHttpServerOptions = {}) {
 
       let session = sessionId ? streamableSessions.get(sessionId) : undefined;
       let isNew = false;
+      if (session && !sameAccess(session.access, access!)) {
+        reject(res, 403, "This session belongs to a different access profile, or the profile changed; reconnect");
+        return;
+      }
 
       if (!session) {
-        const mcp = createServerInstance();
+        const mcp = createServerInstance(access!);
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
         });
         await mcp.connect(transport);
-        session = { mcp, transport };
+        session = { mcp, transport, access: access! };
         isNew = true;
       }
 

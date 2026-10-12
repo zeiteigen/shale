@@ -33,7 +33,7 @@ export function ensureKnowledgeEditingSchema(db: Database) {
       source_id TEXT PRIMARY KEY, metadata TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata))
     ) STRICT;
   `);
-  db.run('CREATE TEMP TABLE IF NOT EXISTS knowledge_edit_journal(kind TEXT NOT NULL,record_id TEXT NOT NULL)');
+  db.run("CREATE TEMP TABLE IF NOT EXISTS knowledge_edit_journal(kind TEXT NOT NULL,record_id TEXT NOT NULL,event TEXT NOT NULL DEFAULT '')");
   db.run('CREATE TEMP TABLE IF NOT EXISTS knowledge_edit_session(id INTEGER PRIMARY KEY,active INTEGER NOT NULL)');
   db.run('INSERT INTO knowledge_edit_session VALUES(1,0) ON CONFLICT(id) DO NOTHING');
   for(const name of ['graph_source_update','graph_source_delete']) {
@@ -70,7 +70,7 @@ export function ensureKnowledgeEditingSchema(db: Database) {
       db.run(`DROP TRIGGER IF EXISTS temp.knowledge_journal_${table}_${event.toLowerCase()}`);
       db.run(`CREATE TEMP TRIGGER knowledge_journal_${table}_${event.toLowerCase()} AFTER ${event} ON main.${table}
         WHEN (SELECT active FROM knowledge_edit_session WHERE id=1)=1
-        BEGIN INSERT INTO knowledge_edit_journal VALUES('${kind}',CAST(${row}.${key} AS TEXT)); END;`);
+        BEGIN INSERT INTO knowledge_edit_journal VALUES('${kind}',CAST(${row}.${key} AS TEXT),'${event[0]}'); END;`);
     }
     if(!migrated) db.run(`INSERT INTO graph_record_versions(kind,record_id,version)
       SELECT '${kind}',CAST(${key} AS TEXT),1 FROM ${table} WHERE true ON CONFLICT(kind,record_id) DO NOTHING`);
@@ -93,7 +93,7 @@ export function ensureKnowledgeEditingSchema(db: Database) {
       db.run(`DROP TRIGGER IF EXISTS temp.knowledge_side_journal_${table}_${event.toLowerCase()}`);
       db.run(`CREATE TEMP TRIGGER knowledge_side_journal_${table}_${event.toLowerCase()} AFTER ${event} ON main.${table}
         WHEN (SELECT active FROM knowledge_edit_session WHERE id=1)=1
-        BEGIN INSERT INTO knowledge_edit_journal VALUES('${kind}',CAST(${row}.${key} AS TEXT)); END;`);
+        BEGIN INSERT INTO knowledge_edit_journal VALUES('${kind}',CAST(${row}.${key} AS TEXT),'${event[0]}'); END;`);
     }
   }
   if(db.query("SELECT 1 FROM sqlite_master WHERE name='graph_events'").get())

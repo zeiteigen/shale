@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "llmEnabled": true,
+  "maxSourcesPerRun": 20,
+  "maxContentChars": 8000,
+  "llmModel": null
+}

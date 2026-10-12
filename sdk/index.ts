@@ -56,3 +56,5 @@ export type * from "../lib/messages.types";
 export { SourceMemoryStore, type MemoryEdit } from './memory/store';
 export { prepareSourceMemory, memoryChunks } from '../lib/memory/prepare';
 export type { PreparedSourceMemory, PreparedSnippet } from '../lib/memory/types';
+export { createScopedSDK, closeScopedSDKs, type ScopedSDK } from './access';
+export { TIERS, readAccessPolicy, resolveProfile, type Tier, type AccessPolicy, type AccessProfile } from '../lib/access/policy';

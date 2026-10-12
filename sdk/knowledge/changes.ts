@@ -16,15 +16,31 @@ type Operation={type:MutationName;args:Record<string,unknown>};
 const sourceOperations=new Set(['add_source','update_source','remove_source','restore_source','add_chunk','revise_chunk','remove_chunk']);
 class PreviewRollback extends Error {constructor(readonly result:unknown){super('Preview rollback');}}
 
+/** Scope check for restricted access profiles (lib/access/write-guard.ts). */
+export interface KnowledgeGuard {
+  /** Verify and normalize the records an operation references, before any write. */
+  prepare(name:string,args:Record<string,unknown>):Record<string,unknown>;
+  /** Inside the transaction, once the journal is active. */
+  begin():void;
+  /** Inside the transaction after the work; throwing rolls the change back. */
+  check():void;
+  /** Remove references the caller may not see from a receipt. */
+  redact<T>(result:T):T;
+}
+
 /** One mutation engine backs individual tools, ordered batches, and previews. */
 export class KnowledgeEditor {
   private graphEdits:KnowledgeGraphEdits;
   private sources:KnowledgeSources;
   private reads:KnowledgeReads;
+  private guard?:KnowledgeGuard;
   constructor(private db:Database,private graph:GraphIngestor,search:ChunkSearcher,namespace:string) {
     ensureKnowledgeEditingSchema(db);
     this.graphEdits=new KnowledgeGraphEdits(db,graph);this.sources=new KnowledgeSources(db,graph,namespace);this.reads=new KnowledgeReads(db,graph,search);
   }
+
+  /** Route every audited write through an access-scope check. */
+  setGuard(guard:KnowledgeGuard|undefined) {this.guard=guard;}
 
   mutate<N extends MutationName>(name:N,args:MutationArgs<N>,context:ChangeContext) {
     return this.apply({...context,operations:[{type:name,args}]});
@@ -48,8 +64,8 @@ export class KnowledgeEditor {
     const parsed=changeInput.parse(input),operations=parsed.operations as unknown as Operation[];
     if(JSON.stringify(parsed).length>5_000_000) throw new Error('Change batch exceeds the 5 MB payload limit');
     const signature=fingerprint(parsed);
-    if(!preview) {const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return previous;}
-    return this.execute(parsed,operations,preview);
+    if(!preview) {const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return this.redact(previous);}
+    return this.redact(this.execute(parsed,operations,preview));
   }
 
   private execute(parsed:ReturnType<typeof changeInput.parse>,operations:Operation[],
@@ -63,8 +79,10 @@ export class KnowledgeEditor {
         // A TEMP journal records exactly the records changed, including trigger invalidation.
         this.db.run('DELETE FROM knowledge_edit_journal');
         this.db.run('UPDATE knowledge_edit_session SET active=1 WHERE id=1');
+        this.guard?.begin();
         for(const operation of operations) {
-          const args=mutationSchemas[operation.type].parse(operation.args) as Record<string,unknown>;
+          let args=mutationSchemas[operation.type].parse(operation.args) as Record<string,unknown>;
+          if(this.guard) args=this.guard.prepare(operation.type,args);
           const before=this.snapshot(args);
           const result=sourceOperations.has(operation.type) ? this.sources.execute(operation.type,args,parsed.actor,parsed.reason) :
             this.graphEdits.execute(operation.type,args,parsed.actor,parsed.reason,refs);
@@ -73,6 +91,7 @@ export class KnowledgeEditor {
         const changed=this.db.query<{kind:string;record_id:string},[]>('SELECT DISTINCT kind,record_id FROM knowledge_edit_journal').all();
         const claimIds=changed.filter(r=>r.kind==='claim').map(r=>r.record_id);
         projectConnections(this.db,claimIds);
+        this.guard?.check();
         const invalidatedClaims=claimIds.map(id=>this.graph.claims.get(id)).filter(c=>['stale','proposed','disputed'].includes(c.status));
         const result={changeId,preview,operations:details,entityRefs:refs,
           affectedRecords:changed.map(r=>({...r,version:recordVersion(this.db,r.kind,r.record_id)})),
@@ -87,20 +106,24 @@ export class KnowledgeEditor {
   }
 
   /** Existing mutation APIs retain their response shape while gaining audit/retry support. */
-  record<T>(action:string,input:unknown,context:ChangeContext,work:()=>T):T {
+  record<T>(action:string,input:unknown,context:ChangeContext,work:(input:unknown)=>T):T {
     if(!context.actor.trim() || !context.reason.trim()) throw new Error('Actor and reason are required');
     const payload={action,input,actor:context.actor,reason:context.reason},signature=fingerprint(payload);
-    const previous=replay(this.db,context.requestId,signature);if(previous!==undefined) return previous as T;
-    return this.db.transaction(()=>{
+    const previous=replay(this.db,context.requestId,signature);if(previous!==undefined) return this.redact(previous as T);
+    // Names resolve among visible entities only; the work receives the normalized input.
+    const prepared=this.guard && typeof input==='object' && input!==null ? this.guard.prepare(action,input as Record<string,unknown>) : input;
+    return this.redact(this.db.transaction(()=>{
       const existing=replay(this.db,context.requestId,signature);if(existing!==undefined) return existing as T;
       this.db.run('DELETE FROM knowledge_edit_journal');
       this.db.run('UPDATE knowledge_edit_session SET active=1 WHERE id=1');
+      this.guard?.begin();
       const before=this.snapshot(typeof input==='object' && input!==null ? input as Record<string,unknown> : {});
-      const result=work();
+      const result=work(prepared);
       if(result instanceof Promise) throw new Error('Audited writes must be synchronous; prepare model work first');
       const affected=this.db.query<{kind:string;record_id:string},[]>('SELECT DISTINCT kind,record_id FROM knowledge_edit_journal').all();
       const claims=affected.filter(r=>r.kind==='claim').map(r=>r.record_id);
       projectConnections(this.db,claims);
+      this.guard?.check();
       const changeId=randomUUIDv7();
       const response=result!==null && typeof result==='object' && !Array.isArray(result) ? {...result,auditChangeId:changeId,
         affectedRecords:affected.map(r=>({...r,version:recordVersion(this.db,r.kind,r.record_id)})),
@@ -111,8 +134,10 @@ export class KnowledgeEditor {
       this.db.run('DELETE FROM knowledge_edit_journal');
       this.db.run('UPDATE knowledge_edit_session SET active=0 WHERE id=1');
       return response as T;
-    })();
+    })());
   }
+
+  private redact<T>(result:T):T {return this.guard ? this.guard.redact(result) : result;}
 
   private snapshot(args:Record<string,unknown>) {
     const records:Record<string,unknown>={};

@@ -54,3 +54,35 @@ export interface AuthAccount {
   canVerify: boolean;
   status: AuthStatus;
 }
+export type AccessTier = "public" | "personal" | "private" | "secret";
+export interface SourceMatch { origin?: string; type?: string; uri?: string }
+export interface AccessProfile { description?: string; clearance: AccessTier; allow?: SourceMatch[]; deny?: SourceMatch[]; write?: boolean }
+export interface AccessPolicy {
+  defaultTier: AccessTier;
+  unauthenticatedProfile: string | null;
+  originTiers: Record<string, AccessTier>;
+  tierRules: Array<{ match: SourceMatch; tier: AccessTier }>;
+  profiles: Record<string, AccessProfile>;
+}
+export interface AccessToken { id: string; profile: string; label: string; createdAt: number }
+export interface AccessOverview {
+  tiers: AccessTier[];
+  policy: AccessPolicy;
+  tokens: AccessToken[];
+  origins: Array<{ origin: string; n: number }>;
+  classification: { sources: number; heuristic: number; llm: number; manual: number };
+}
+export interface ProfilePreview {
+  unrestricted?: boolean;
+  sources?: number;
+  entities?: number;
+  claims?: number;
+  origins?: Array<{ origin: string; n: number }>;
+  error?: string;
+}
+export interface RecordAccess {
+  kind: string;
+  id: string;
+  tier: AccessTier | null;
+  labels: Array<{ origin: "manual" | "heuristic" | "llm"; tier: AccessTier; hard: boolean; reason: string; updatedAt: number }>;
+}

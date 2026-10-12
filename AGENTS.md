@@ -11,6 +11,7 @@ This document outlines the core conventions, architecture patterns, and best pra
    - Settings are read dynamically on the fly from disk without sticky in-memory caches.
    - Extensions use persistent watermarks and transactional checkpoints to guarantee recovery upon crashes or interruptions.
 3. **Cross-Extension Decoupling**: Extensions communicate via a unified, typed cross-extension message bus (`lib/messages.ts`, `sdk/messages.ts`), avoiding direct import coupling.
+4. **Permission-Scoped Consumers**: Anything that serves graph data to an agent or another application goes through an access profile (`createScopedSDK` in `sdk/access.ts`), never the raw connection. See Section 8.
 
 ---
 
@@ -22,6 +23,7 @@ shale/
 │   ├── db.ts                # SQLite database setup, schema migrations
 │   ├── messages.ts          # Core pub/sub and request/response message broker
 │   ├── ai.ts                # LLM API clients
+│   ├── access/              # Sensitivity tiers, access profiles, scoped connections, write guard
 │   └── extension.ts         # Extension interfaces and cron definitions
 ├── sdk/                     # High-level developer SDK (@shale/sdk)
 │   ├── index.ts             # SDK entry point, ambient scope, factory
@@ -32,6 +34,7 @@ shale/
 │   ├── messages.ts          # Type-safe messaging interface for extensions
 │   ├── llm.ts               # LLM querying interface with thinking tokens & multimodal support
 │   ├── checkpoint.ts        # Recovery checkpoint manager for multi-phase tasks
+│   ├── access.ts            # createScopedSDK: profile-filtered read SDK + guarded write SDK
 │   └── chat/                # Shared chat-connector toolkit: message store, time windows, transcripts, summaries, graph commit
 ├── extensions/              # Autonomous modular extensions
 │   ├── obsidian/            # Obsidian vault ingestion, frontmatter/wikilink parsing, note chunking
@@ -40,6 +43,7 @@ shale/
 │   ├── source-linker/       # Cross-source entity discovery and knowledge graph linker
 │   ├── discord/             # Discord ingestion via DiscordChatExporter JSON (import folder + optional sync)
 │   ├── instagram/           # Instagram DM ingestion via official data export (+ optional instagrapi sidecar)
+│   ├── access-classifier/   # Heuristic + LLM sensitivity tiers for sources, entities, claims
 │   └── db-backup/           # Automated background SQLite database hot backups
 ├── main/                    # Host daemon and orchestration
 │   ├── index.ts             # Main process entry, Bun.serve HTTP server, startup runner
@@ -221,4 +225,16 @@ bun run scripts/serve-visualizer.ts
 - **`extensions/source-linker`**: Cross-source graph linker. Discovers unlinked entity references across disparate sources and generates semantic edges.
 - **`extensions/discord`**: Ingests Discord channels, threads, and DMs from DiscordChatExporter JSON exports dropped into `data/discord/import`. The optional `discord-sync` cron runs the exporter with the account connected on the web interface's Accounts page (user or bot token). Messages are split into conversation windows (one source each) with LLM summaries, and authors become `Person` entities with `external:discord` aliases.
 - **`extensions/instagram`**: Ingests Instagram DMs from the official "Download your information" JSON export (`data/instagram/import`), repairing the export's mojibake. An optional `instagram-sync` cron runs a Python instagrapi sidecar (`sidecar/ig_sync.py`), signed in from the Accounts page (password with 2FA/challenge codes, or a session cookie), that merges into the same threads without duplicates. Uses the same windowing as Discord.
+- **`extensions/access-classifier`**: Assigns sensitivity tiers to sources, entities, and claims. Heuristics catch credentials, account numbers, PII, sensitive topics, and direct messages; an LLM pass refines them. Access profiles use the tiers.
 - **`extensions/db-backup`**: Hot backup utility. Uses SQLite backup APIs to create consistent database snapshots without stopping host operations.
+
+---
+
+## 8. Access Profiles & Permissions
+
+Users decide which data each consumer may use (`docs/access-control.md`).
+- **Tiers and profiles.** Records have a tier (`public < personal < private < secret`), set automatically by heuristics and `access-classifier`, or manually. Profiles in `data/access.json` (read fresh, created with defaults on first use) set a clearance plus `allow`/`deny` source patterns and `write`.
+- **Enforcement lives in the database layer.** `lib/access/scoped-database.ts` gives each restricted profile a read-only connection whose TEMP views shadow every `main` table. Unknown tables are shadowed by empty views. Readers need no permission code of their own; just use the scoped SDK.
+- **New tables.** Add a row filter to `shadowFilters` if a scoped consumer should see the table's rows; otherwise it stays hidden. New `chunks_fts` queries must join `chunks`.
+- **New write paths.** Add every write tool or knowledge operation to `WRITE_REFERENCES` in `lib/access/write-guard.ts`, listing the record ids it references. Unlisted writes are refused for restricted profiles. Audited writes must go through `sdk.knowledge` (`record`/`apply`) so the guard runs inside the transaction.
+- **MCP.** Clients authenticate with `Authorization: Bearer <token>`; tokens are created on the web interface's Access page. Requests without a token use `unauthenticatedProfile`.

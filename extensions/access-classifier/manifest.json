@@ -1,0 +1,14 @@
+{
+  "name": "access-classifier",
+  "version": "1.0.0",
+  "description": "Assigns sensitivity tiers to sources, entities, and claims (heuristics, then an LLM pass) so access profiles can limit what each agent sees.",
+  "namespace": "knowledge",
+  "crons": [
+    {
+      "name": "access-classifier-cron",
+      "schedule": "*/30 * * * *",
+      "script": "index.ts",
+      "run_on_startup": true
+    }
+  ]
+}

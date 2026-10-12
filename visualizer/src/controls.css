@@ -120,3 +120,42 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .auth-field small { color: #8c8478; font-size: 11px; }
 .auth-actions { flex-wrap: wrap; align-items: center; }
 .auth-actions .text-button { display: inline-flex; align-items: center; gap: 5px; }
+.access-page { padding-bottom: 90px; }
+.access-defaults { display: grid; gap: 12px; margin: 20px 0; }
+.access-defaults .quiet { margin: 0; }
+.access-defaults select, .access-card select, .access-rule input, .access-inline input, .access-unauthenticated select { padding: 8px 9px; border: 1px solid #bdb5a6; background: #fffbf4; color: inherit; font: 12px monospace; border-radius: 0; min-width: 0; }
+.access-subheading { margin: 10px 0 0; font: 10px monospace; text-transform: uppercase; letter-spacing: .08em; color: #7e7567; }
+.access-rule { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 120px auto; gap: 8px; align-items: center; }
+.access-defaults > .action-button { justify-self: start; }
+.access-unauthenticated { margin-top: 8px; max-width: 460px; }
+.access-card { display: grid; gap: 14px; }
+.access-check { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #5f594e; }
+.access-origins { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 12px 13px; border: 1px solid #d7cfc1; }
+.access-origins legend { padding: 0 5px; font-size: 11px; color: #7c7365; }
+.access-preview { display: grid; gap: 4px; padding: 11px 13px; background: #ede7dc; border: 1px solid #d7cfc1; font-size: 12px; color: #5f594e; }
+.access-preview p { margin: 0; }
+.access-preview small { color: #8c8478; font-size: 11px; overflow-wrap: anywhere; }
+.access-tokens { display: grid; gap: 8px; }
+.access-tokens .eyebrow { margin: 0; }
+.access-token { display: flex; gap: 9px; align-items: center; font-size: 12px; color: #4c493e; }
+.access-token span { display: grid; gap: 2px; min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.access-token small { color: #8c8478; font-size: 10px; }
+.access-reveal { padding: 11px 13px; background: #e6ece0; border: 1px solid #b7c7b4; color: #3f5543; font-size: 12px; display: grid; gap: 8px; }
+.access-reveal p { margin: 0; line-height: 1.5; }
+.access-reveal div { display: flex; gap: 8px; align-items: center; }
+.access-reveal code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 11px; }
+.access-inline { display: flex; gap: 8px; }
+.access-inline input { flex: 1; }
+.access-new { display: grid; gap: 10px; align-content: start; }
+.access-new .eyebrow, .access-new .quiet { margin: 0; }
+.access-savebar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding: 12px 28px; background: #f5f1e8; border-top: 1px solid #c8c0b2; }
+.tier-badge { padding: 3px 7px; border: 1px solid #d4cbbd; font: 10px monospace; text-transform: uppercase; color: #6d685d; }
+.tier-badge.public { color: #49654e; border-color: #b7c7b4; background: #e6ece0; }
+.tier-badge.private { color: #896522; border-color: #cfc091; background: #efe7cb; }
+.tier-badge.secret { color: #945544; border-color: #d5b1a5; background: #f0ded5; }
+.sensitivity-control { margin: 22px 0; }
+.sensitivity-control h3 { display: flex; align-items: center; gap: 6px; }
+.sensitivity-select { display: grid; gap: 6px; font-size: 12px; color: #7d6e58; margin-bottom: 8px; }
+.sensitivity-select select { padding: 7px 8px; border: 1px solid #c9bfae; background: #fffbf4; color: inherit; font: 12px monospace; }
+.sensitivity-control .quiet { margin: 4px 0; overflow-wrap: anywhere; }
+@media (max-width: 800px) { .access-rule { grid-template-columns: 1fr 1fr; } .access-savebar { padding: 12px 18px; } }

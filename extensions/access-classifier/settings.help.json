@@ -1,0 +1,10 @@
+{
+  "extension": "access-classifier",
+  "settings": {
+    "enabled": {"type": "boolean", "description": "Classify new and changed records into sensitivity tiers. Heuristic tiers also apply immediately whenever a restricted profile reads.", "default": true, "possibleValues": [true, false]},
+    "llmEnabled": {"type": "boolean", "description": "Refine heuristic tiers with the chat model. Heuristics alone still classify everything.", "default": true, "possibleValues": [true, false]},
+    "maxSourcesPerRun": {"type": "number", "description": "Maximum sources (with their entities and claims) sent to the model per run.", "default": 20, "range": {"min": 1, "max": 200}},
+    "maxContentChars": {"type": "number", "description": "Maximum source characters shown to the model per source.", "default": 8000, "range": {"min": 500, "max": 50000}},
+    "llmModel": {"type": "string", "description": "Optional chat model override.", "default": null}
+  }
+}

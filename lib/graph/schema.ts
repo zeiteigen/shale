@@ -3,11 +3,12 @@ import type { Database } from "bun:sqlite";
 import { installRevisionTracking } from "./source-revisions";
 import { ensureKnowledgeEditingSchema } from '../knowledge/schema';
 import { ensureEdgeProjection } from './edge-projection';
+import { ensureAccessSchema } from '../access/schema';
 
 /** Additive migration: legacy node IDs and edge consumers remain valid. */
 export function ensureGraphSchema(db: Database) {
   if (db.query("SELECT 1 FROM sqlite_master WHERE name='graph_migrations'").get() &&
-      db.query("SELECT 1 FROM graph_migrations WHERE name='knowledge-schema-v2'").get()) {installRevisionTracking(db);ensureRevisionUpsertSafety(db);ensureKnowledgeEditingSchema(db);ensureEdgeProjection(db);return;}
+      db.query("SELECT 1 FROM graph_migrations WHERE name='knowledge-schema-v2'").get()) {installRevisionTracking(db);ensureRevisionUpsertSafety(db);ensureKnowledgeEditingSchema(db);ensureEdgeProjection(db);ensureAccessSchema(db);return;}
   db.transaction(() => {
     db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY,namespace TEXT NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL,UNIQUE(namespace,name)) STRICT;
       CREATE TABLE IF NOT EXISTS edges (source_entity_id INTEGER NOT NULL REFERENCES entities(id),target_entity_id INTEGER NOT NULL REFERENCES entities(id),
@@ -122,5 +123,6 @@ export function ensureGraphSchema(db: Database) {
     db.run("INSERT INTO graph_migrations VALUES ('knowledge-schema-v2')");
     ensureKnowledgeEditingSchema(db);
     ensureEdgeProjection(db);
+    ensureAccessSchema(db);
   })();
 }

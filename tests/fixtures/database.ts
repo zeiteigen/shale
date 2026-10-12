@@ -1,9 +1,10 @@
 import { Database } from "bun:sqlite";
 import schema from "../../lib/db-init";
 
-/** Exercise the real schema and triggers in an isolated in-memory database. */
-export function createTestDatabase(): Database {
-  const database = new Database(":memory:");
+/** Exercise the real schema and triggers in an isolated database (in memory unless a file path is given). */
+export function createTestDatabase(path = ":memory:"): Database {
+  const database = new Database(path);
+  if (path !== ":memory:") database.run("PRAGMA journal_mode = WAL");
   database.run("PRAGMA foreign_keys = ON");
   const tables = schema.query<{ sql: string }, []>(`
     SELECT sql FROM sqlite_master WHERE type = 'table' AND name IN

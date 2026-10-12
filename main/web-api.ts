@@ -2,6 +2,7 @@ import type { CronExtension } from "../lib/extension";
 import type { CliCommandResult } from "./cli";
 import { settingsApi } from "./settings-api";
 import { authApi, type AuthRegistry } from "./auth-api";
+import { accessApi } from "./access-api";
 import { WebLogs } from "./web-logs";
 import { WebTasks } from "./web-tasks";
 import { getCronRun } from "./cron-runs";
@@ -27,6 +28,8 @@ export function createWebApi(context: WebContext) {
     if (settings) return settings;
     const auth = await authApi(req, url, context.auth ?? new Map());
     if (auth) return auth;
+    const access = await accessApi(req, url);
+    if (access) return access;
     if (req.method === "GET" && url.pathname === "/api/host") {
       return Response.json({ status: "running", port: context.port(), uptime: Math.floor(process.uptime()),
         memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),

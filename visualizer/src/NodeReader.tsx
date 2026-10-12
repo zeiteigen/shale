@@ -3,6 +3,7 @@ import { ArrowUpRight, CircleDot, Network, X } from 'lucide-react';
 import { ClaimPanel } from './ClaimPanel';
 import { ConnectionPanel, type NodeConnection } from './ConnectionPanel';
 import { IdentityPanel } from './IdentityPanel';
+import { SensitivityControl } from './SensitivityControl';
 import { MemoryOverview, SnippetPanel } from './SourceMemoryPanel';
 import { useSourceMemory } from './use-source-memory';
 import type { GraphNode } from './types';
@@ -46,6 +47,8 @@ export function NodeReader({ node, nodes, connections, onSelect, onClose, onChan
       {tab === 'Details' && <>
         <div className="reader-section-heading"><h3>Source and identity</h3></div>
         <dl className="reader-properties"><dt>Type</dt><dd>{node.type}</dd><dt>Origin</dt><dd>{node.namespace}</dd><dt>Stable identity</dt><dd>{node.stableId}</dd>{node.sourceUri && <><dt>Source</dt><dd><a href={node.sourceUri} target="_blank" rel="noreferrer">{node.sourceUri}</a></dd></>}{memory && <><dt>Memory version</dt><dd>{memory.version}</dd><dt>Retention</dt><dd>Summary and snippets</dd></>}</dl>
+        <SensitivityControl kind="entity" id={node.id} label="Entry" />
+        {(memory?.source.id ?? node.sourceId) && <SensitivityControl kind="source" id={memory?.source.id ?? node.sourceId!} label="Source" />}
         <IdentityPanel node={node} nodes={nodes} onChanged={onChanged} />
       </>}
     </div>

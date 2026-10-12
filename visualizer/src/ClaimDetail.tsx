@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { updateKnowledge } from './api';
 import { claimPredicate, claimTarget } from './claim-presentation';
+import { SensitivityControl } from './SensitivityControl';
 import type { Claim, Evidence, ClaimStatus } from '../../sdk/graph/types';
 import type { GraphNode } from './types';
 
@@ -51,6 +52,7 @@ export function ClaimDetail({ detail, node, nodes, onBack, onReviewed }: {
       {detail.history.map((item, index) => <p key={index}>{new Date(item.changed_at).toLocaleString()} · {item.status}</p>)}
       {detail.reviews.map((item, index) => <p key={`review:${index}`}>{item.actor}: {item.reason}</p>)}
     </details>
+    <SensitivityControl kind="claim" id={detail.claim.id} label="Claim" />
     <details className="reader-disclosure knowledge-panel"><summary>Review this claim</summary>
       {error && <p role="alert" className="error-note">{error}</p>}
       <label>Review decision<select value={status} onChange={event => setStatus(event.target.value as ClaimStatus)}>{(['accepted', 'rejected', 'disputed', 'retracted'] as ClaimStatus[]).map(status => <option key={status}>{status}</option>)}</select></label>
