@@ -78,6 +78,24 @@ describe("chat windows", () => {
     expect(conversationId).toBe("export:a");
     expect(store.stats().conversations).toBe(1);
   });
+
+  it("rescans all sealed windows on metadata changes while preserving their identities", () => {
+    const messages = [msg("1", 0), msg("2", 100)];
+    store.ingest(conversation, messages);
+    const first = pendingWindows(store, "test", {});
+    markAll(first);
+    expect(pendingWindows(store, "test", {})).toEqual([]);
+    expect(store.scanFrom("c1")).toBeGreaterThan(0);
+    store.ingest({ ...conversation, title: "#renamed" }, messages);
+    expect(store.scanFrom("c1")).toBe(0);
+    const renamed = pendingWindows(store, "test", {});
+    expect(renamed.map(w => w.windowId)).toEqual(first.map(w => w.windowId));
+    expect(renamed.every((w, i) => w.messageHash !== first[i]!.messageHash)).toBe(true);
+    markAll(renamed);
+    expect(pendingWindows(store, "test", {})).toEqual([]);
+    store.ingest({ ...conversation, title: "#renamed", matchKey: "feed-match" }, messages);
+    expect(pendingWindows(store, "test", {})).toEqual([]);
+  });
 });
 
 describe("chat transcripts", () => {

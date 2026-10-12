@@ -1,10 +1,8 @@
-import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import type { ChatConversation, ChatMessage, ChatWindowMessage } from "./types";
-
-export function chatHash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
-}
+import { conversationHash } from "./conversation-hash";
+import { chatHash } from "./hash";
+export { chatHash } from "./hash";
 
 const feed = (messageId: string) => messageId.slice(0, Math.max(0, messageId.indexOf(":")));
 
@@ -62,11 +60,14 @@ export class ChatStore {
   }
 
   upsertConversation(conversation: ChatConversation) {
+    const previous = this.conversation(conversation.conversationId);
+    const changed = previous && conversationHash(previous) !== conversationHash(conversation);
     this.db.query(`INSERT INTO ${this.conversations}(extension_id,conversation_id,match_key,payload,dirty,updated_at)
       VALUES(?,?,?,?,1,?) ON CONFLICT(extension_id,conversation_id) DO UPDATE SET
-      match_key=coalesce(excluded.match_key,match_key),payload=excluded.payload,updated_at=excluded.updated_at`)
+      match_key=coalesce(excluded.match_key,match_key),payload=excluded.payload,updated_at=excluded.updated_at,
+      dirty=CASE WHEN ? THEN 1 ELSE dirty END,scan_from=CASE WHEN ? THEN 0 ELSE scan_from END`)
       .run(this.extensionId, conversation.conversationId, conversation.matchKey ?? null,
-        JSON.stringify(conversation), Date.now());
+        JSON.stringify(conversation), Date.now(), changed ? 1 : 0, changed ? 1 : 0);
   }
 
   conversation(id: string): ChatConversation | null {

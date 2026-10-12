@@ -6,6 +6,7 @@ import { createExtensionSDK, type ShaleSDK } from "../sdk";
 import { createScopedSDK, type ScopedSDK } from "../sdk/access";
 import { profileForRequest } from "../lib/access/tokens";
 import { createKnowledgeGraphMcpServer } from "./server";
+import { acceptsRequestOrigin } from "./request-origin";
 
 export interface McpHttpServerOptions {
   port?: number;
@@ -68,8 +69,14 @@ export function createMcpHttpHandler(options: McpHttpServerOptions = {}) {
   }
 
   const handler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
-    // Enable CORS for agent integration across different origins and browser extensions
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    if (!acceptsRequestOrigin(req, options.host)) {
+      reject(res, 403, "Untrusted host or browser origin");
+      return;
+    }
+    if (req.headers.origin) {
+      res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
+      res.setHeader("Vary", "Origin");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.setHeader(
       "Access-Control-Allow-Headers",

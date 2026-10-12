@@ -12,18 +12,21 @@ DiscordChatExporter.Cli export -t "$DISCORD_TOKEN" -c <channel-id> -f Json -o da
 
 You can also use the DCE GUI with the **JSON** format.
 
-**2. Scheduled sync (opt-in).** The `discord-sync` cron runs hourly and calls the DCE CLI for every target in `channels`, `guilds`, and `includeDMs`.
-- It asks only for messages newer than the last sync (`--after`, with a watermark per target).
-- The first sync of a target reaches back `initialSyncDays`.
-
-To enable it:
-1. Install the [DCE CLI](https://github.com/Tyrrrz/DiscordChatExporter/releases). If it isn't on `PATH`, point `dceCommand` at it, e.g. `["dotnet", "/opt/dce/DiscordChatExporter.Cli.dll"]`.
+**2. Scheduled sync.** The `discord-sync` cron runs hourly. It does nothing until an account is connected.
+1. Run `bun run setup discord`. It downloads the self-contained DiscordChatExporter CLI into `data/discord/dce`, and the extension finds it automatically. Set `dceCommand` only to use a different copy.
 2. Open the Shale web interface → **Accounts** → **Discord** and connect a token:
-   - **User token**: reads your servers and DMs.
-   - **Bot token**: reads only servers the bot has joined (it needs the Message Content intent), and is the ToS-compliant option.
+   - **User token:** reads your servers and DMs.
+   - **Bot token:** reads only servers the bot has joined (it needs the Message Content intent). This is the option that stays within Discord's terms.
 
-   The token is checked against Discord, stored in `data/credentials.json` (owner-only), and never shown in the browser again. **Check connection** and **Disconnect** are on the same card. On a headless setup you can instead set `DISCORD_TOKEN` in `data/.env`, which is used only when no account is connected.
-3. Set `syncEnabled` to `true` and list your targets. The token is passed to the exporter through its environment, never on the command line.
+   The token is checked against Discord and stored in `data/credentials.json` (owner-only). It is never shown in the browser again and reaches the exporter only through its environment. On a headless setup, `DISCORD_TOKEN` in `data/.env` is a fallback.
+3. That's it. With the default `syncScope: "all"`, each run:
+   - lists every server and DM the account can see
+   - exports each channel (with its threads) separately, from that channel's own watermark
+   - on a channel's first sync, fetches its full history (`initialSyncDays: 0`)
+
+   An interrupted sweep resumes channel by channel. Channels the account can't read are skipped and retried weekly. The Accounts card shows the last sync's results; trigger a run now from **Overview** with `discord-sync`. To limit what's synced, set `syncScope` to `"selected"` and list `channels`, `guilds`, and/or `includeDMs`.
+
+   If a thread export fails while other exports succeed, those completed files are ingested and the channel watermark stays unchanged. The next run retries the missing history.
 
 > ⚠️ Automating a user account ("self-botting") is against Discord's Terms of Service. Read-only exports are rarely flagged, but the risk is yours.
 

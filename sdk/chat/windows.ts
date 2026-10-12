@@ -1,5 +1,6 @@
 import { chatHash, type ChatStore } from "./store";
 import type { ChatWindow, ChatWindowSettings } from "./types";
+import { conversationHash } from "./conversation-hash";
 
 export const CHAT_WINDOW_DEFAULTS = Object.freeze({
   gapMinutes: 30, maxWindowMessages: 120, maxWindowChars: 11000, idleMinutes: 60, maxAttempts: 5, maxWindowsPerRun: 50,
@@ -60,7 +61,7 @@ export function pendingWindows(store: ChatStore, platform: string, settings: Cha
         continue;
       }
       const windowId = chatHash([platform, conversationId, segment[0]![0]]);
-      const messageHash = chatHash(segment.map(([id, , hash]) => [id, hash]));
+      const messageHash = chatHash([conversationHash(conversation), segment.map(([id, , hash]) => [id, hash])]);
       const state = store.windowState(windowId);
       if (state?.indexed_hash === messageHash) continue;
       if (state?.message_hash === messageHash && state.attempts >= maxAttempts) continue;

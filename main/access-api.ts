@@ -1,5 +1,6 @@
 import { createExtensionSDK, type ShaleSDK } from "../sdk";
 import { createScopedSDK } from "../sdk/access";
+import { LIVE_SOURCE_CONTENT_HASH_SQL } from "../lib/access/source-hash";
 import { readAccessPolicy, TIERS, writeAccessPolicy } from "../lib/access/policy";
 import { clearLabel, listLabels, setLabel, type LabelKind } from "../lib/access/schema";
 import { createToken, listTokens, revokeToken } from "../lib/access/tokens";
@@ -58,9 +59,9 @@ function classification(sdk: ShaleSDK) {
   return {
     sources: row("SELECT count(*) AS n FROM sources"),
     heuristic: row(`SELECT count(*) AS n FROM sources s JOIN graph_access_labels l ON l.kind='source' AND l.record_id=s.id
-      AND l.origin='heuristic' AND l.content_hash=s.hash`),
+      AND l.origin='heuristic' AND l.content_hash=${LIVE_SOURCE_CONTENT_HASH_SQL}`),
     llm: row(`SELECT count(*) AS n FROM sources s JOIN graph_access_labels l ON l.kind='source' AND l.record_id=s.id
-      AND l.origin='llm' AND l.content_hash=s.hash`),
+      AND l.origin='llm' AND l.content_hash=${LIVE_SOURCE_CONTENT_HASH_SQL}`),
     manual: row("SELECT count(*) AS n FROM graph_access_labels WHERE origin='manual'"),
     tiers: db.query<{ origin: string; tier: number; n: number }, []>(`SELECT l.origin,l.tier,count(*) AS n FROM graph_access_labels l
       WHERE l.kind='source' GROUP BY l.origin,l.tier`).all(),

@@ -1,0 +1,22 @@
+.reading-pane .rich-text { font-size: 13px; line-height: 1.75; color: #5d594f; overflow-wrap: anywhere; }
+.reading-pane .rich-text p { margin: 0 0 12px; white-space: normal; line-height: inherit; }
+.reading-pane .rich-text > :last-child { margin-bottom: 0; }
+.reading-pane .rich-text h1, .reading-pane .rich-text h2, .reading-pane .rich-text h3, .reading-pane .rich-text h4, .reading-pane .rich-text h5, .reading-pane .rich-text h6 { font-family: inherit; color: #494739; font-size: 14px; font-weight: 600; line-height: 1.5; letter-spacing: 0; margin: 18px 0 9px; }
+.reading-pane .rich-text > :first-child { margin-top: 0; }
+.reading-pane .rich-text ul, .reading-pane .rich-text ol { padding-left: 20px; margin: 10px 0 14px; }
+.reading-pane .rich-text li { margin-bottom: 6px; }
+.reading-pane .rich-text li > p { margin-bottom: 5px; }
+.reading-pane .rich-text blockquote { padding: 8px 12px; margin: 12px 0; border-left: 2px solid #8d9a82; background: #eee9dd; }
+.reading-pane .rich-text a { color: #4c7567; text-decoration-color: #a2b4a5; text-underline-offset: 3px; }
+.reading-pane .rich-text code { font-size: 11px; padding: 2px 4px; background: #ece6d9; border-radius: 3px; }
+.reading-pane .rich-text pre { overflow: auto; max-width: 100%; margin: 12px 0; padding: 12px; background: #ece6d9; border-radius: 5px; }
+.reading-pane .rich-text pre code { padding: 0; white-space: pre; }
+.reading-pane .rich-text hr { border: 0; border-top: 1px solid #ded6c8; margin: 16px 0; }
+.reading-pane .rich-table { width: 100%; overflow-x: auto; margin: 12px 0; }
+.reading-pane .rich-text table { border-collapse: collapse; font-size: 12px; }
+.reading-pane .rich-text th, .reading-pane .rich-text td { border: 1px solid #d9cfbd; padding: 7px 9px; text-align: left; }
+.reading-pane .rich-text th { background: #eee7d8; font-weight: 600; }
+.reading-pane .rich-text .katex { font-size: 1.05em; }
+.reading-pane .rich-text .katex-display { margin: 14px 0; max-width: 100%; padding: 4px 0; overflow-x: auto; overflow-y: hidden; }
+.reading-pane .rich-text .katex-display > .katex { text-align: left; }
+.reading-pane .rich-text .katex-error { color: #8a7355 !important; white-space: pre-wrap; font: 11px/1.6 monospace; }

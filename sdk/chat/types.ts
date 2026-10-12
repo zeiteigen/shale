@@ -60,7 +60,7 @@ export interface ChatWindow {
   messages: ChatWindowMessage[];
   startTime: number;
   endTime: number;
-  /** Fingerprint of message ids and contents; changes when a message is edited, added, or removed. */
+  /** Fingerprint of message ids, contents, and conversation metadata used by the index. */
   messageHash: string;
 }
 

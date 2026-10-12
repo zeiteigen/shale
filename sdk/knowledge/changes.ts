@@ -65,7 +65,7 @@ export class KnowledgeEditor {
     if(JSON.stringify(parsed).length>5_000_000) throw new Error('Change batch exceeds the 5 MB payload limit');
     const signature=fingerprint(parsed);
     if(!preview) {const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return this.redact(previous);}
-    return this.redact(this.execute(parsed,operations,preview));
+    return this.execute(parsed,operations,preview);
   }
 
   private execute(parsed:ReturnType<typeof changeInput.parse>,operations:Operation[],
@@ -73,7 +73,7 @@ export class KnowledgeEditor {
     const signature=fingerprint(parsed);
     try {
       return this.db.transaction(()=>{
-        if(!preview) {const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return previous;}
+        if(!preview) {const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return this.redact(previous);}
         const changeId=randomUUIDv7(),refs:Record<string,number>={};
         const details=[];
         // A TEMP journal records exactly the records changed, including trigger invalidation.
@@ -96,11 +96,12 @@ export class KnowledgeEditor {
         const result={changeId,preview,operations:details,entityRefs:refs,
           affectedRecords:changed.map(r=>({...r,version:recordVersion(this.db,r.kind,r.record_id)})),
           requiresReview:invalidatedClaims.map(c=>c.id),affectedClaimCount:claimIds.length};
-        if(preview) throw new PreviewRollback(result);
+        const receipt=this.redact(result);
+        if(preview) throw new PreviewRollback(receipt);
         saveChange(this.db,parsed,parsed,result,changeId);
         this.db.run('DELETE FROM knowledge_edit_journal');
         this.db.run('UPDATE knowledge_edit_session SET active=0 WHERE id=1');
-        return result;
+        return receipt;
       })();
     } catch(error) {if(error instanceof PreviewRollback) return error.result;throw error;}
   }
@@ -112,8 +113,8 @@ export class KnowledgeEditor {
     const previous=replay(this.db,context.requestId,signature);if(previous!==undefined) return this.redact(previous as T);
     // Names resolve among visible entities only; the work receives the normalized input.
     const prepared=this.guard && typeof input==='object' && input!==null ? this.guard.prepare(action,input as Record<string,unknown>) : input;
-    return this.redact(this.db.transaction(()=>{
-      const existing=replay(this.db,context.requestId,signature);if(existing!==undefined) return existing as T;
+    return this.db.transaction(()=>{
+      const existing=replay(this.db,context.requestId,signature);if(existing!==undefined) return this.redact(existing as T);
       this.db.run('DELETE FROM knowledge_edit_journal');
       this.db.run('UPDATE knowledge_edit_session SET active=1 WHERE id=1');
       this.guard?.begin();
@@ -131,10 +132,11 @@ export class KnowledgeEditor {
       saveChange(this.db,payload,context,response,changeId);
       // before/after are retained separately in the operation payload for historical correction inspection.
       this.db.query('UPDATE graph_changes SET operations=? WHERE id=?').run(JSON.stringify(compactAudit({...payload,before,after:this.snapshot(typeof input==='object' && input!==null ? input as Record<string,unknown> : {})})),changeId);
+      const receipt=this.redact(response as T);
       this.db.run('DELETE FROM knowledge_edit_journal');
       this.db.run('UPDATE knowledge_edit_session SET active=0 WHERE id=1');
-      return response as T;
-    })());
+      return receipt;
+    })();
   }
 
   private redact<T>(result:T):T {return this.guard ? this.guard.redact(result) : result;}

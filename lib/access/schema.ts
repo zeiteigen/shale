@@ -27,6 +27,24 @@ export function ensureAccessSchema(db: Database) {
     reason TEXT NOT NULL DEFAULT '', content_hash TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL,
     PRIMARY KEY(kind,record_id,origin)
   ) STRICT`);
+  db.run(`CREATE TABLE IF NOT EXISTS graph_access_revision_labels (
+    revision_id INTEGER PRIMARY KEY REFERENCES graph_source_revisions(id) ON DELETE CASCADE,
+    tier INTEGER NOT NULL CHECK(tier BETWEEN 0 AND ${TIERS.length - 1}), hard INTEGER NOT NULL,
+    content_hash TEXT NOT NULL, updated_at INTEGER NOT NULL
+  ) STRICT;
+  CREATE TRIGGER IF NOT EXISTS access_revision_passage_insert AFTER INSERT ON graph_revision_passages BEGIN
+    DELETE FROM graph_access_revision_labels WHERE revision_id=NEW.revision_id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS access_revision_passage_delete AFTER DELETE ON graph_revision_passages BEGIN
+    DELETE FROM graph_access_revision_labels WHERE revision_id=OLD.revision_id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS access_revision_passage_update AFTER UPDATE OF text_id,revision_id ON graph_revision_passages BEGIN
+    DELETE FROM graph_access_revision_labels WHERE revision_id IN (OLD.revision_id,NEW.revision_id);
+  END;
+  CREATE TRIGGER IF NOT EXISTS access_revision_text_update AFTER UPDATE OF text_content ON graph_memory_texts BEGIN
+    DELETE FROM graph_access_revision_labels WHERE revision_id IN (
+      SELECT revision_id FROM graph_revision_passages WHERE text_id=NEW.id);
+  END;`);
 }
 
 export function setLabel(db: Database, kind: LabelKind, recordId: string, origin: LabelOrigin, tier: number,

@@ -6,6 +6,7 @@
   "checkpoint_recover": "recover.ts",
   "setup_script": "refresh.ts",
   "auth_script": "auth.ts",
+  "install_script": "install.ts",
   "crons": [
     { "name": "discord-import", "schedule": "*/15 * * * *", "script": "index.ts", "run_on_startup": true },
     { "name": "discord-sync", "schedule": "0 * * * *", "script": "sync.ts" }

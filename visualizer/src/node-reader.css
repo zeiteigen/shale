@@ -2,6 +2,8 @@
 .notebook-shell .workspace { display: grid; grid-template-columns: 280px minmax(200px, 1fr) 440px; gap: 14px; padding: 14px; }
 .notebook-shell .index-pane, .notebook-shell .map-pane, .notebook-shell .reading-pane { position: relative; inset: auto; min-width: 0; width: auto; max-height: none; height: 100%; border-radius: 8px; }
 .notebook-shell .index-pane { padding: 20px 16px; }
+.notebook-shell .type-toggle { grid-template-columns: 14px 8px minmax(0, 1fr) auto; gap: 5px; }
+.notebook-shell .type-toggle span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notebook-shell .map-pane { overflow: hidden; border: 1px solid #d1c8b9; }
 .notebook-shell .map-heading { top: 14px; left: 14px; right: 14px; justify-content: space-between; gap: 10px; border: 0; box-shadow: none; border-radius: 5px; padding: 12px; }
 .notebook-shell .map-heading h1 { font-size: 23px; }

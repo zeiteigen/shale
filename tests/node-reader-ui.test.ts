@@ -34,6 +34,15 @@ it.skipIf(process.env.SHALE_WEB_E2E !== "1")("shows retained source memory on de
     stats: { totalEntities: 5, totalEdges: 6, totalSources: 1, totalChunks: 0, totalClaims: 16 },
   };
   const longExcerpt = "Quoted source passage: " + "The radius and angle determine a point in the plane. ".repeat(18);
+  const formattedNote = [
+    '## Angle conventions',
+    'The guide links **angles** to trigonometry: $x=r\\cos\\theta$.',
+    '- Radius $r$\n- Angle $\\theta$',
+    '$$\nr^2=x^2+y^2\n$$',
+    '<script>window.shaleSnippetExecuted = true</script>',
+    '![Source image](https://viewer-test.invalid/image.png)',
+    '[Unsafe link](javascript:alert%281%29)',
+  ].join('\n\n');
   const observedAt = Date.UTC(2026, 9, 10, 12);
   const memory: SourceMemory = {
     source: { id: "source-polar", uri: "file:///notes/polar.md", title: "Polar Coordinates Guide", type: "note", origin: "obsidian", updated_at: observedAt },
@@ -41,7 +50,7 @@ it.skipIf(process.env.SHALE_WEB_E2E !== "1")("shows retained source memory on de
     summary: { text: "A concise retained summary about converting between Cartesian and polar coordinates.", versionId: 7, method: "model" },
     snippets: [
       { id: "snippet-1", versionId: 7, text: longExcerpt, kind: "excerpt", locator: { heading: "Worked example" }, purpose: "supports coordinate conversion" },
-      { id: "snippet-2", versionId: 7, text: "The guide also links angle conventions to trigonometry.", kind: "derived", locator: { heading: "Angles" }, purpose: "topic note" },
+      { id: "snippet-2", versionId: 7, text: formattedNote, kind: "derived", locator: { heading: "Angles" }, purpose: "topic note" },
     ],
     freshness: { fingerprint: "fp-7", lastObservedAt: observedAt, observation: null },
     coverage: { inputCharacters: 1200, sections: 2, summarizedSections: 2, method: "model" },
@@ -60,7 +69,9 @@ it.skipIf(process.env.SHALE_WEB_E2E !== "1")("shows retained source memory on de
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     page.setDefaultTimeout(5000);
     const errors: string[] = [];
+    const remoteImages: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
+    page.on('request', request => { if (request.url().startsWith('https://viewer-test.invalid')) remoteImages.push(request.url()); });
     await page.route(/\/knowledge-map-.*\.json$/, route => route.fulfill({ status: 404 }));
     await page.route(/\/api\/graph(?:\?|$)/, route => route.fulfill({ json: graph }));
     await page.route(/\/api\/knowledge\/claims(?:\?|$)/, async route => {
@@ -104,9 +115,23 @@ it.skipIf(process.env.SHALE_WEB_E2E !== "1")("shows retained source memory on de
     const excerpt = pane.locator("details").filter({ hasText: "Quoted excerpt" });
     expect(await excerpt.isVisible()).toBe(true);
     await excerpt.locator("summary").click();
+    await excerpt.locator('.snippet-body .rich-text').waitFor();
     expect(await excerpt.locator('.snippet-body p').isVisible()).toBe(true);
-    expect(await excerpt.locator('.snippet-body p').textContent()).toBe(longExcerpt);
+    expect((await excerpt.locator('.snippet-body p').textContent())?.trim()).toBe(longExcerpt.trim());
     expect(await pane.getByText("Derived note", { exact: true }).isVisible()).toBe(true);
+    const derived = pane.locator('.snippet-card').filter({ hasText: 'Derived note' });
+    await derived.locator('summary').click();
+    await derived.getByRole('heading', { name: 'Angle conventions', exact: true }).waitFor();
+    expect(await derived.locator('strong').allTextContents()).toContain('angles');
+    expect(await derived.locator('li').count()).toBe(2);
+    expect(await derived.locator('.katex').count()).toBeGreaterThan(1);
+    expect(await derived.locator('.katex-display').count()).toBe(1);
+    expect(await derived.locator('img, script, a[href^="javascript:"]').count()).toBe(0);
+    expect(remoteImages).toEqual([]);
+    expect(await page.evaluate(() => Reflect.get(window, 'shaleSnippetExecuted'))).toBeUndefined();
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 1000 });
 
     await tabs.filter({ hasText: "Connections" }).click();
     const groups = pane.locator(".connection");

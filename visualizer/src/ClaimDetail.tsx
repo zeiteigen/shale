@@ -3,6 +3,7 @@ import { ArrowLeft } from 'lucide-react';
 import { updateKnowledge } from './api';
 import { claimPredicate, claimTarget } from './claim-presentation';
 import { SensitivityControl } from './SensitivityControl';
+import { ReadableText } from './ReadableText';
 import type { Claim, Evidence, ClaimStatus } from '../../sdk/graph/types';
 import type { GraphNode } from './types';
 
@@ -36,7 +37,7 @@ export function ClaimDetail({ detail, node, nodes, onBack, onReviewed }: {
     {(detail.claim.validFrom !== undefined || detail.claim.validTo !== undefined) && <p className="quiet">Valid {detail.claim.validFrom === undefined ? 'from an unknown date' : `from ${new Date(detail.claim.validFrom).toLocaleDateString()}`} {detail.claim.validTo === undefined ? 'onward' : `until ${new Date(detail.claim.validTo).toLocaleDateString()}`}</p>}
     <div className="reader-section-heading"><h3>Evidence</h3><span>{detail.evidence.length}</span></div>
     {detail.evidence.map(item => <blockquote key={item.id} className="evidence-card">
-      <p>{item.quote ?? (item.availability === 'discarded' ? 'The original passage was not retained.' : 'Evidence is attached at source level; no excerpt was saved.')}</p>
+      {item.quote ? <ReadableText text={item.quote} /> : <p>{item.availability === 'discarded' ? 'The original passage was not retained.' : 'Evidence is attached at source level; no excerpt was saved.'}</p>}
       <cite>{item.title || 'Untitled source'}</cite>
       <div className="evidence-meta"><span>{item.stance}</span>{item.stale && <span className="evidence-stale">Source has changed</span>}{item.withdrawnAt && <span>Withdrawn</span>}{item.availability === 'discarded' && <span>Passage unavailable</span>}</div>
       {item.availability !== 'discarded' && <a href={`/api/knowledge/revision?id=${item.revisionId}`} target="_blank" rel="noreferrer">Read retained revision ↗</a>}

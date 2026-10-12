@@ -40,12 +40,15 @@ manual ?? max(floor, llm ?? heuristic, hard heuristic)
 - **Your manual label** always wins.
 - **Unclassified records** count as `secret`: a record that no classifier has judged for its current content is hidden from restricted profiles until it is classified. Automatic labels are tied to a content hash, so a changed source is classified again.
 
+Source classification fingerprints include the title, URI, origin, and type as well as the content hash, so metadata-only edits invalidate automatic verdicts. Removed snapshots are classified too. Entity classification uses the displayed name and type. Retained revisions have separate heuristic labels in `graph_access_revision_labels`; replacing sensitive content with benign text does not lower the tier of the old text. Adding or changing retained passages invalidates their revision's label. A source's manual label applies to its history too. A model verdict applies only to the revision and metadata it judged.
+
 ## Visibility rules
 
 | Record | Visible when |
 | --- | --- |
 | Source | Its tier ≤ the profile's clearance, it matches the profile's `allow` list (if any), and it matches no `deny` entry. |
-| Chunk, revision, passage, snippet, memory, observation, metadata | Its source is visible. |
+| Chunk, snippet, memory, observation, metadata | Its source and active revision are visible. |
+| Revision, passage | Its source is visible, its retained content passes the tier check, and its historical URI passes the profile's source rules. |
 | Evidence | Its source revision is visible and its claim is visible. |
 | Entity | Its own tier passes, and either it appears in a visible source (`source_entities`, `chunk_entities`, or a claim with evidence in a visible revision) or it has no source provenance at all. |
 | Claim | Its own tier passes, its subject and object are visible, it has visible evidence or no evidence at all, and every claim it depends on is visible. |
@@ -76,6 +79,7 @@ Restricted profiles see no rows in any other table, including extension state, c
 - **Requests without a token** use `unauthenticatedProfile`. Set it to `null` to require a token.
 - **A session stays bound to the profile that opened it.** A request with a different token is rejected. If an edit changes whether a profile is filtered, its existing sessions must reconnect.
 - **`bun run mcp --profile cloud`** starts a listener that serves only that profile, without tokens.
+- **Browser requests** must use the listener's own origin. Foreign origins and cross-site requests are rejected on both the direct MCP listener and the host gateway. Command-line MCP clients can connect without an `Origin` header.
 
 ## How it is enforced
 
@@ -100,9 +104,9 @@ Writes run on the shared connection inside the knowledge editor's transaction (`
 
 1. **Before the write,** every record the tool or operation references must be visible (see `WRITE_REFERENCES`). Entity names are resolved only among visible entities. Hidden records are reported as *not found*. A tool or operation that is missing from the map is refused.
 2. **Inside the transaction,** the touched records are classified, and visibility is recomputed against the uncommitted state. The change rolls back if it touched a record that was not visible, or if it created a record the profile cannot see. One example is a claim containing a password. Dependent claims elsewhere becoming `stale` is allowed.
-3. **Receipts** list only visible records and omit before/after snapshots. The actor is recorded as `profile:<name>/<actor>`.
+3. **Receipts** list only visible records and omit before/after snapshots. Nested evidence, claim links, dependents, merges, and participants are filtered too. Previews use visibility inside their temporary transaction; replayed receipts use current visibility. The actor is recorded as `profile:<name>/<actor>`.
 
-Profiles with `"write": false` do not get any editing tools.
+Profiles with `"write": false` do not get any editing tools, including profiles with secret clearance. Revoking write permission also blocks writes from existing sessions.
 
 Known limits:
 - `infer_transitive` fails when a derivation would depend on a hidden claim.

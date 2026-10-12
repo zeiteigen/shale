@@ -7,6 +7,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createExtensionSDK, SourceGraph, type ShaleSDK } from "../sdk";
 import { closeScopedSDKs, createScopedSDK } from "../sdk/access";
+import { sourceContentHash, type SourceContent } from "../lib/access/source-hash";
 import { createTestDatabase } from "./fixtures/database";
 import { startMcpServer, type RunningMcpServer } from "../mcp";
 import { classifyText, classifySource } from "../lib/access/heuristics";
@@ -34,6 +35,7 @@ const POLICY = {
     local: { clearance: "secret" },
     cloud: { clearance: "personal", deny: [{ origin: "browser" }] },
     reader: { clearance: "personal", write: false },
+    fullreader: { clearance: "secret", write: false },
   },
 };
 
@@ -164,13 +166,79 @@ describe("scoped database", () => {
   it("lets LLM labels refine soft heuristics but never lower hard findings", () => {
     const access = createScopedSDK("cloud", sdk);
     access.refresh();
-    const hash = (id: string) => db.query<{ hash: string }, [string]>("SELECT hash FROM sources WHERE id=?").get(id)!.hash;
+    const hash = (id: string) => sourceContentHash(db.query<SourceContent, [string]>("SELECT * FROM sources WHERE id=?").get(id)!);
     setLabel(db, "source", "keys", "llm", 0, { contentHash: hash("keys") });
     access.refresh();
     expect(access.scoped!.isVisible("sources", "keys")).toBe(false);
     setLabel(db, "source", "keys", "manual", 1);
     access.refresh();
     expect(access.scoped!.isVisible("sources", "keys")).toBe(true);
+  });
+
+  it("classifies displayed entity names and invalidates labels on rename", () => {
+    const secretName = "password: regression-fake-password";
+    const secret = sdk.graph.entities.create({ name: secretName, type: "Thing" });
+    const ordinary = sdk.graph.entities.create({ name: "Ordinary", type: "Thing" });
+    const access = createScopedSDK("cloud", sdk);
+    expect(access.read.graph.entities.resolve(secretName)).toEqual([]);
+    expect(access.read.graph.entities.resolve("Ordinary")).toHaveLength(1);
+    sdk.graph.entities.rename(ordinary.id, secretName);
+    access.refresh();
+    expect(access.scoped!.isVisible("entities", ordinary.id)).toBe(false);
+    expect(db.query("SELECT tier,hard FROM graph_access_labels WHERE kind='entity' AND record_id=? AND origin='heuristic'")
+      .get(String(secret.id))).toEqual({ tier: 3, hard: 1 });
+  });
+
+  it("keeps secret historical passages hidden after the current source becomes benign", () => {
+    const access = createScopedSDK("cloud", sdk);
+    const old = db.query<{ id: number }, []>("SELECT id FROM graph_source_revisions WHERE source_id='keys'").get()!;
+    expect(access.scoped!.isVisible("revisions", old.id)).toBe(false);
+    sdk.ingest.sourceAndChunks({ source: { id: "keys", uri: "file:///vault/keys.md", title: "keys", origin: "obsidian", type: "note", hash: "keys-v2" },
+      chunks: [{ text_content: "A harmless project overview." }] });
+    access.refresh();
+    expect(access.scoped!.isVisible("sources", "keys")).toBe(true);
+    expect(() => access.read.graph.evidence.revision(old.id)).toThrow("Unknown source revision");
+    expect(access.read.database.query("SELECT text_content FROM graph_revision_chunks WHERE revision_id=?").all(old.id)).toEqual([]);
+    expect(access.read.database.query("SELECT text_content FROM graph_memory_texts WHERE text_content LIKE '%hunter2%'").all()).toEqual([]);
+    expect(sdk.graph.evidence.revision(old.id).chunks.length).toBeGreaterThan(0);
+    // New retained passages in an existing revision invalidate its previous verdict.
+    const current = db.query<{ id: number }, []>("SELECT r.id FROM graph_source_revisions r JOIN sources s ON s.id=r.source_id AND s.hash=r.hash WHERE s.id='keys'").get()!;
+    db.query("INSERT INTO graph_revision_chunks(revision_id,chunk_index,chunk_type,text_content) VALUES(?,99,'verbatim',?)")
+      .run(current.id, "password: new-retained-secret");
+    access.refresh();
+    expect(access.scoped!.isVisible("revisions", current.id)).toBe(false);
+    expect(access.scoped!.isVisible("sources", "keys")).toBe(false);
+    expect(access.read.database.query("SELECT id FROM graph_source_revisions WHERE source_id='keys'").all()).toEqual([]);
+  });
+
+  it("reclassifies metadata-only edits and keeps removed sources classified", async () => {
+    const access = createScopedSDK("cloud", sdk);
+    await sdk.knowledge.mutate("update_source", { sourceId: "note-cedar", title: "password: archived-secret" },
+      { actor: "test", reason: "rename" });
+    access.refresh();
+    expect(access.scoped!.isVisible("sources", "note-cedar")).toBe(false);
+    await sdk.knowledge.mutate("remove_source", { sourceId: "note-cedar" }, { actor: "test", reason: "remove" });
+    access.refresh();
+    expect(access.scoped!.isVisible("archives", "note-cedar")).toBe(false);
+    await expect(access.read.knowledge.read("inspect_source", { sourceId: "note-cedar" })).rejects.toThrow("Unknown removed source");
+    await sdk.knowledge.mutate("remove_source", { sourceId: "web-history" }, { actor: "test", reason: "remove" });
+    const reader = createScopedSDK("reader", sdk);
+    expect(reader.scoped!.isVisible("archives", "web-history")).toBe(true);
+  });
+
+  it("hides earlier benign revisions when a source's active memory fails classification", () => {
+    const access = createScopedSDK("cloud", sdk);
+    const old = db.query<{ id: number }, []>("SELECT id FROM graph_source_revisions WHERE source_id='note-cedar'").get()!;
+    sdk.ingest.sourceAndChunks({ source: { id: "note-cedar", uri: "file:///vault/cedar.md", title: "Cedar", origin: "obsidian", type: "note", hash: "cedar-v2" },
+      chunks: [{ text_content: "Another ordinary overview." }] });
+    access.refresh();
+    expect(access.scoped!.isVisible("revisions", old.id)).toBe(true);
+    const current = db.query<{ id: number }, []>("SELECT r.id FROM graph_source_revisions r JOIN sources s ON s.id=r.source_id AND s.hash=r.hash WHERE s.id='note-cedar'").get()!;
+    db.query("INSERT INTO graph_revision_chunks(revision_id,chunk_index,chunk_type,text_content) VALUES(?,99,'verbatim',?)")
+      .run(current.id, "password: retained-secret");
+    access.refresh();
+    expect(access.scoped!.isVisible("sources", "note-cedar")).toBe(false);
+    expect(access.scoped!.isVisible("revisions", old.id)).toBe(false);
   });
 });
 
@@ -265,6 +333,59 @@ describe("MCP access profiles", () => {
     for (const tool of all.filter(t => !t.annotations?.readOnlyHint || t.name === "preview_graph_changes"))
       expect(WRITE_REFERENCES[tool.name], tool.name).toBeDefined();
   });
+
+  it("enforces read-only permissions at secret clearance and after policy edits", async () => {
+    const running = await server();
+    const { token } = createToken("fullreader");
+    const reader = await connect(running, token);
+    const tools = (await reader.client.listTools()).tools;
+    expect(tools.some(t => !t.annotations?.readOnlyHint || t.name === "preview_graph_changes")).toBe(false);
+    expect((await reader.call("create_entity", { name: "Blocked", reason: "test" })).error).toBe(true);
+    const local = await connect(running);
+    writeAccessPolicy({ ...POLICY, profiles: { ...POLICY.profiles, local: { clearance: "secret", write: false } } });
+    expect((await local.call("create_entity", { name: "Blocked", reason: "test" })).error).toBe(true);
+    expect(sdk.graph.entities.resolve("Blocked")).toEqual([]);
+  });
+
+  it("filters nested inspection receipts, previews and replayed writes", async () => {
+    const parent = sdk.graph.claims.add({ subject: ids.bob, predicate: "NOTE", value: "parent", status: "accepted" });
+    const child = sdk.graph.claims.add({ subject: ids.bob, predicate: "NOTE", value: "child", status: "accepted", dependsOn: [parent.id], evidence: [
+      { sourceId: "note-cedar" }, { sourceId: "keys", chunkIndex: 0, quote: "hunter2-correct-horse" },
+    ] });
+    const hidden = sdk.graph.claims.add({ subject: ids.bob, predicate: "NOTE", value: "password: hidden-claim", status: "accepted", dependsOn: [child.id] });
+    sdk.graph.lifecycle.link(child.id, hidden.id, "supports");
+    const running = await server();
+    const { token } = createToken("cloud");
+    const cloud = await connect(running, token);
+    const args = { reason: "test", requestId: "redaction-retry", operations: [{ type: "remove_claim_dependency", args: { claimId: child.id, dependsOn: parent.id } }] };
+    const preview = await cloud.call("preview_graph_changes", args);
+    const applied = await cloud.call("apply_graph_changes", args);
+    const replay = await cloud.call("apply_graph_changes", args);
+    for (const receipt of [preview, applied, replay]) {
+      expect(receipt.error).toBe(false);
+      const result = receipt.data.operations[0].result;
+      expect(result.evidence.map((e: any) => e.sourceId)).toEqual(["note-cedar"]);
+      expect(result.links).toEqual([]);
+      expect(result.dependents).toEqual([]);
+      expect(JSON.stringify(receipt.data)).not.toContain("hunter2");
+      expect(JSON.stringify(receipt.data)).not.toContain(hidden.id);
+    }
+    const newPreview = await cloud.call("preview_graph_changes", { reason: "test", operations: [{ type: "append_graph", args: { entities: [{ ref: "new", name: "Preview node", type: "Thing" }] } }] });
+    expect(newPreview.error).toBe(false);
+    expect(newPreview.data.operations[0].result.entities[0].name).toBe("Preview node");
+    expect(sdk.graph.entities.resolve("Preview node")).toEqual([]);
+  });
+
+  it("classifies every created record when a guarded batch exceeds one classification page", async () => {
+    const cloud = createScopedSDK("cloud", sdk);
+    const entities = Array.from({ length: 205 }, (_, index) => ({ ref: `entity${index}`, name: `Batch entity ${index}`, type: "Thing" }));
+    await cloud.write.knowledge.apply({ actor: "test", reason: "bulk create", operations: [
+      { type: "append_graph", args: { entities: entities.slice(0, 200) } },
+      { type: "append_graph", args: { entities: entities.slice(200) } },
+    ] });
+    cloud.refresh();
+    expect(cloud.read.graph.entities.resolve("Batch entity 204")).toHaveLength(1);
+  });
 });
 
 describe("access-classifier extension", () => {
@@ -280,6 +401,7 @@ describe("access-classifier extension", () => {
     const result = await run(sdk);
     expect(result.llm).toBe(1);
     expect(prompts.length).toBe(5);
+    expect(prompts.find(p => p.includes("note-cedar"))).toContain("Bob (Person)");
     const label = db.query<{ tier: number }, []>(`SELECT tier FROM graph_access_labels WHERE kind='entity' AND record_id='${ids.bob}' AND origin='llm'`).get();
     expect(label?.tier).toBe(2);
     const access = createScopedSDK("cloud", sdk);
@@ -290,6 +412,32 @@ describe("access-classifier extension", () => {
     prompts.length = 0;
     await run(sdk);
     expect(prompts.length).toBe(0);
+  });
+
+  it("does not attach an old model verdict to an entity renamed while classification runs", async () => {
+    const { run } = await import("../extensions/access-classifier/index");
+    sdk.queryLLM = (async (prompt: string) => {
+      if (!prompt.includes("note-cedar")) return "not json";
+      sdk.graph.entities.rename(ids.bob, "Diagnosed with anxiety; prescribed medication");
+      return JSON.stringify({ source: { tier: "personal" }, entities: [{ id: ids.bob, tier: "public" }] });
+    }) as ShaleSDK["queryLLM"];
+    await run(sdk);
+    const access = createScopedSDK("cloud", sdk);
+    expect(access.scoped!.isVisible("entities", ids.bob)).toBe(false);
+    expect(db.query("SELECT 1 FROM graph_access_labels WHERE kind='entity' AND record_id=? AND origin='llm'").get(String(ids.bob))).toBeNull();
+  });
+
+  it("ignores a model verdict after the source metadata changes while classification runs", async () => {
+    const { run } = await import("../extensions/access-classifier/index");
+    sdk.queryLLM = (async (prompt: string) => {
+      if (!prompt.includes("note-cedar")) return "not json";
+      await sdk.knowledge.mutate("update_source", { sourceId: "note-cedar", title: "Diagnosed with anxiety; prescribed medication" },
+        { actor: "test", reason: "rename during classification" });
+      return JSON.stringify({ source: { tier: "public" } });
+    }) as ShaleSDK["queryLLM"];
+    await run(sdk);
+    const access = createScopedSDK("cloud", sdk);
+    expect(access.scoped!.isVisible("sources", "note-cedar")).toBe(false);
   });
 });
 

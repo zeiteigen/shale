@@ -1,27 +1,181 @@
 {
   "extension": "discord",
   "settings": {
-    "importDir": { "type": "string", "description": "Folder scanned (recursively) for DiscordChatExporter JSON exports (`-f Json`). Relative paths resolve from the Shale project root; ~/ is supported.", "default": "./data/discord/import" },
-    "syncEnabled": { "type": "boolean", "description": "Run DiscordChatExporter on the discord-sync cron using the account connected on the Accounts page. Automating a user account is against Discord's Terms of Service; use at your own risk.", "default": false, "possibleValues": [true, false] },
-    "dceCommand": { "type": "string[]", "description": "Command that launches the DiscordChatExporter CLI, e.g. [\"DiscordChatExporter.Cli\"] or [\"dotnet\", \"/opt/dce/DiscordChatExporter.Cli.dll\"].", "default": ["DiscordChatExporter.Cli"] },
-    "tokenEnv": { "type": "string", "description": "Fallback environment variable (e.g. in data/.env) for the Discord token, used only when no account is connected on the Accounts page. The token reaches the exporter via its environment, never the command line.", "default": "DISCORD_TOKEN" },
-    "channels": { "type": "string[]", "description": "Channel or thread ids to sync.", "default": [] },
-    "guilds": { "type": "string[]", "description": "Server (guild) ids whose channels are all synced.", "default": [] },
-    "includeDMs": { "type": "boolean", "description": "Also sync all direct messages and group DMs.", "default": false, "possibleValues": [true, false] },
-    "includeThreads": { "type": "string", "description": "Which threads to include when syncing a guild or channel.", "default": "all", "possibleValues": ["none", "active", "all"] },
-    "initialSyncDays": { "type": "number", "description": "How far back the first sync of a target reaches. 0 fetches the full history.", "default": 30, "range": { "min": 0, "max": 36500 } },
-    "downloadMedia": { "type": "boolean", "description": "Download attachments next to the exports (exportDir/media).", "default": false, "possibleValues": [true, false] },
-    "exportDir": { "type": "string", "description": "Working folder for sync exports.", "default": "./data/discord/exports" },
-    "keepExports": { "type": "boolean", "description": "Keep each sync's JSON files after ingestion instead of deleting them.", "default": false, "possibleValues": [true, false] },
-    "syncTimeoutMinutes": { "type": "number", "description": "Maximum run time of one exporter invocation.", "default": 30, "range": { "min": 1, "max": 1440 } },
-    "gapMinutes": { "type": "number", "description": "A silence longer than this starts a new conversation window (one searchable source per window).", "default": 30, "range": { "min": 1, "max": 1440 } },
-    "maxWindowMessages": { "type": "number", "description": "Maximum messages per conversation window.", "default": 120, "range": { "min": 5, "max": 1000 } },
-    "maxWindowChars": { "type": "number", "description": "Maximum transcript characters per window; keep at or below 12000 so whole windows stay searchable.", "default": 11000, "range": { "min": 1000, "max": 12000 } },
-    "idleMinutes": { "type": "number", "description": "The newest window of a conversation is indexed only after this much silence.", "default": 60, "range": { "min": 0, "max": 10080 } },
-    "maxWindowsPerRun": { "type": "number", "description": "Windows summarised per batch.", "default": 50, "range": { "min": 1, "max": 1000 } },
-    "summarize": { "type": "boolean", "description": "Summarise each window with the chat LLM; otherwise a heuristic summary is used.", "default": true, "possibleValues": [true, false] },
-    "llmModel": { "type": "string", "description": "Optional chat model override for window summaries. Empty uses the default.", "default": "" },
-    "excludeBots": { "type": "boolean", "description": "Leave bot messages out of transcripts.", "default": true, "possibleValues": [true, false] },
-    "namespace": { "type": "string", "description": "Namespace for Discord sources and graph entities.", "default": "discord" }
+    "importDir": {
+      "type": "string",
+      "description": "Folder scanned (recursively) for DiscordChatExporter JSON exports (`-f Json`). Relative paths resolve from the Shale project root; ~/ is supported.",
+      "default": "./data/discord/import"
+    },
+    "syncEnabled": {
+      "type": "boolean",
+      "description": "Run DiscordChatExporter on the discord-sync cron with the account connected on the Accounts page. Nothing is fetched until an account is connected. Automating a user account is against Discord's Terms of Service; use at your own risk.",
+      "default": true,
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "syncScope": {
+      "type": "string",
+      "description": "\"all\" syncs every server and DM the connected account can see; \"selected\" syncs only the channels, guilds, and (with includeDMs) DMs listed below.",
+      "default": "all",
+      "possibleValues": [
+        "all",
+        "selected"
+      ]
+    },
+    "dceCommand": {
+      "type": "string[]",
+      "description": "Command that launches the DiscordChatExporter CLI. Empty uses the copy installed by `bun run setup discord` (data/discord/dce), then DiscordChatExporter.Cli on PATH.",
+      "default": []
+    },
+    "tokenEnv": {
+      "type": "string",
+      "description": "Fallback environment variable (e.g. in data/.env) for the Discord token, used only when no account is connected on the Accounts page. The token reaches the exporter via its environment, never the command line.",
+      "default": "DISCORD_TOKEN"
+    },
+    "channels": {
+      "type": "string[]",
+      "description": "Extra channel or thread ids to sync (with syncScope \"selected\", the only channels synced besides guilds and DMs).",
+      "default": []
+    },
+    "guilds": {
+      "type": "string[]",
+      "description": "Extra server (guild) ids whose channels are synced.",
+      "default": []
+    },
+    "includeDMs": {
+      "type": "boolean",
+      "description": "With syncScope \"selected\", also sync all direct messages and group DMs (always included with \"all\" for user tokens).",
+      "default": false,
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "includeThreads": {
+      "type": "string",
+      "description": "Which threads to include when syncing a guild or channel.",
+      "default": "all",
+      "possibleValues": [
+        "none",
+        "active",
+        "all"
+      ]
+    },
+    "initialSyncDays": {
+      "type": "number",
+      "description": "How far back the first sync of each channel reaches. 0 fetches the full history.",
+      "default": 0,
+      "range": {
+        "min": 0,
+        "max": 36500
+      }
+    },
+    "downloadMedia": {
+      "type": "boolean",
+      "description": "Download attachments next to the exports (exportDir/media).",
+      "default": false,
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "exportDir": {
+      "type": "string",
+      "description": "Working folder for sync exports.",
+      "default": "./data/discord/exports"
+    },
+    "keepExports": {
+      "type": "boolean",
+      "description": "Keep each sync's JSON files after ingestion instead of deleting them.",
+      "default": false,
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "syncTimeoutMinutes": {
+      "type": "number",
+      "description": "Maximum run time for exporting one channel (with its threads).",
+      "default": 120,
+      "range": {
+        "min": 1,
+        "max": 1440
+      }
+    },
+    "gapMinutes": {
+      "type": "number",
+      "description": "A silence longer than this starts a new conversation window (one searchable source per window).",
+      "default": 30,
+      "range": {
+        "min": 1,
+        "max": 1440
+      }
+    },
+    "maxWindowMessages": {
+      "type": "number",
+      "description": "Maximum messages per conversation window.",
+      "default": 120,
+      "range": {
+        "min": 5,
+        "max": 1000
+      }
+    },
+    "maxWindowChars": {
+      "type": "number",
+      "description": "Maximum transcript characters per window; keep at or below 12000 so whole windows stay searchable.",
+      "default": 11000,
+      "range": {
+        "min": 1000,
+        "max": 12000
+      }
+    },
+    "idleMinutes": {
+      "type": "number",
+      "description": "The newest window of a conversation is indexed only after this much silence.",
+      "default": 60,
+      "range": {
+        "min": 0,
+        "max": 10080
+      }
+    },
+    "maxWindowsPerRun": {
+      "type": "number",
+      "description": "Windows summarised per batch.",
+      "default": 50,
+      "range": {
+        "min": 1,
+        "max": 1000
+      }
+    },
+    "summarize": {
+      "type": "boolean",
+      "description": "Summarise each window with the chat LLM; otherwise a heuristic summary is used.",
+      "default": true,
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "llmModel": {
+      "type": "string",
+      "description": "Optional chat model override for window summaries. Empty uses the default.",
+      "default": ""
+    },
+    "excludeBots": {
+      "type": "boolean",
+      "description": "Leave bot messages out of transcripts.",
+      "default": true,
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "namespace": {
+      "type": "string",
+      "description": "Namespace for Discord sources and graph entities.",
+      "default": "discord"
+    }
   }
 }

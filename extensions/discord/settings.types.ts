@@ -1,10 +1,12 @@
 import type { ChatWindowSettings } from "@shale/sdk/chat/types";
 
 export type DiscordThreadMode = "none" | "active" | "all";
+export type DiscordSyncScope = "all" | "selected";
 
 export interface DiscordSettings extends ChatWindowSettings {
   importDir?: string;
   syncEnabled?: boolean;
+  syncScope?: DiscordSyncScope;
   dceCommand?: string[];
   tokenEnv?: string;
   channels?: string[];
@@ -22,9 +24,9 @@ export interface DiscordSettings extends ChatWindowSettings {
 export const DISCORD_DEFAULTS = {
   importDir: "./data/discord/import",
   exportDir: "./data/discord/exports",
-  dceCommand: ["DiscordChatExporter.Cli"],
   tokenEnv: "DISCORD_TOKEN",
+  syncScope: "all" as DiscordSyncScope,
   includeThreads: "all" as DiscordThreadMode,
-  initialSyncDays: 30,
-  syncTimeoutMinutes: 30,
+  initialSyncDays: 0,
+  syncTimeoutMinutes: 120,
 };

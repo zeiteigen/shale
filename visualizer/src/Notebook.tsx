@@ -127,7 +127,7 @@ function Notebook() {
             </div>
             <p className="section-label">Show entries</p>
             <div className="filter-options">
-              {types.map((type) => <label key={type} className="type-toggle"><input type="checkbox" checked={visibleTypes.has(type)} onChange={() => toggleType(type)} /><i style={{ backgroundColor: colorFor(type) }} /><span>{type}</span><small>{typeCounts.get(type)}</small></label>)}
+              {types.map((type) => <label key={type} className="type-toggle"><input type="checkbox" checked={visibleTypes.has(type)} onChange={() => toggleType(type)} /><i style={{ backgroundColor: colorFor(type) }} /><span title={type}>{type}</span><small>{typeCounts.get(type)}</small></label>)}
             </div>
             <div className="selection-filter">
               <label><input type="checkbox" checked={focusSelection} disabled={!selected} onChange={(event) => setFocusSelection(event.target.checked)} /> Focus selection</label>

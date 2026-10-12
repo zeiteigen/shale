@@ -197,13 +197,22 @@ describe("MCP Knowledge Graph HTTP Server", () => {
     const corsRes = await fetch(`${url}/mcp`, {
       method: "OPTIONS",
       headers: {
-        Origin: "http://example.com",
+        Origin: url,
         "Access-Control-Request-Method": "POST",
       },
     });
     expect(corsRes.status).toBe(204);
-    expect(corsRes.headers.get("access-control-allow-origin")).toBe("*");
+    expect(corsRes.headers.get("access-control-allow-origin")).toBe(url);
     expect(corsRes.headers.get("access-control-allow-methods")).toContain("POST");
+
+    for (const path of ["/mcp", "/sse", "/messages"]) {
+      for (const method of ["OPTIONS", "POST", "GET"]) {
+        const denied = await fetch(`${url}${path}`, { method, headers: { Origin: "https://untrusted.example" } });
+        expect(denied.status).toBe(403);
+        expect(denied.headers.get("access-control-allow-origin")).toBeNull();
+      }
+    }
+    expect((await fetch(`${url}/health`, { headers: { Host: "untrusted.example" } })).status).toBe(403);
 
     // 404 for unknown endpoint
     const notFoundRes = await fetch(`${url}/non-existent`);
@@ -744,6 +753,13 @@ describe("MCP Knowledge Graph HTTP Server", () => {
     try {
       const proxyBase = `http://127.0.0.1:${webServer.port}`;
 
+      for (const path of ["/mcp", "/sse", "/messages", "/mcp/health"]) {
+        for (const method of ["OPTIONS", "POST", "GET"]) {
+          const denied = await fetch(`${proxyBase}${path}`, { method, headers: { Origin: "https://untrusted.example", "Sec-Fetch-Site": "cross-site" } });
+          expect(denied.status).toBe(403);
+        }
+      }
+
       // Health check proxied
       const healthRes = await fetch(`${proxyBase}/mcp/health`);
       expect(healthRes.status).toBe(200);
@@ -761,7 +777,8 @@ describe("MCP Knowledge Graph HTTP Server", () => {
         { capabilities: {} },
       );
       clients.push(streamClient);
-      await streamClient.connect(new StreamableHTTPClientTransport(new URL(`${proxyBase}/mcp`)));
+      await streamClient.connect(new StreamableHTTPClientTransport(new URL(`${proxyBase}/mcp`),
+        { requestInit: { headers: { Origin: proxyBase, "Sec-Fetch-Site": "same-origin" } } }));
 
       const statsRes = await streamClient.callTool({
         name: "get_graph_stats",

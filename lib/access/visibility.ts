@@ -1,5 +1,7 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { SECRET, tierIndex, type AccessPolicy, type ResolvedProfile, type SourceMatch } from "./policy";
+import { REVISION_CONTENT_HASH_SQL } from "./revision-classify";
+import { LIVE_SOURCE_CONTENT_HASH_SQL, sourceContentHashSql } from "./source-hash";
 
 /** Temp tables holding the ids a profile may see; `prefix` keeps reader and write-guard sets apart. */
 export const VISIBLE_SETS = {
@@ -57,7 +59,11 @@ function effectiveTierSql(kind: string, idSql: string, hashSql: string, floorSql
 
 function sourceFilterSql(profile: ResolvedProfile, policy: AccessPolicy, columns: SourceColumns & { id: string; hash: string }, params: SQLQueryBindings[]) {
   const floor = configTierSql(policy, columns, params);
-  const conditions = [`${effectiveTierSql("source", columns.id, columns.hash, floor)} <= ${tierIndex(profile.clearance)}`];
+  return sourceConditionsSql(profile, columns, effectiveTierSql("source", columns.id, columns.hash, floor), params);
+}
+
+function sourceConditionsSql(profile: ResolvedProfile, columns: SourceColumns, tier: string, params: SQLQueryBindings[]) {
+  const conditions = [`${tier} <= ${tierIndex(profile.clearance)}`];
   if (profile.allow?.length) conditions.push(`(${profile.allow.map(m => matchSql(m, columns, params)).join(" OR ")})`);
   if (profile.deny?.length) conditions.push(`NOT (${profile.deny.map(m => matchSql(m, columns, params)).join(" OR ")})`);
   return conditions.join(" AND ");
@@ -78,21 +84,48 @@ export function materializeVisibility(db: Database, profile: ResolvedProfile, po
       db.run(`DELETE FROM ${t(set as VisibleSet)}`);
     }
     const params: SQLQueryBindings[] = [];
-    const live = sourceFilterSql(profile, policy, { id: "s.id", hash: "s.hash", origin: "s.origin", type: "s.type", uri: "s.uri" }, params);
+    const live = sourceFilterSql(profile, policy, { id: "s.id", hash: LIVE_SOURCE_CONTENT_HASH_SQL, origin: "s.origin", type: "s.type", uri: "s.uri" }, params);
     db.query(`INSERT INTO ${t("sources")} SELECT s.id FROM main.sources s WHERE ${live}`).run(...params);
     const archived: SQLQueryBindings[] = [];
     const snapshot = (field: string) => `coalesce(json_extract(a.snapshot,'$.source.${field}'),'')`;
-    const archive = sourceFilterSql(profile, policy, { id: "a.source_id", hash: snapshot("hash"), origin: snapshot("origin"),
+    const archiveHash = sourceContentHashSql({ hash: snapshot("hash"), title: snapshot("title"), uri: snapshot("uri"),
+      origin: snapshot("origin"), type: snapshot("type") });
+    const archive = sourceFilterSql(profile, policy, { id: "a.source_id", hash: archiveHash, origin: snapshot("origin"),
       type: snapshot("type"), uri: snapshot("uri") }, archived);
     db.query(`INSERT INTO ${t("archives")} SELECT a.source_id FROM main.graph_source_archives a
       WHERE a.source_id NOT IN (SELECT id FROM main.sources) AND ${archive}`).run(...archived);
-    db.run(`INSERT INTO ${t("revisions")} SELECT r.id FROM main.graph_source_revisions r
-      WHERE r.source_id IN (SELECT id FROM ${t("sources")} UNION ALL SELECT id FROM ${t("archives")})`);
+    const revisionParams: SQLQueryBindings[] = [];
+    const revisionColumns = { uri: "r.uri", origin: "coalesce(s.origin,json_extract(a.snapshot,'$.source.origin'),'')",
+      type: "coalesce(s.type,json_extract(a.snapshot,'$.source.type'),'')" };
+    const revisionFloor = configTierSql(policy, revisionColumns, revisionParams);
+    const revisionHash = sourceContentHashSql({ ...revisionColumns, hash: "r.hash", title: "r.title" });
+    const sourceLabel = (origin: string, extra = "") => `(SELECT tier FROM main.graph_access_labels
+      WHERE kind='source' AND record_id=r.source_id AND origin='${origin}'${extra})`;
+    const judged = `l.content_hash=(${REVISION_CONTENT_HASH_SQL})`;
+    const revisionTier = `COALESCE(${sourceLabel("manual")},MAX(${revisionFloor},
+      CASE WHEN ${judged} THEN COALESCE(${sourceLabel("llm", ` AND content_hash=${revisionHash}`)},l.tier) ELSE ${SECRET} END,
+      CASE WHEN ${judged} AND l.hard=1 THEN l.tier ELSE 0 END,
+      COALESCE(${sourceLabel("heuristic", ` AND content_hash=${revisionHash} AND hard=1`)},0)))`;
+    const revisionFilter = sourceConditionsSql(profile, revisionColumns, revisionTier, revisionParams);
+    db.query(`INSERT INTO ${t("revisions")} SELECT r.id FROM main.graph_source_revisions r
+      LEFT JOIN main.sources s ON s.id=r.source_id LEFT JOIN main.graph_source_archives a ON a.source_id=r.source_id
+      LEFT JOIN main.graph_access_revision_labels l ON l.revision_id=r.id
+      WHERE r.source_id IN (SELECT id FROM ${t("sources")} UNION ALL SELECT id FROM ${t("archives")})
+      AND ${revisionFilter}`).run(...revisionParams);
+    // Do not serve a source whose active memory has not passed the revision check yet.
+    db.run(`DELETE FROM ${t("sources")} WHERE NOT EXISTS(SELECT 1 FROM main.sources s
+      JOIN main.graph_source_revisions r ON r.source_id=s.id AND r.hash=s.hash
+      WHERE s.id=${t("sources")}.id AND r.id IN (SELECT id FROM ${t("revisions")}))`);
+    db.run(`DELETE FROM ${t("archives")} WHERE NOT EXISTS(SELECT 1 FROM main.graph_source_archives a
+      JOIN main.graph_source_revisions r ON r.source_id=a.source_id AND r.hash=json_extract(a.snapshot,'$.source.hash')
+      WHERE a.source_id=${t("archives")}.id AND r.id IN (SELECT id FROM ${t("revisions")}))`);
+    db.run(`DELETE FROM ${t("revisions")} WHERE id IN (SELECT r.id FROM main.graph_source_revisions r
+      WHERE r.source_id NOT IN (SELECT id FROM ${t("sources")} UNION ALL SELECT id FROM ${t("archives")}))`);
     db.run(`INSERT INTO ${t("chunks")} SELECT c.id FROM main.chunks c WHERE c.source_id IN (SELECT id FROM ${t("sources")})`);
     db.run(`INSERT OR IGNORE INTO ${t("texts")} SELECT p.text_id FROM main.graph_revision_passages p
       WHERE p.revision_id IN (SELECT id FROM ${t("revisions")})`);
 
-    const entityTier = effectiveTierSql("entity", "CAST(e.id AS TEXT)", "e.name||char(31)||e.type", "0");
+    const entityTier = effectiveTierSql("entity", "CAST(e.id AS TEXT)", "coalesce(e.display_name,e.name)||char(31)||e.type", "0");
     const grounded = (visibleOnly: boolean) => {
       const sources = visibleOnly ? ` AND se.source_id IN (SELECT id FROM ${t("sources")})` : "";
       const chunks = visibleOnly ? ` AND ce.chunk_id IN (SELECT id FROM ${t("chunks")})` : "";
@@ -134,9 +167,9 @@ export function recordTier(db: Database, policy: AccessPolicy, kind: "source" | 
   let sql: string;
   if (kind === "source") {
     const floor = configTierSql(policy, { origin: "s.origin", type: "s.type", uri: "s.uri" }, params);
-    sql = `SELECT ${effectiveTierSql("source", "s.id", "s.hash", floor)} AS tier FROM main.sources s WHERE s.id=?`;
+    sql = `SELECT ${effectiveTierSql("source", "s.id", LIVE_SOURCE_CONTENT_HASH_SQL, floor)} AS tier FROM main.sources s WHERE s.id=?`;
   } else if (kind === "entity") {
-    sql = `SELECT ${effectiveTierSql("entity", "CAST(e.id AS TEXT)", "e.name||char(31)||e.type", "0")} AS tier FROM main.entities e WHERE e.id=?`;
+    sql = `SELECT ${effectiveTierSql("entity", "CAST(e.id AS TEXT)", "coalesce(e.display_name,e.name)||char(31)||e.type", "0")} AS tier FROM main.entities e WHERE e.id=?`;
   } else {
     sql = `SELECT ${effectiveTierSql("claim", "c.id", "''", "0")} AS tier FROM main.graph_claims c WHERE c.id=?`;
   }

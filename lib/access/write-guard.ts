@@ -4,6 +4,7 @@ import { classifyPending } from "./classify";
 import { readAccessPolicy, resolveProfile } from "./policy";
 import type { ScopedDatabase } from "./scoped-database";
 import { materializeVisibility, visibleTable, type VisibleSet } from "./visibility";
+import { redactReceipt } from "./receipts";
 
 type RefKind = "entity" | "claim" | "source" | "chunk" | "evidence" | "revision" | "identity-change";
 type Spec = Array<[path: string, kind: RefKind]>;
@@ -163,7 +164,6 @@ export class AccessWriteGuard {
     const touched = writer.query<{ kind: string; record_id: string; events: string }, [number]>(
       "SELECT kind,record_id,group_concat(event,'') AS events FROM knowledge_edit_journal WHERE rowid>? GROUP BY kind,record_id",
     ).all(this.journalStart);
-    if (!touched.length) return;
     const ids = (kind: string) => touched.filter(r => r.kind === kind).map(r => r.record_id);
     classifyPending(writer, { ids: { sources: ids("source"), entities: ids("entity").map(Number), claims: ids("claim") } });
     const policy = readAccessPolicy();
@@ -217,31 +217,12 @@ export class AccessWriteGuard {
 
   /** Drop references to records the profile cannot see from a write receipt. */
   redact<T>(result: T): T {
-    if (!result || typeof result !== "object" || Array.isArray(result)) return result;
-    const scoped = this.options.scoped;
-    scoped.refresh();
-    const copy = { ...(result as Record<string, unknown>) };
-    const visible = (kind: string, id: string) => {
-      switch (kind) {
-        case "source": return scoped.isVisible("sources", id) || scoped.isVisible("archives", id);
-        case "chunk": return scoped.isVisible("chunks", Number(id));
-        case "entity": case "event": return scoped.isVisible("entities", Number(id));
-        case "claim": return scoped.isVisible("claims", id);
-        case "evidence": return scoped.isVisible("evidence", id);
-        default: return true;
-      }
-    };
-    if (Array.isArray(copy.affectedRecords))
-      copy.affectedRecords = copy.affectedRecords.filter((r: { kind: string; record_id: string }) => visible(r.kind, r.record_id));
-    if (Array.isArray(copy.requiresReview))
-      copy.requiresReview = copy.requiresReview.filter((id: string) => scoped.isVisible("claims", id));
-    if (typeof copy.affectedClaimCount === "number")
-      copy.affectedClaimCount = (copy.affectedRecords as Array<{ kind: string }> | undefined)?.filter(r => r.kind === "claim").length ?? copy.affectedClaimCount;
-    if (Array.isArray(copy.operations))
-      copy.operations = copy.operations.map((op: Record<string, unknown>) => {
-        const { before: _before, after: _after, ...rest } = op;
-        return rest;
-      });
-    return copy as T;
+    const writer = this.options.writer;
+    // Inside a write/preview, the guard's TEMP sets describe the uncommitted state.
+    const active = writer.query<{ active: number }, []>("SELECT active FROM knowledge_edit_session WHERE id=1").get()?.active === 1;
+    if (active) return redactReceipt(result, (set, id) =>
+      Boolean(writer.query(`SELECT 1 FROM ${visibleTable("access_guard", set)} WHERE id=?`).get(id)));
+    this.options.scoped.refresh();
+    return redactReceipt(result, (set, id) => this.options.scoped.isVisible(set, id));
   }
 }

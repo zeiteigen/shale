@@ -1,6 +1,7 @@
 import type { AuthProvider, AuthStatus, ShaleSDK } from "@shale/sdk";
 import { discordSettings } from "./connector";
 import { DISCORD_DEFAULTS } from "./settings.types";
+import { LAST_SYNC_KEY } from "./connector";
 
 const API = "https://discord.com/api/v10";
 
@@ -25,15 +26,24 @@ async function whoAmI(token: string, kind: DiscordTokenKind) {
   return user;
 }
 
+function lastSync(sdk: ShaleSDK): string {
+  const settings = discordSettings(sdk);
+  if (settings.syncEnabled === false) return " Sync is turned off (syncEnabled).";
+  const last = sdk.state.getJson<{ channels: number; skipped: number; messages: number; errors: number; finishedAt: number }>(LAST_SYNC_KEY);
+  if (!last) return " The first sync runs on the next discord-sync cron (hourly), or run it now from Overview.";
+  return ` Last sync ${new Date(last.finishedAt).toLocaleString()}: ${last.channels} channel(s), ${last.messages} new message(s)`
+    + `${last.skipped ? `, ${last.skipped} without access` : ""}${last.errors ? `, ${last.errors} error(s) — see the logs` : ""}.`;
+}
+
 function status(sdk: ShaleSDK, error?: string): AuthStatus {
   const stored = sdk.credentials.all();
   if (stored.token) return {
     connected: true, account: stored.account, checkedAt: stored.checkedAt ? Number(stored.checkedAt) : undefined, error,
-    detail: stored.kind === "bot" ? "Bot token — syncs servers the bot has joined." : "User token — syncs your servers and DMs.",
+    detail: (stored.kind === "bot" ? "Bot token — syncs servers the bot has joined." : "User token — syncs your servers and DMs.") + lastSync(sdk),
   };
   const envName = discordSettings(sdk).tokenEnv || DISCORD_DEFAULTS.tokenEnv;
   if (process.env[envName]?.trim()) return { connected: true, account: `${envName} environment variable`, error,
-    detail: `Using ${envName} from data/.env. Connect here to manage the token from the browser instead.` };
+    detail: `Using ${envName} from data/.env. Connect here to manage the token from the browser instead.` + lastSync(sdk) };
   return { connected: false, error };
 }
 

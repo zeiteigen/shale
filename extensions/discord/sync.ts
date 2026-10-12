@@ -7,15 +7,15 @@ import { syncDiscord } from "./dce";
 export async function run(sdkOverride?: ShaleSDK) {
   const sdk = sdkOverride ?? getSDK(import.meta.dir);
   const settings = discordSettings(sdk);
-  if (!settings.syncEnabled) {
-    sdk.logger.log("Discord sync is disabled (set syncEnabled to true to fetch with DiscordChatExporter).");
+  if (settings.syncEnabled === false) {
+    sdk.logger.log("Discord sync is disabled (syncEnabled is false in the discord settings).");
     return null;
   }
   const connector = discordConnector(sdk, settings);
   return withChatLease(sdk, async () => {
     const synced = await syncDiscord(sdk, connector, settings);
     const indexed = await indexChatWindows(sdk, connector, settings);
-    sdk.logger.log(`Discord sync: ${synced.targets} target(s), ${synced.messages} new/edited messages, `
+    sdk.logger.log(`Discord sync: ${synced.channels} channel(s) checked, ${synced.skipped} skipped, ${synced.messages} new/edited messages, `
       + `indexed ${indexed.indexed} window(s), ${synced.errors.length + indexed.errors.length} error(s).`);
     return { synced, indexed };
   });

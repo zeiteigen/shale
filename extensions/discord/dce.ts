@@ -6,80 +6,123 @@ import { resolveDataPath } from "@shale/sdk/chat/paths";
 import { DISCORD_DEFAULTS, type DiscordSettings } from "./settings.types";
 import { importExportFile, jsonFiles } from "./import-folder";
 import { discordToken } from "./auth";
+import { dceCommand } from "./dce-binary";
+import { Exporter, PartialExportError } from "./dce-runner";
+import { LAST_SYNC_KEY } from "./connector";
 
-export interface SyncTarget {
-  /** Watermark key, e.g. `channel:123`, `guild:456`, `dm`. */
-  key: string;
-  args: string[];
+const LIST_TIMEOUT_MS = 5 * 60_000;
+/** Channels the account cannot read are retried after this long instead of on every run. */
+const FORBIDDEN_RETRY_MS = 7 * 86_400_000;
+
+export interface SyncChannel { id: string; label: string }
+
+/** Parse DiscordChatExporter listing output: `<id> | <name>` per line (threads may be indented or bulleted). */
+export function parseListing(output: string): Array<{ id: string; name: string }> {
+  return output.split("\n").flatMap(line => {
+    const match = line.match(/^[\s*•-]*(\d{1,20})\s*\|\s*(.*)$/);
+    return match && match[1] !== "0" ? [{ id: match[1]!, name: match[2]!.trim() }] : [];
+  });
 }
 
-export function syncTargets(settings: DiscordSettings): SyncTarget[] {
-  const threads = settings.includeThreads ?? DISCORD_DEFAULTS.includeThreads;
-  const threadArgs = threads === "none" ? [] : ["--include-threads", threads === "active" ? "Active" : "All"];
-  return [
-    ...(settings.channels ?? []).filter(Boolean).map(id => ({ key: `channel:${id}`, args: ["export", "-c", id, ...threadArgs] })),
-    ...(settings.guilds ?? []).filter(Boolean).map(id => ({ key: `guild:${id}`, args: ["exportguild", "-g", id, ...threadArgs] })),
-    ...(settings.includeDMs ? [{ key: "dm", args: ["exportdm"] }] : []),
-  ];
+/**
+ * Channels to sync: configured channels and servers, plus — with syncScope "all" —
+ * every server and (for user tokens) every DM the account can see.
+ */
+export async function discoverChannels(exporter: Exporter, settings: DiscordSettings, tokenKind: string | undefined) {
+  const all = (settings.syncScope ?? DISCORD_DEFAULTS.syncScope) === "all";
+  const channels = new Map<string, string>();
+  for (const id of settings.channels ?? []) if (id) channels.set(id, `channel ${id}`);
+  const guilds = new Map<string, string>((settings.guilds ?? []).filter(Boolean).map(id => [id, id]));
+  if (all) for (const guild of parseListing(await exporter.run(["guilds"], LIST_TIMEOUT_MS))) guilds.set(guild.id, guild.name);
+  for (const [id, name] of guilds)
+    for (const channel of parseListing(await exporter.run(["channels", "-g", id], LIST_TIMEOUT_MS)))
+      channels.set(channel.id, `${name} › ${channel.name}`);
+  if ((all || settings.includeDMs) && tokenKind !== "bot")
+    for (const dm of parseListing(await exporter.run(["dm"], LIST_TIMEOUT_MS))) channels.set(dm.id, `DM ${dm.name}`);
+  return [...channels].map(([id, label]) => ({ id, label }));
 }
 
-/** Arguments for one exporter run; `--after` comes from the target's watermark or `initialSyncDays`. */
-export function exporterArgs(target: SyncTarget, outDir: string, settings: DiscordSettings, watermark: string | null, now = Date.now()) {
+/** Arguments to export one channel (and its threads) since its watermark, or `initialSyncDays` on first sync. */
+export function exporterArgs(channelId: string, outDir: string, settings: DiscordSettings, watermark: string | null, now = Date.now()) {
   const days = settings.initialSyncDays ?? DISCORD_DEFAULTS.initialSyncDays;
   const after = watermark ?? (days > 0 ? new Date(now - days * 86_400_000).toISOString() : null);
-  const args = [...target.args, "-f", "Json", "-o", join(outDir, "%c.json")];
+  const threads = settings.includeThreads ?? DISCORD_DEFAULTS.includeThreads;
+  const args = ["export", "-c", channelId, "-f", "Json", "-o", join(outDir, "%c.json")];
+  if (threads !== "none") args.push("--include-threads", threads === "active" ? "Active" : "All");
   if (after) args.push("--after", after);
   if (settings.downloadMedia) args.push("--media", "--reuse-media", "--media-dir", join(resolveDataPath(settings.exportDir ?? DISCORD_DEFAULTS.exportDir), "media"));
   return args;
 }
 
-async function runExporter(command: string[], args: string[], token: string, timeoutMs: number) {
-  const child = Bun.spawn([...command, ...args], {
-    // DiscordChatExporter reads DISCORD_TOKEN itself; keeping it off argv hides it from process listings.
-    env: { ...process.env, DISCORD_TOKEN: token }, stdout: "pipe", stderr: "pipe", stdin: "ignore",
-  });
-  const timer = setTimeout(() => child.kill(), timeoutMs);
-  const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-  clearTimeout(timer);
-  if (code !== 0) {
-    const detail = `${stderr}\n${stdout}`.split(token).join("***").trim().split("\n").slice(-8).join("\n");
-    throw new Error(`DiscordChatExporter exited with ${child.signalCode ?? code}: ${detail}`);
-  }
-}
+export interface SyncResult { channels: number; skipped: number; messages: number; errors: string[] }
 
-export interface SyncResult { targets: number; messages: number; errors: string[] }
-
-/** Export each configured target since its watermark and ingest the produced JSON files. */
+/** Export every channel since its own watermark and ingest the files; an interrupted sweep resumes per channel. */
 export async function syncDiscord(sdk: ShaleSDK, connector: ChatConnector, settings: DiscordSettings): Promise<SyncResult> {
-  const result: SyncResult = { targets: 0, messages: 0, errors: [] };
+  const result: SyncResult = { channels: 0, skipped: 0, messages: 0, errors: [] };
   const token = discordToken(sdk);
   if (!token) {
-    sdk.logger.warn("Discord sync is enabled but no account is connected. Connect Discord on the Accounts page of the Shale web interface. Skipping sync.");
+    sdk.logger.warn("Discord sync skipped: no account is connected. Connect Discord on the Accounts page of the Shale web interface.");
     return result;
   }
-  const command = settings.dceCommand?.length ? settings.dceCommand : DISCORD_DEFAULTS.dceCommand;
+  const exporter = new Exporter(dceCommand(settings), token);
   const root = resolveDataPath(settings.exportDir ?? DISCORD_DEFAULTS.exportDir);
   const timeout = (settings.syncTimeoutMinutes ?? DISCORD_DEFAULTS.syncTimeoutMinutes) * 60_000;
-  for (const target of syncTargets(settings)) {
-    const outDir = join(root, `run-${Date.now()}-${target.key.replace(/[^a-z0-9]+/gi, "-")}`);
-    const stateKey = `sync:${target.key}`;
+  const startedAt = Date.now();
+  let channels: SyncChannel[];
+  try {
+    channels = await discoverChannels(exporter, settings, sdk.credentials.get("kind"));
+  } catch (error) {
+    result.errors.push(`listing channels: ${error instanceof Error ? error.message : String(error)}`);
+    sdk.logger.error("Discord sync could not list channels:", error);
+    sdk.state.setJson(LAST_SYNC_KEY, { ...result, errors: result.errors.length, startedAt, finishedAt: Date.now() });
+    return result;
+  }
+  if (!channels.length) sdk.logger.warn("Discord sync found no channels. Set syncScope to \"all\", or list channels/guilds in the discord settings.");
+  else sdk.logger.log(`Discord sync: ${channels.length} channel(s) to check.`);
+  for (const [index, channel] of channels.entries()) {
+    const forbiddenAt = Number(sdk.state.getWatermark(`forbidden:${channel.id}`) ?? 0);
+    if (forbiddenAt && Date.now() - forbiddenAt < FORBIDDEN_RETRY_MS) { result.skipped++; continue; }
+    const outDir = join(root, `run-${startedAt}`, channel.id);
+    const stateKey = `sync:channel:${channel.id}`;
     try {
       await mkdir(outDir, { recursive: true });
-      await runExporter(command, exporterArgs(target, outDir, settings, sdk.state.getWatermark(stateKey)), token, timeout);
-      let newest = 0;
+      let partial: PartialExportError | undefined;
+      try {
+        await exporter.run(exporterArgs(channel.id, outDir, settings, sdk.state.getWatermark(stateKey)), timeout);
+      } catch (error) {
+        if (!(error instanceof PartialExportError)) throw error;
+        partial = error;
+      }
+      let newest = 0, changed = 0;
       for await (const path of jsonFiles(outDir)) {
         const imported = await importExportFile(connector, path);
-        result.messages += imported.changed;
+        changed += imported.changed;
         newest = Math.max(newest, imported.newest);
       }
       // Advance only after every file committed; re-fetching one second keeps same-second messages.
-      if (newest) sdk.state.setWatermark(new Date(newest - 1000).toISOString(), stateKey);
-      result.targets++;
-      if (!settings.keepExports) await rm(outDir, { recursive: true, force: true });
+      if (newest && !partial) sdk.state.setWatermark(new Date(newest - 1000).toISOString(), stateKey);
+      sdk.state.delete(`forbidden:${channel.id}`);
+      result.channels++;
+      result.messages += changed;
+      if (partial) {
+        result.errors.push(`${channel.label}: ${partial.message}`);
+        sdk.logger.error(`Discord sync incomplete for ${channel.label}:`, partial.message);
+      }
+      if (changed) sdk.logger.log(`Discord sync [${index + 1}/${channels.length}] ${channel.label}: ${changed} new/edited message(s).`);
     } catch (error) {
-      result.errors.push(`${target.key}: ${error instanceof Error ? error.message : String(error)}`);
-      sdk.logger.error(`Discord sync failed for ${target.key}:`, error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (/forbidden|missing access|unauthorized to view/i.test(message)) {
+        sdk.state.setWatermark(String(Date.now()), `forbidden:${channel.id}`);
+        result.skipped++;
+      } else {
+        result.errors.push(`${channel.label}: ${message}`);
+        sdk.logger.error(`Discord sync failed for ${channel.label}:`, message);
+      }
+    } finally {
+      if (!settings.keepExports) await rm(outDir, { recursive: true, force: true });
     }
   }
+  if (!settings.keepExports) await rm(join(root, `run-${startedAt}`), { recursive: true, force: true });
+  sdk.state.setJson(LAST_SYNC_KEY, { ...result, errors: result.errors.length, startedAt, finishedAt: Date.now() });
   return result;
 }

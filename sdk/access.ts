@@ -28,7 +28,7 @@ export function createScopedSDK(profileName: string, base: ShaleSDK = createExte
   const path = base.database.filename;
   const key = `${path}\u0000${profileName}\u0000${base.namespace}`;
   const cached = cache.get(key);
-  if (cached) return cached;
+  if (cached) { cached.refresh(); return cached; }
   const scoped = new ScopedDatabase(profileName, base.database, path);
   const read = createExtensionSDK(`${base.extensionId}:${profileName}`, { namespace: base.namespace, database: scoped.db });
   scoped.seal();
@@ -36,7 +36,7 @@ export function createScopedSDK(profileName: string, base: ShaleSDK = createExte
   const write = createExtensionSDK(base.extensionId, { namespace: base.namespace, database: base.database });
   const guard = new AccessWriteGuard({ scoped, visibleGraph: read.graph, writer: base.database });
   write.knowledge.setGuard(guard);
-  const entry: ScopedSDK = { profile, read, write, guard, scoped, refresh: () => scoped.refresh() };
+  const entry: ScopedSDK = { profile, read, write, guard, scoped, refresh: () => (entry.profile = scoped.refresh()) };
   cache.set(key, entry);
   return entry;
 }

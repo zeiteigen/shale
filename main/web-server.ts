@@ -31,10 +31,14 @@ export function startWebServer(context: WebContext, connectors: ConnectorRoutes,
           url.pathname === "/messages" ||
           url.pathname === "/mcp/health")
       ) {
+        const rejected = rejectNonLocalRequest(req);
+        if (rejected) return rejected;
         const targetPath = url.pathname === "/mcp/health" ? "/health" : url.pathname;
         const targetUrl = new URL(targetPath + url.search, mcpBase);
         const headers = new Headers(req.headers);
         headers.set("host", new URL(mcpBase).host);
+        // The gateway has checked this origin; the backend has a different local port.
+        headers.delete("origin");
         return fetch(targetUrl.toString(), {
           method: req.method,
           headers,

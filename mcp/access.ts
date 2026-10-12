@@ -44,14 +44,14 @@ function toolSubset(mcp: McpServer, keep: (name: string, readOnly: boolean) => b
  * resolve entity names among visible entities, and attribute the change to the profile.
  */
 export function registerScoped(mcp: McpServer, access: ScopedSDK, register: (mcp: McpServer, sdk: ScopedSDK["read"]) => void) {
-  if (access.profile.unrestricted) return register(mcp, access.read);
   register(toolSubset(mcp, (_, readOnly) => readOnly), access.read);
-  if (access.profile.write === false || !access.guard) return;
+  if (access.profile.write === false) return;
   const guard = access.guard;
   register(toolSubset(mcp, (_, readOnly) => !readOnly, (name, callback) => async (args, extra) => {
     try {
-      const prepared = guard.prepare(name, args ?? {});
-      if (typeof prepared.actor === "string" && !prepared.actor.startsWith("profile:"))
+      if (access.refresh().write === false) throw new Error(`The "${access.profile.name}" access profile is read-only`);
+      const prepared = guard ? guard.prepare(name, args ?? {}) : args;
+      if (guard && typeof prepared.actor === "string" && !prepared.actor.startsWith("profile:"))
         prepared.actor = `profile:${guard.profileName}/${prepared.actor}`;
       return await callback(prepared, extra);
     } catch (error) {

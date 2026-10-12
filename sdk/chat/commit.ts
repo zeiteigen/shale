@@ -8,6 +8,8 @@ import { summarizeWindow } from "./summarize";
 import { transcriptChunks } from "./transcript";
 import { pendingWindows } from "./windows";
 import type { ChatParticipant, ChatWindow, ChatWindowSettings, PreparedChatWindow } from "./types";
+import { chatHash } from "./store";
+import { conversationHash } from "./conversation-hash";
 
 export const CHAT_SOURCE_TYPE = "chat_session";
 
@@ -61,7 +63,7 @@ export async function prepareWindow(sdk: ShaleSDK, connector: ChatConnector, win
     conversation: window.conversation, startTime: window.startTime, endTime: window.endTime,
     messageCount: messages.filter(message => !message.isSystem).length, messageHash: window.messageHash,
     firstMessageId: window.messages[0]!.messageId, participants: participants({ ...window, messages }),
-    synthesis, sourceHash: contentFingerprint(chunks), memory,
+    synthesis, sourceHash: chatHash([conversationHash(window.conversation), contentFingerprint(chunks)]), memory,
   };
   sdk.saveCheckpoint(data, { id, key: id });
   return { id, data };
@@ -137,6 +139,12 @@ export async function finalizeWindows(sdk: ShaleSDK, connector: ChatConnector,
   const errors: string[] = [];
   for (const { id, data } of prepared) {
     try {
+      const current = connector.store.conversation(data.conversation.conversationId);
+      if (current && conversationHash(current) !== conversationHash(data.conversation)) {
+        // A renamed conversation must be prepared again instead of restoring an old summary.
+        sdk.checkpoint.delete(id);
+        continue;
+      }
       const result = commitWindow(sdk, connector, id, data);
       if (result.skipped) continue;
       indexed++;

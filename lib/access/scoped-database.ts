@@ -75,6 +75,7 @@ export class ScopedDatabase {
   private sealed = false;
   private seenVersion = -1;
   private seenSignature = "";
+  private classificationPending = false;
 
   constructor(readonly profileName: string, private writer: Database, path: string) {
     if (!path || path === ":memory:") throw new Error("Restricted access profiles require a file-backed database");
@@ -120,7 +121,8 @@ export class ScopedDatabase {
     const policy = readAccessPolicy();
     const profile = resolveProfile(this.profileName, policy);
     const version = this.dataVersion();
-    if (version !== this.seenVersion) classifyPending(this.writer, { budgetMs: 1_500 });
+    if (version !== this.seenVersion || this.classificationPending)
+      this.classificationPending = classifyPending(this.writer, { budgetMs: 1_500 }).pending;
     const signature = JSON.stringify([profile, policy.defaultTier, policy.originTiers, policy.tierRules]);
     const latest = this.dataVersion();
     if (latest === this.seenVersion && signature === this.seenSignature) return profile;

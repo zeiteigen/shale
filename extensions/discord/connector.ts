@@ -12,3 +12,4 @@ export function discordSettings(sdk: ShaleSDK): DiscordSettings {
 export function discordConnector(sdk: ShaleSDK, settings = discordSettings(sdk)): ChatConnector {
   return { platform: PLATFORM, namespace: settings.namespace || sdk.namespace, store: new ChatStore(sdk.database, sdk.extensionId, "discord") };
 }
+export const LAST_SYNC_KEY = "sync:last";
