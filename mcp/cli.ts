@@ -19,7 +19,7 @@ program
   .option("-h, --host <string>", "Host to bind on", "127.0.0.1")
   .option("-n, --namespace <string>", "Default graph namespace", "knowledge")
   .option("--db <string>", "Custom database path")
-  .option("--profile <name>", "Serve every request as this access profile (data/access.json), without tokens")
+  .option("--profile <name>", "Serve every request as this access profile (resources/access.json), without tokens")
   .action(async (opts) => {
     const port = Number(opts.port);
     const host = opts.host;

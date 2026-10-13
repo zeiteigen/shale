@@ -46,7 +46,7 @@ export function findProjectRoot(): string {
  * Find extension directory for a given extension name.
  */
 export function getExtensionDir(extensionName: string, rootDir = findProjectRoot()): string {
-  if (extensionName === "root") return path.join(rootDir, "data");
+  if (extensionName === "root") return path.join(rootDir, "resources");
   if (!extensionName || extensionName === "." || extensionName === ".." || /[\\/]/.test(extensionName))
     throw new Error("Settings target must be root or an extension name");
   return path.join(rootDir, "extensions", extensionName);

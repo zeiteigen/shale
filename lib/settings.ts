@@ -5,7 +5,7 @@ import type { RootSettings } from "./settings.types";
 import { omitRemovedRootSettings } from "./removed-settings";
 
 export function getRootSettingsPath(): string {
-  return process.env.SHALE_SETTINGS_PATH ?? join(import.meta.dir, "../data/settings.json");
+  return process.env.SHALE_SETTINGS_PATH ?? join(import.meta.dir, "../resources/settings.json");
 }
 
 /** Read on every call. Invalid host configuration must never silently select another provider. */

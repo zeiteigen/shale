@@ -40,7 +40,7 @@ Assistant replies are indexed in full. Because long replies fill windows quickly
 
 ## Privacy
 
-Chats with assistants are often personal. Their origins default to the `private` tier (`originTiers` in `data/access.json`), so the `cloud` profile cannot read them. To exclude a provider entirely, remove it from `providers`. The Chrome module then stops capturing it, and the server skips anything still queued.
+Chats with assistants are often personal. Their origins default to the `private` tier (`originTiers` in `resources/access.json`), so the `cloud` profile cannot read them. To exclude a provider entirely, remove it from `providers`. The Chrome module then stops capturing it, and the server skips anything still queued.
 
 ## Settings
 

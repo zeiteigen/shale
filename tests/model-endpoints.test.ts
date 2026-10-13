@@ -8,13 +8,13 @@ import { loadSettings, loadSettingsHelp, saveSettings, setSettingValue } from ".
 
 const originalEnv = { ...process.env };
 let directory: string;
-function settings(values: Record<string, unknown>) { writeFileSync(join(directory, "data/settings.json"), JSON.stringify(values)); }
+function settings(values: Record<string, unknown>) { writeFileSync(join(directory, "resources/settings.json"), JSON.stringify(values)); }
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "shale-model-endpoints-"));
-  mkdirSync(join(directory, "data"));
-  process.env = { ...originalEnv, SHALE_SETTINGS_PATH: join(directory, "data/settings.json") };
+  mkdirSync(join(directory, "resources"));
+  process.env = { ...originalEnv, SHALE_SETTINGS_PATH: join(directory, "resources/settings.json") };
   for (const key of Object.keys(process.env)) if (/^(OPENAI_|CHAT_TIMEOUT_MS$|MODEL_TIMEOUT_MS$|MAX_THINKING_TOKENS$)/.test(key)) delete process.env[key];
-  writeFileSync(join(directory, "data/settings.help.json"), readFileSync(join(import.meta.dir, "../data/settings.help.json")));
+  writeFileSync(join(directory, "resources/settings.help.json"), readFileSync(join(import.meta.dir, "../resources/settings.help.json")));
   settings({ OPENAI_BASE_URL: "http://127.0.0.1:8080/v1" });
 });
 afterEach(() => { process.env = { ...originalEnv }; rmSync(directory, { recursive: true, force: true }); });
@@ -64,5 +64,5 @@ it("removes aliases from the editor and persisted files while keeping canonical 
   expect(bodies[0].model).toBe("gpt-4o-mini");
   expect(bodies[0].max_thinking_tokens).toBe(512);
   saveSettings("root", { ...aliases, OPENAI_CHAT_MODEL: "canonical" }, directory);
-  expect(JSON.parse(readFileSync(join(directory, "data/settings.json"), "utf8"))).toEqual({ OPENAI_CHAT_MODEL: "canonical" });
+  expect(JSON.parse(readFileSync(join(directory, "resources/settings.json"), "utf8"))).toEqual({ OPENAI_CHAT_MODEL: "canonical" });
 });

@@ -52,7 +52,7 @@ export const DEFAULT_POLICY: AccessPolicy = {
 };
 
 export function accessPolicyPath(): string {
-  return process.env.SHALE_ACCESS_PATH ?? join(import.meta.dir, "../../data/access.json");
+  return process.env.SHALE_ACCESS_PATH ?? join(import.meta.dir, "../../resources/access.json");
 }
 
 export function tierIndex(tier: Tier): number {

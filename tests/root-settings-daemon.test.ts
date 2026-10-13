@@ -8,10 +8,10 @@ it("supports root settings in daemon commands and dynamic completion", async () 
   const rootDir = mkdtempSync(join(tmpdir(), "shale-root-daemon-"));
   try {
     mkdirSync(join(rootDir, "extensions"));
-    mkdirSync(join(rootDir, "data"));
+    mkdirSync(join(rootDir, "resources"));
     writeFileSync(join(rootDir, "package.json"), '{"name":"root-daemon-test"}');
-    writeFileSync(join(rootDir, "data/settings.json"), '{"OPENAI_CHAT_CONCURRENCY":4}');
-    writeFileSync(join(rootDir, "data/settings.help.json"), readFileSync(join(import.meta.dir, "../data/settings.help.json")));
+    writeFileSync(join(rootDir, "resources/settings.json"), '{"OPENAI_CHAT_CONCURRENCY":4}');
+    writeFileSync(join(rootDir, "resources/settings.help.json"), readFileSync(join(import.meta.dir, "../resources/settings.help.json")));
     const options = { rootDir, crons: [] };
     expect((await handleCliCommand("settings list-targets", options)).output).toContain("root");
     expect((await handleCliCommand("settings get root OPENAI_CHAT_CONCURRENCY", options)).output).toBe("4");

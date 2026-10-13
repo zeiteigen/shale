@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { getRootSettingsPath } from "../lib/settings";
 
-it("defaults host settings to data while preserving explicit path overrides", () => {
+it("defaults host settings to resources while preserving explicit path overrides", () => {
   const previous = process.env.SHALE_SETTINGS_PATH;
   try {
     delete process.env.SHALE_SETTINGS_PATH;
-    expect(getRootSettingsPath()).toBe(join(import.meta.dir, "../data/settings.json"));
+    expect(getRootSettingsPath()).toBe(join(import.meta.dir, "../resources/settings.json"));
     process.env.SHALE_SETTINGS_PATH = "/tmp/custom-settings.json";
     expect(getRootSettingsPath()).toBe("/tmp/custom-settings.json");
   } finally {

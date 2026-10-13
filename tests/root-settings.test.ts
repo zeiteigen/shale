@@ -16,11 +16,11 @@ let directory: string;
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "shale-root-settings-"));
   mkdirSync(join(directory, "extensions"));
-  mkdirSync(join(directory, "data"));
+  mkdirSync(join(directory, "resources"));
   writeFileSync(join(directory, "package.json"), '{"name":"root-settings-test"}');
-  writeFileSync(join(directory, "data/settings.json"), "{}\n");
-  writeFileSync(join(directory, "data/settings.help.json"), readFileSync(join(project, "data/settings.help.json")));
-  process.env = { ...originalEnv, SHALE_SETTINGS_PATH: join(directory, "data/settings.json") };
+  writeFileSync(join(directory, "resources/settings.json"), "{}\n");
+  writeFileSync(join(directory, "resources/settings.help.json"), readFileSync(join(project, "resources/settings.help.json")));
+  process.env = { ...originalEnv, SHALE_SETTINGS_PATH: join(directory, "resources/settings.json") };
   for (const key of Object.keys(process.env))
     if (/^(OPENAI_|MODEL_BATCH_)/.test(key)) delete process.env[key];
 });
@@ -91,11 +91,11 @@ it("validates root edits, rejects secrets and unknown keys, and resets optional 
 });
 
 it("fails clearly on malformed root settings and excludes host settings from extension fallback", () => {
-  writeFileSync(join(directory, "data/settings.json"), "[]");
+  writeFileSync(join(directory, "resources/settings.json"), "[]");
   expect(() => readRootSettings()).toThrow("JSON object");
-  writeFileSync(join(directory, "data/settings.json"), '{"OPENAI_API_KEY":"dummy"}');
+  writeFileSync(join(directory, "resources/settings.json"), '{"OPENAI_API_KEY":"dummy"}');
   expect(() => readRootSettings()).toThrow("API keys belong in .env");
-  writeFileSync(join(directory, "data/settings.json"), '{"OPENAI_CHAT_MODEL":"host"}');
+  writeFileSync(join(directory, "resources/settings.json"), '{"OPENAI_CHAT_MODEL":"host"}');
   const previous = process.cwd();
   try {
     process.chdir(directory);

@@ -13,7 +13,7 @@ export interface KnowledgeGraphMcpServerOptions {
   version?: string;
   sdk?: ShaleSDK;
   namespace?: string;
-  /** Access profile (data/access.json) whose permissions this server applies. Defaults to full access. */
+  /** Access profile (resources/access.json) whose permissions this server applies. Defaults to full access. */
   profile?: string;
   /** Pre-built scoped SDKs; takes precedence over `sdk` and `profile`. */
   access?: ScopedSDK;

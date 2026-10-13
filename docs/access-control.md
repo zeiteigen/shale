@@ -59,7 +59,7 @@ Restricted profiles see no rows in any other table, including extension state, c
 
 ## Profiles and tokens
 
-`data/access.json` is created with defaults on first use and read fresh on every request:
+`resources/access.json` is version-controlled, recreated with defaults if missing, and read fresh on every request:
 
 ```json
 {

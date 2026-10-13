@@ -54,14 +54,14 @@ describe("unified local web interface", () => {
         expect((await post(host.base, "/api/settings/demo", { key, value })).status).toBe(400);
       }
       expect(settings.get<number>("batchSize")).toBe(4);
-      writeFileSync(join(host.rootDir, "data/settings.json"), '{"PORT":7425,"OPENAI_ENDPOINT":"http://localhost:8080/v1","VISUALIZER_PORT":3333}');
+      writeFileSync(join(host.rootDir, "resources/settings.json"), '{"PORT":7425,"OPENAI_ENDPOINT":"http://localhost:8080/v1","VISUALIZER_PORT":3333}');
       const root = await (await fetch(host.base + "/api/settings/root")).json();
       expect(root.values).toEqual({ PORT: 7425 });
       expect(root.schema).not.toHaveProperty("OPENAI_ENDPOINT");
       expect(root.schema).not.toHaveProperty("VISUALIZER_PORT");
       expect((await post(host.base, "/api/settings/root", { key: "OPENAI_ENDPOINT", value: "http://localhost:8080/v1" })).status).toBe(400);
       expect((await post(host.base, "/api/settings/root", { key: "PORT", value: "8000" })).status).toBe(200);
-      expect(JSON.parse(readFileSync(join(host.rootDir, "data/settings.json"), "utf8"))).toEqual({ PORT: 8000 });
+      expect(JSON.parse(readFileSync(join(host.rootDir, "resources/settings.json"), "utf8"))).toEqual({ PORT: 8000 });
       expect((await post(host.base, "/api/settings/root", { key: "OPENAI_API_KEY", value: "secret" })).status).toBe(400);
       expect((await post(host.base, "/api/settings/demo", { key: "enabled", value: true })).status).toBe(400);
       expect((await post(host.base, "/api/settings/demo/reset", { key: "enabled" })).status).toBe(200);

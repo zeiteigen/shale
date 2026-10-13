@@ -19,6 +19,8 @@ This document outlines the core conventions, architecture patterns, and best pra
 
 ```
 shale/
+├── resources/               # Version-controlled host configuration, examples, and reports
+├── data/                    # Entirely gitignored local databases, credentials, backups, and connector files
 ├── lib/                     # Low-level core infrastructure (database, message bus, models)
 │   ├── db.ts                # SQLite database setup, schema migrations
 │   ├── messages.ts          # Core pub/sub and request/response message broker
@@ -261,7 +263,7 @@ bun run scripts/serve-visualizer.ts
 ## 8. Access Profiles & Permissions
 
 Users decide which data each consumer may use (`docs/access-control.md`).
-- **Tiers and profiles.** Records have a tier (`public < personal < private < secret`), set automatically by heuristics and `access-classifier`, or manually. Profiles in `data/access.json` (read fresh, created with defaults on first use) set a clearance plus `allow`/`deny` source patterns and `write`.
+- **Tiers and profiles.** Records have a tier (`public < personal < private < secret`), set automatically by heuristics and `access-classifier`, or manually. Profiles in `resources/access.json` (read fresh, created with defaults on first use) set a clearance plus `allow`/`deny` source patterns and `write`.
 - **Enforcement lives in the database layer.** `lib/access/scoped-database.ts` gives each restricted profile a read-only connection whose TEMP views shadow every `main` table. Unknown tables are shadowed by empty views. Readers need no permission code of their own; just use the scoped SDK.
 - **New tables.** Add a row filter to `shadowFilters` if a scoped consumer should see the table's rows; otherwise it stays hidden. New `chunks_fts` queries must join `chunks`.
 - **New write paths.** Add every write tool or knowledge operation to `WRITE_REFERENCES` in `lib/access/write-guard.ts`, listing the record ids it references. Unlisted writes are refused for restricted profiles. Audited writes must go through `sdk.knowledge` (`record`/`apply`) so the guard runs inside the transaction.

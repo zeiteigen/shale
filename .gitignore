@@ -1,9 +1,7 @@
 node_modules/
 .env
 *.db*
-/data/backups/
-/data/discord/
-/data/instagram/
-/data/email/
-/data/credentials.json
+/data/
 .*
+!/resources/
+!/resources/**

@@ -9,7 +9,7 @@ bun run start
 
 Open **http://localhost:7425**. Use Overview to run background jobs and follow output, Settings to configure the host and extensions, Accounts to connect services such as Discord, Instagram, and [email](extensions/email/README.md), and Knowledge to explore sources and review claims.
 
-The daemon serves the interface and ingestion API together. Settings are read fresh from disk; port and database changes require a restart. Host settings and their schema live in `data/settings.json` and `data/settings.help.json`. The default database is `data/production.db`, with backups in `data/backups/`. API keys live in `data/.env`, loaded at startup without overriding existing environment variables. Example configuration files are also in `data/`. Terminal commands remain available for automation, with `--cli` enabling the legacy interactive console.
+The daemon serves the interface and ingestion API together. Settings are read fresh from disk; port and database changes require a restart. Host settings and their schema live in `resources/settings.json` and `resources/settings.help.json`. The `resources/` directory is version-controlled and also holds the access policy, configuration examples, and migration report. The `data/` directory is entirely gitignored: the default database is `data/production.db`, with backups in `data/backups/`. API keys live in `data/.env`, loaded at startup without overriding existing environment variables; use `resources/.env.example` as a template. Terminal commands remain available for automation, with `--cli` enabling the legacy interactive console.
 
 See [the web interface guide](visualizer/README.md) for development, compatibility, and verification, and [the SDK guide](sdk/README.md) for extension development.
 
@@ -52,7 +52,7 @@ Remove the connection with `codex mcp remove shale`. See [OpenAI's MCP setup ins
 
 ## Limit what an agent can see
 
-Every source, entity, and claim gets a sensitivity tier: `public`, `personal`, `private`, or `secret`. Tiers are assigned automatically; heuristics run immediately and the `access-classifier` extension refines them with the chat model. Access profiles in `data/access.json` set each agent's clearance. Unauthenticated requests use the `local` profile, which sees everything, so existing connections keep working.
+Every source, entity, and claim gets a sensitivity tier: `public`, `personal`, `private`, or `secret`. Tiers are assigned automatically; heuristics run immediately and the `access-classifier` extension refines them with the chat model. Access profiles in `resources/access.json` set each agent's clearance. Unauthenticated requests use the `local` profile, which sees everything, so existing connections keep working.
 
 To give a hosted agent less, open **Access** in the web interface and create a token for the `cloud` profile (personal clearance, so no private messages or credentials). Configure the agent's MCP connection to send it as an `Authorization: Bearer <token>` header. Each session is bound to the profile of the token that opened it.
 
