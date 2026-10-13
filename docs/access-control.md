@@ -51,6 +51,8 @@ Source classification fingerprints include the title, URI, origin, and type as w
 | Revision, passage | Its source is visible, its retained content passes the tier check, and its historical URI passes the profile's source rules. |
 | Evidence | Its source revision is visible and its claim is visible. |
 | Entity | Its own tier passes, and either it appears in a visible source (`source_entities`, `chunk_entities`, or a claim with evidence in a visible revision) or it has no source provenance at all. |
+| Episode and narrative metadata | Its entity passes, and every active member and retained narrative input source is visible across its full identity group. Detached/removed inputs remain protected until a complete narrative replacement releases their provenance. |
+| Source digest and digest signals | The source is visible; signal rows also require their entity to be visible. |
 | Claim | Its own tier passes, its subject and object are visible, it has visible evidence or no evidence at all, and every claim it depends on is visible. |
 | Aliases, events, participants, links, reviews, edges | The records they connect are visible. |
 | Audit history (`graph_changes`) | The change was made by this profile. Before/after snapshots are removed. |
@@ -92,11 +94,15 @@ Restricted profiles see no rows in any other table, including extension state, c
 
 Visibility is recomputed when the database changes (detected with `PRAGMA data_version`) or the policy changes. The cost grows with the size of the graph.
 
-Two kinds of objects are deliberately not shadowed:
-- `chunks_fts`, because FTS5 `MATCH` cannot run through a view. Every query against it joins `chunks`, whose view removes hidden rows, and a test enforces this.
+Full-text indexes need explicit exceptions to shadowing:
+- `chunks_fts` and `entity_registry_fts`, because FTS5 `MATCH` cannot run through a view. Every query joins filtered `chunks`, `entities`, or `graph_episodes`; hidden rows cannot become returned results. Registry rows must never be served directly to a consumer.
 - The FTS storage tables, whose names are reserved.
 
-Neither contains anything the filtered join exposes.
+These indexes can contain hidden text; consumer readers must use the filtered joins. The scoped connection is an internal SDK implementation detail, not a general SQL execution interface for agents. Non-content relation/migration tables are also passed through.
+
+`graph_episode_provenance` durably records sources used by episode narratives. Removing a source clears current source associations, but must not make its old generated narrative readable. Membership claims and narrative provenance survive that removal. Detachment changes membership immediately while retaining narrative inputs; a complete consolidation rewrite replaces the inputs atomically. Merged episodes check the entire canonical identity group.
+
+Visibility is conservative after corrections: consolidation replaces the canonical episode's narrative inputs, while merged-away episodes retain their original narrative/provenance for undo. Those older inputs can keep the merged group hidden even after the canonical summary is rewritten. Unmerge and regenerate the original episode separately when its narrative needs replacement; do not clear provenance while leaving its old text intact. Closed or empty episodes are not automatically rewritten by the nightly pass.
 
 ### Writes from restricted profiles
 

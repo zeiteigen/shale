@@ -2,6 +2,8 @@
 
 A local knowledge workspace with SQLite storage, modular connectors, and a unified web interface for host controls, settings, and the knowledge graph.
 
+For agent/contributor onboarding, start with [docs/README.md](docs/README.md): project goals, architecture, code map, data model, knowledge pipeline, connectors, and development workflow.
+
 ```sh
 bun run setup   # bun install (root + visualizer) and each extension's installer, e.g. Instagram's Python sidecar
 bun run start

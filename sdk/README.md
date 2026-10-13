@@ -106,7 +106,7 @@ Extensions declare a `checkpoint_recover` script in `manifest.json`:
 
 ## Phase 4: The Stateless Extension Workflow (SOP)
 
-Every cron-based extension in the Shale ecosystem must adhere to the 6-step stateless lifecycle:
+Collection extensions commonly follow this stateless lifecycle. Processing-only jobs and shared chat connectors have their own bounded workflows; see [extension development](../docs/extensions.md).
 
 ```mermaid
 graph TD
@@ -125,13 +125,10 @@ graph TD
 
 ```typescript
 // extensions/my-extension/index.ts
-import { createExtensionSDK } from "@shale/sdk";
+import type { ShaleSDK } from "@shale/sdk";
 
-// When invoked by Shale cron runner, `shared.sdk` is provided automatically.
-// Or instantiate directly:
-const sdk = shared?.sdk ?? createExtensionSDK("my-extension");
-
-export async function run() {
+// The host invokes the exported runner inside the SDK's ambient scope.
+export async function run(sdk: ShaleSDK) {
   // Step 1: Check Watermark
   const cursor = sdk.state.getWatermark("channel-general") ?? "0";
 
@@ -151,29 +148,31 @@ export async function run() {
   const prompt = `History:\n${context.combinedText}\n\nNew Messages:\n${newItems.map((m) => m.text).join("\n")}`;
   const extracted = await callLLM(prompt);
 
-  // Step 5: Ingest (Source, Chunks, and Graph)
-  sdk.ingest.sourceAndChunks({
-    source: {
-      type: "chat_thread",
-      uri: threadUri,
-      origin: "discord",
-      title: "Discord #general",
-    },
-    chunks: extracted.chunks.map((c) => ({
-      text_content: c.text,
-    })),
-  });
-
-  if (extracted.entities.length > 0) {
-    sdk.graph.ingest({
-      entities: extracted.entities,
-      edges: extracted.edges,
+  // Steps 5-6: Commit source, graph and progress together after model work.
+  sdk.database.transaction(() => {
+    sdk.ingest.sourceAndChunks({
+      source: {
+        type: "chat_thread",
+        uri: threadUri,
+        origin: "discord",
+        title: "Discord #general",
+      },
+      chunks: extracted.chunks.map((c) => ({
+        text_content: c.text,
+      })),
     });
-  }
 
-  // Step 6: Advance Watermark
-  const latestId = newItems[newItems.length - 1].id;
-  sdk.state.setWatermark(latestId, "channel-general");
+    if (extracted.entities.length > 0) {
+      sdk.graph.ingest({
+        entities: extracted.entities,
+        edges: extracted.edges,
+      });
+    }
+
+    // Step 6: Advance Watermark
+    const latestId = newItems[newItems.length - 1].id;
+    sdk.state.setWatermark(latestId, "channel-general");
+  }).immediate();
 }
 ```
 ## Runtime and recovery guarantees

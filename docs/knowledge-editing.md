@@ -1,8 +1,12 @@
 # Knowledge editing through MCP
 
+For the surrounding system, read [the data model](data-model.md), [knowledge pipeline](knowledge-pipeline.md), and [access control](access-control.md).
+
 The MCP editing surface adds 32 tools to the existing graph tools. Mutations share validation with `sdk.knowledge`, record an actor and a meaningful reason, and preserve provenance. Read tools return IDs and versions needed for precise edits. Candidate tools suggest leads for review; they never create connections or merge entities themselves. Background identity resolution does merge automatically, but only on strong evidence (a shared account, repository, or URL key, or a model registry match corroborated by a name key, or a model adjudication at 0.85 confidence or more); every such merge is recorded in `graph_identity_changes` with its reason and can be undone with `unmerge_entities`. People are never merged on a shared name alone.
 
 ## Editing tools
+
+Episode tools are registered separately in `mcp/tools/episodes.ts`. `list_episodes`, `get_episode`, and `entity_timeline` are read entry points. `merge_episodes`, `split_episode`, and `detach_from_episode` are audited mutations with actor/reason and profile write guards. A merge groups identities without copying member claims; `unmerge_entities` separates the identity/member groups using the returned change ID. Consolidation refreshes generated narratives after correction. Detaching retracts membership but retains narrative provenance until a complete replacement title/summary is committed, so stale content cannot bypass source permissions.
 
 | Tool | Purpose |
 | --- | --- |

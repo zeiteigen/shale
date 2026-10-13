@@ -2,6 +2,8 @@
 
 This document outlines the core conventions, architecture patterns, and best practices for developing and maintaining the Shale codebase.
 
+For repository onboarding and detailed current context, start with [docs/README.md](docs/README.md). It links the architecture, code map, data model, knowledge pipeline, connector catalog, and development workflow. Historical plans and dated runtime reports are not current operational state.
+
 ---
 
 ## 1. Core Principles
@@ -207,14 +209,14 @@ bun run setup instagram     # just one extension (e.g. its Python sidecar)
 ```
 
 ### Launch Host & Interactive Daemon CLI
-When starting the host daemon, an interactive CLI runs over `process.stdin`:
+The host serves the web interface by default. Add `--cli` to enable the legacy interactive console over `process.stdin`:
 ```bash
-# Run Shale host daemon (loads extensions, starts HTTP /ingest on :7425, opens CLI)
+# Run Shale host daemon (loads extensions, serves web UI and HTTP /ingest on :7425)
 bun run main/index.ts
 
 # Optional flags:
-bun run main/index.ts --run-all-cron   # Run all crons once on boot
-bun run main/index.ts --no-cli         # Disable interactive CLI (headless/background mode)
+bun run main/index.ts --run-all-cron   # Run all crons once, then exit
+bun run main/index.ts --cli            # Enable the interactive CLI
 ```
 
 #### Running Commands in the Daemon CLI:
@@ -242,7 +244,7 @@ bun run main/index.ts --no-cli         # Disable interactive CLI (headless/backg
 
 ### Launch Visualizer
 ```bash
-# Launch knowledge graph visualizer web server
+# Compatibility launcher for the unified host/web interface
 bun run scripts/serve-visualizer.ts
 ```
 
@@ -254,7 +256,7 @@ bun run scripts/serve-visualizer.ts
 - **`extensions/browser`**: Syncs Chrome browser tabs and visits. Aggregates tabs into browsing sessions, generates synthetic narrative summaries, and stores web history/bookmarks as verbatim chunks.
 - **`extensions/process-image`**: Multimodal image processing service. Deconstructs diagrams, charts, and photos into verbatim visual layout and synthetic conceptual meaning chunks. Handles `file:process`, `files:process`, and `files:can-process`.
 - **`extensions/source-linker`**: BM25 source-pair linker. Disabled by default (`enabled: false`), superseded by identity resolution and episodes.
-- **`extensions/discord`**: Ingests Discord channels, threads, and DMs from DiscordChatExporter JSON exports dropped into `data/discord/import`. The hourly `discord-sync` cron uses the account connected on the web interface's Accounts page (user or bot token) and the exporter installed by `bun run setup discord`. It sweeps every visible server and DM channel by channel, with per-channel watermarks; the first sync of a channel fetches its full history. Messages are split into conversation windows (one source each) with LLM summaries, and authors become `Person` entities with `external:discord` aliases.
+- **`extensions/discord`**: Imports DiscordChatExporter JSON and performs bounded relevance-driven REST sync with the connected account. Time/request/message budgets, recent sampling, incremental cursors, and limited backfill mean coverage can be incomplete. Only admitted settled windows become searchable memories; the rolling raw archive remains private. Explicit participation, interests, and inclusion/exclusion rules guide admission. See the extension README for reconciliation and reclassification.
 - **`extensions/instagram`**: Ingests Instagram DMs from the official "Download your information" JSON export (`data/instagram/import`), repairing the export's mojibake. An optional `instagram-sync` cron runs a Python instagrapi sidecar (`sidecar/ig_sync.py`), signed in from the Accounts page (password with 2FA/challenge codes, or a session cookie), that merges into the same threads without duplicates. Uses the same windowing as Discord.
 - **`extensions/ai-chats`**: Ingests ChatGPT, Claude, and Gemini conversations through its Chrome module, which reads them from tabs where the user is signed in.
   - **ChatGPT and Claude:** read through the sites' own JSON endpoints. A conversation is captured when opened and re-checked while visible. A resumable `sync` job lists conversations and fetches the ones that changed.
@@ -280,6 +282,6 @@ Users decide which data each consumer may use (`docs/access-control.md`).
 - **Tiers and profiles.** Records have a tier (`public < personal < private < secret`), set automatically by heuristics and `access-classifier`, or manually. Profiles in `resources/access.json` (read fresh, created with defaults on first use) set a clearance plus `allow`/`deny` source patterns and `write`.
 - **Enforcement lives in the database layer.** `lib/access/scoped-database.ts` gives each restricted profile a read-only connection whose TEMP views shadow every `main` table. Unknown tables are shadowed by empty views. Readers need no permission code of their own; just use the scoped SDK.
 - **New tables.** Add a row filter to `shadowFilters` if a scoped consumer should see the table's rows; otherwise it stays hidden. New `chunks_fts` queries must join `chunks`. New `entity_registry_fts` queries must join `entities` (or `graph_episodes`).
-- **Episodes.** An `Episode` entity is visible only when every member source is (`lib/access/visibility.ts`), because its title and summary are written from all of them.
+- **Episodes.** An `Episode` entity is visible only when every active member and retained narrative input source is visible across its identity group (`lib/access/visibility.ts`). Durable `graph_episode_provenance` survives detachment and source removal until a complete narrative rewrite replaces its inputs.
 - **New write paths.** Add every write tool or knowledge operation to `WRITE_REFERENCES` in `lib/access/write-guard.ts`, listing the record ids it references. Unlisted writes are refused for restricted profiles. Audited writes must go through `sdk.knowledge` (`record`/`apply`) so the guard runs inside the transaction.
 - **MCP.** Clients authenticate with `Authorization: Bearer <token>`; tokens are created on the web interface's Access page. Requests without a token use `unauthenticatedProfile`.

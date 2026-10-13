@@ -2,6 +2,8 @@
 
 Shale keeps a summary and selected snippets for each logical source. It processes original contents transiently during ingestion and explicit refresh; the database cannot reconstruct omitted details. Small sources can naturally fit in one exact excerpt.
 
+This describes the long-term searchable memory contract. Connector-private operational tables can retain bounded raw messages/captions for collection, recovery and refresh; they are hidden from scoped consumers. See [architecture](architecture.md), [the data model](data-model.md), and [connector behavior](extensions.md) for the surrounding system.
+
 ## Storage contract
 
 | Record | Stored information |
@@ -24,7 +26,7 @@ The automatic fallback creates an extractive overview across paragraphs, heading
 
 ## Agent workflow
 
-1. `search_graph` returns one preview per matching source, with `summaryVersionId` or `snippetVersionId`. Default limit is five sources. Activity/history/session records and metadata-quality browser captures require explicit type/source filters. Graph expansion defaults to zero seeds.
+1. `search_graph` returns one preview per matching source, with `summaryVersionId` or `snippetVersionId`. Default limit is five sources. Activity/history/session records and metadata-quality browser captures require explicit type/source filters. Graph expansion defaults to three hit seeds, using accepted links and confident proposed links; each claim retains its status. Set `maxSeeds:0` to disable neighborhood expansion. Related episodes accompany matching sources.
 2. `get_source_memory` reads the summary and a paginated snippet array. `get_snippet` reads a retained immutable passage version directly. Both declare `completeOriginal:false`.
 3. `edit_source_memory` adds, revises or retires snippets and optionally changes the summary. Supply `expectedVersion`, `actor`, `reason`, and an optional `requestId`. Conflicting versions and changed retry payloads fail without partial writes.
 4. An exact excerpt must match retained observed text. Its coordinates are derived from that observation. New interpretations use `kind:"derived"`.
@@ -37,6 +39,8 @@ Responses default to a 16,000-character JSON budget, with an explicit maximum of
 ## Connector retention and recovery
 
 Browser pages use one canonical logical source. History/bookmarks keep metadata and references, and sessions keep narratives and visit references. Raw event JSON is operational data, excluded from ordinary knowledge search. Completed browser jobs/caches retain receipts. Pending raw captures, prepared sessions/cache entries and Chrome outbox captures expire after 24 hours; reacquisition is explicit after expiry. The worker/status sweeps enforce host retention, and outbox reads enforce client expiry. Typed activity records have a 90-day retention window.
+
+Discord uses a separate rolling raw archive bounded by age, payload size and per-conversation count; accepted windows become retained memories. YouTube keeps multipart captions and intermediate synthesis privately while producing bounded summaries/snippets. Shared chat refresh uses exact message membership and reports unavailable/incomplete when missing messages cannot be restored. These private stores do not make complete original history available to MCP.
 
 Notes, documents and images compact preparations before checkpointing. Source-linker work queues store source/revision references and pin only retained passages temporarily. Checkpoints and audits do not provide a hidden full-body archive. Source archives/restores preserve selected memory, snippet identity, locators and associations.
 
@@ -64,7 +68,7 @@ The running instance was stopped, backed up, migrated, compacted and restarted. 
 | --- | ---: | ---: |
 | Current plus historical stored text | 23,273,875 characters | 6,648,842 characters (71.4% reduction) |
 | Compacted database pages | 115,286,016 bytes | 75,784,192 bytes (34.3% reduction) |
-| Three-source `WaterlooWorks` MCP response | 833,781 characters | 2,563 characters (99.7% reduction) |
+| Three-source `CareerPortal` MCP response | 833,781 characters | 2,563 characters (99.7% reduction) |
 | Three-source `Shale` MCP response | 98,291 characters | 2,404 characters |
 
 11,252 historical evidence records were regrounded into retained excerpts or structured source-level observations. 8,401 broad historical citations now explicitly report unavailable text; many concern obsolete location/content claims, which were retracted. The stale-claim inventory increased from 2,642 to 3,825. Exact retained quotations validate against retained passages. The largest distinct retained-text history was 26,991 characters, below the 32,000-character cap.

@@ -1,6 +1,6 @@
 # Shale roadmap
 
-Updated 2026-10-11. Retained memory is implemented; dreaming and its usage analytics are future capabilities.
+Updated 2026-10-13. Retained memory and cross-source identity/episodes are implemented; dreaming and its usage analytics are future capabilities. Start with [the repository context](README.md) for the current system.
 
 ## Implemented foundation: summary and snippet memory
 
@@ -10,7 +10,15 @@ Summaries provide broad coverage. Snippets preserve the details useful for answe
 
 The memory schema, edit/refresh contracts, connector changes, bounded MCP retrieval, optional graph expansion, evidence migration, and database compaction are implemented. Exact cited excerpts keep immutable identities; discarded details have explicit availability states. See [the source memory guide](source-memory.md) for current contracts and limits.
 
-The [implementation plan](plans/content-storage-and-mcp-plan.md) contains the live database/MCP measurements, proposed storage model, migration sequence, and validation criteria.
+The [historical implementation plan](plans/content-storage-and-mcp-plan.md) contains the dated database/MCP measurements, proposed storage model, migration sequence, and validation criteria.
+
+## Implemented foundation: connected identities and episodes
+
+Source digests now capture resolved entities, grounded assertions, user involvement and activity. The registry supplies cross-source identity keys and model shortlists; the resolver merges strong identities and adjudicates ambiguous candidates. Episodes connect sources belonging to a pursuit, with reviewed assignment, context reconsideration, nightly title/summary/step consolidation, and agent corrections. Search expands retained-memory hits into graph neighborhoods and returns related episodes; consumers can also retrieve episodes and entity timelines directly.
+
+YouTube watch/caption ingestion, bounded Discord relevance-driven REST sync, email cursor/gap recovery, and live graph display updates are implemented. These are bounded collection/processing capabilities, not a promise of complete historical coverage. See [the pipeline](knowledge-pipeline.md) and [extension catalog](extensions.md).
+
+Episode consolidation is distinct from the future dreaming milestone below: it organizes existing digests and membership; it does not autonomously reopen old original sources using retrieval-usage analytics. Ongoing work includes backlog/coverage evaluation, extraction quality, and correction of unsupported historical graph assertions. Dated runtime reports under `resources/` require fresh validation before being treated as current status.
 
 ## Future milestone: dreaming and targeted re-ingestion
 
