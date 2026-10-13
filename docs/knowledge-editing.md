@@ -1,6 +1,6 @@
 # Knowledge editing through MCP
 
-The MCP editing surface adds 32 tools to the existing graph tools. Mutations share validation with `sdk.knowledge`, record an actor and a meaningful reason, and preserve provenance. Read tools return IDs and versions needed for precise edits. Candidate tools suggest leads for review; they never automatically create connections or merge entities.
+The MCP editing surface adds 32 tools to the existing graph tools. Mutations share validation with `sdk.knowledge`, record an actor and a meaningful reason, and preserve provenance. Read tools return IDs and versions needed for precise edits. Candidate tools suggest leads for review; they never create connections or merge entities themselves. Background identity resolution does merge automatically, but only on strong evidence (a shared account, repository, or URL key, or a model registry match corroborated by a name key, or a model adjudication at 0.85 confidence or more); every such merge is recorded in `graph_identity_changes` with its reason and can be undone with `unmerge_entities`. People are never merged on a shared name alone.
 
 ## Editing tools
 
@@ -109,6 +109,8 @@ Source content changes conservatively mark claims supported by that source stale
 ## Discover, inspect, and connect
 
 Start with `list_entities`, `resolve_entities`, or `search_graph`. Inspect an exact identity and its existing connections before adding another. `find_connection_candidates` ranks possible connections; `find_duplicate_entities` identifies possible identity overlaps. These outputs are suggestions. Review shared evidence, exact source text, and identity details before authorizing any connection, merge, or split.
+
+Episodes group the user's pursuits across sources. Read them with `list_episodes`, `get_episode` (a dated timeline with each member's role and step), and `entity_timeline`. Correct them with `merge_episodes` (reversible with `unmerge_entities`), `split_episode`, and `detach_from_episode`; all three are audited.
 
 For a supported relationship, use `connect_entities` with the predicate and source evidence. For an incorrect relationship, use `revise_connection` or `retract_connection`. For claims that depend on earlier claims, use explicit dependencies. Search results are discovery aids; establish factual support from source evidence.
 

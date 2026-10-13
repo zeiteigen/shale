@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Activity, KeyRound, Network, Settings, ShieldCheck, Square } from "lucide-react";
+import { Activity, GitBranch, KeyRound, Network, Settings, ShieldCheck, Square } from "lucide-react";
 import { HostPanel } from "./HostPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { AccountsPanel } from "./AccountsPanel";
 import { AccessPanel } from "./AccessPanel";
+import { EpisodesPanel } from "./EpisodesPanel";
 import Notebook from "./Notebook";
 import { usePoll } from "./use-poll";
 import { post } from "./control-api";
@@ -17,6 +18,7 @@ const pages = [
   { id: "accounts", title: "Accounts", icon: KeyRound },
   { id: "access", title: "Access", icon: ShieldCheck },
   { id: "knowledge", title: "Knowledge", icon: Network },
+  { id: "episodes", title: "Episodes", icon: GitBranch },
 ] as const;
 function currentPage() {
   const hash = window.location.hash.slice(1);
@@ -53,6 +55,6 @@ export default function App() {
     <button className="stop-button" onClick={stop} disabled={stopped || stopping || !!error || !host}><Square size={13} /> Stop host</button></header>
     {!stopped && (error || stopError) && <div className="connection-error" role="alert">{stopError ?? `Cannot reach the Shale host: ${error}`}<button className="text-button" onClick={refresh}>Retry</button></div>}
     {stopped ? <main className="control-page"><h1>Shale has stopped.</h1><p>Start Shale again to resume your workspace, then reload this page.</p></main>
-      : page === "settings" ? <SettingsPanel /> : page === "accounts" ? <AccountsPanel /> : page === "access" ? <AccessPanel /> : page === "knowledge" ? <Notebook /> : <HostPanel host={host} onChanged={refresh} />}
+      : page === "settings" ? <SettingsPanel /> : page === "accounts" ? <AccountsPanel /> : page === "access" ? <AccessPanel /> : page === "knowledge" ? <Notebook /> : page === "episodes" ? <EpisodesPanel /> : <HostPanel host={host} onChanged={refresh} />}
   </div>;
 }

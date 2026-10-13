@@ -7,7 +7,8 @@
     "instagram.com",
     "tiktok.com",
     "linkedin.com",
-    "youtube.com"
+    "youtube.com",
+    "localhost"
   ],
   "excludePatterns": [
     "*localhost:7425*",

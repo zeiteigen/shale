@@ -1,0 +1,10 @@
+{
+  "name": "episodes",
+  "version": "1.0.0",
+  "description": "Cross-source episodes: groups digested sources into the user's ongoing pursuits, with a timeline, summary, and involved entities.",
+  "namespace": "episodes",
+  "crons": [
+    { "name": "episodes-assign", "schedule": "*/10 * * * *", "script": "index.ts", "run_on_startup": true },
+    { "name": "episodes-consolidate", "schedule": "30 3 * * *", "script": "consolidate-run.ts" }
+  ]
+}

@@ -199,7 +199,8 @@ export class UnifiedIngestor {
       };
     });
 
-    return txn();
+    // Reserve the writer before identity/exclusion reads to avoid a deferred read-to-write upgrade.
+    return txn.immediate();
   }
 }
 

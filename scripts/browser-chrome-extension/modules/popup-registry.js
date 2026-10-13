@@ -2,8 +2,10 @@
 import { render as render0 } from "./browser/popup.js";
 import { render as render1 } from "./ai-chats/popup.js";
 import { render as render2 } from "./search-queries/popup.js";
+import { render as render3 } from "./youtube/popup.js";
 export default [
   { id: "browser", render: render0 },
   { id: "ai-chats", render: render1 },
   { id: "search-queries", render: render2 },
+  { id: "youtube", render: render3 },
 ];

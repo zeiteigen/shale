@@ -1,6 +1,12 @@
 {
   "extension": "source-linker",
   "settings": {
+    "enabled": {
+      "type": "boolean",
+      "description": "Run BM25 pair linking. Off by default: knowledge-graph identity resolution and episodes now connect sources.",
+      "default": false,
+      "possibleValues": [true, false]
+    },
     "maxPairsPerRun": {
       "type": "number",
       "description": "Maximum number of candidate source pairs evaluated by the LLM per cron or run invocation to manage latency and token usage.",

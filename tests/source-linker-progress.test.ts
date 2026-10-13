@@ -13,6 +13,8 @@ import { join } from "node:path";
 function fixture() {
   const database = createTestDatabase();
   const sdk = createExtensionSDK("source-linker", { database });
+  const get = sdk.settings.get.bind(sdk.settings);
+  sdk.settings.get = ((key: string, fallback?: unknown) => key === 'enabled' ? true : get(key, fallback)) as typeof sdk.settings.get;
   for (const [i, title] of ["Same title", "Same title", "Third"].entries()) {
     sdk.ingest.sourceAndChunks({
       source: { id: `id${i}`, type: "test", origin: "test", uri: `uri:${i}`, title, updated_at: 100 + i },
@@ -46,6 +48,21 @@ it("retains failed analyses and candidate overflow across bounded runs", async (
     expect(sdk.state.getWatermark(WATERMARK_KEY)).toBe("102");
     expect(calls).toBe(4);
     expect((await processSourceLinks(sdk)).sourcesAnalyzed).toBe(0);
+  } finally { database.close(); }
+});
+
+it('preserves pending decisions while disabled and recovers them after explicit re-enabling', async () => {
+  const { database, sdk, pair } = fixture();
+  const enabled = sdk.settings.get.bind(sdk.settings);
+  try {
+    await analyzeSourcePairWithLLM(pair, sdk);
+    sdk.settings.get = ((key: string, fallback?: unknown) => key === 'enabled' ? false : enabled(key, fallback)) as typeof sdk.settings.get;
+    expect(await recover(sdk)).toMatchObject({ recoveredCount: 0, edgesCommitted: 0 });
+    expect(sdk.hasCheckpoints()).toBe(true);
+    expect(database.query('SELECT id FROM graph_claims').all()).toEqual([]);
+    sdk.settings.get = enabled;
+    expect((await recover(sdk)).edgesCommitted).toBeGreaterThan(0);
+    expect(sdk.hasCheckpoints()).toBe(false);
   } finally { database.close(); }
 });
 

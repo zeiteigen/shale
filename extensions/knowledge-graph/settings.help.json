@@ -1,0 +1,11 @@
+{
+  "extension": "knowledge-graph",
+  "settings": {
+    "resolverEnabled": {"type": "boolean", "description": "Resolve identities across sources: key connector entities, gather the user's accounts, and adjudicate likely duplicates.", "default": true, "possibleValues": [true, false]},
+    "selfNames": {"type": "string[]", "description": "Names the user goes by. The first becomes the label of the user's own Person entity.", "default": []},
+    "selfEmails": {"type": "string[]", "description": "Email addresses that belong to the user, besides the connected mail account.", "default": []},
+    "selfHandles": {"type": "string[]", "description": "The user's accounts as kind:value, e.g. github:octocat or linkedin:in/octocat. Connected Discord accounts are added automatically.", "default": []},
+    "maxAdjudicationsPerRun": {"type": "number", "description": "Maximum queued identity pairs the model decides per run (eight per request).", "default": 32, "range": {"min": 0, "max": 400}},
+    "llmModel": {"type": "string", "description": "Optional chat model override for identity adjudication.", "default": null}
+  }
+}

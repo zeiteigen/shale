@@ -19,6 +19,7 @@ import { startCli, handleCliCommand } from "./cli";
 import { startWebServer } from "./web-server";
 import { WebLogs } from "./web-logs";
 import { trackCronRun } from "./cron-runs";
+import { runStartupJobs } from "./startup-crons";
 import { startMcpServer, type RunningMcpServer } from "../mcp";
 
 export {
@@ -55,34 +56,34 @@ export async function runCheckpointRecover(
     return;
   }
 
-  await sdk.models.run( () =>
-    sdkStorage.run(sdk, async () => {
-      let mod: any;
-      try {
-        mod = await import(scriptPath);
-      } catch {
-        // Fall back to transpilation/AsyncFunction if dynamic import fails
+  // Recovery acquires extension leases before any model work. Individual SDK model
+  // calls are scheduled already; holding the GPU while waiting for a lease inverts that order.
+  await sdkStorage.run(sdk, async () => {
+    let mod: any;
+    try {
+      mod = await import(scriptPath);
+    } catch {
+      // Fall back to transpilation/AsyncFunction if dynamic import fails
+    }
+
+    if (mod) {
+      if (typeof mod.run === "function") {
+        await mod.run(sdk, context);
+        return;
       }
-
-      if (mod) {
-        if (typeof mod.run === "function") {
-          await mod.run(sdk, context);
-          return;
-        }
-        if (typeof mod.default === "function") {
-          await mod.default(sdk, context);
-          return;
-        }
+      if (typeof mod.default === "function") {
+        await mod.default(sdk, context);
+        return;
       }
+    }
 
-      const code = await Bun.file(scriptPath).text();
-      const transpiler = new Bun.Transpiler({ loader: "ts" });
-      const jsCode = transpiler.transformSync(code);
-      const runFn = new AsyncFunction("shared", jsCode);
+    const code = await Bun.file(scriptPath).text();
+    const transpiler = new Bun.Transpiler({ loader: "ts" });
+    const jsCode = transpiler.transformSync(code);
+    const runFn = new AsyncFunction("shared", jsCode);
 
-      await runFn({ sdk, context });
-    }),
-  );
+    await runFn({ sdk, context });
+  });
 }
 
 export async function wait_for_checkpoint_script(
@@ -182,15 +183,9 @@ async function executeCron(cron: CronExtension, sdkOverride?: ShaleSDK) {
 
 /** Run only crons explicitly marked for the host startup phase. */
 export async function runStartupCrons() {
-  for (const cron of crons) {
-    if (cron.run_on_startup) {
-      try {
-        await runCron(cron);
-      } catch (error) {
-        console.error(`[cron] Startup job ${cron.name || cron.extensionId} failed:`, error);
-      }
-    }
-  }
+  await runStartupJobs(crons, runCron, (cron, error) => {
+    console.error(`[cron] Startup job ${cron.name || cron.extensionId} failed:`, error);
+  });
 }
 
 export async function runAllCrons() {

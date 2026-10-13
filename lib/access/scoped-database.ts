@@ -7,8 +7,9 @@ import { materializeVisibility, visibilityCounts, visibleTable, type VisibleSet 
 const PREFIX = "access";
 
 /** Tables without user content, readable unfiltered. FTS5 MATCH cannot run through a view; every
- *  `chunks_fts` query joins `chunks`, whose shadow view drops hidden rows. */
-export const PASSTHROUGH_TABLES = new Set(["graph_relations", "graph_migrations", "chunks_fts"]);
+ *  `chunks_fts` query joins `chunks`, and every `entity_registry_fts` query joins `entities` (or a table
+ *  keyed by entity), whose shadow views drop hidden rows. */
+export const PASSTHROUGH_TABLES = new Set(["graph_relations", "graph_migrations", "chunks_fts", "entity_registry_fts"]);
 
 /** Virtual-table storage (e.g. `chunks_fts_data`) has reserved names that cannot be shadowed. */
 export function virtualTableStorage(db: Database): Set<string> {
@@ -38,6 +39,7 @@ export function shadowFilters(profileName: string): Record<string, string> {
     graph_revision_passages: `revision_id IN ${v("revisions")}`,
     graph_memory_texts: `id IN ${v("texts")}`,
     entities: `id IN ${v("entities")}`,
+    graph_entity_retirements: `entity_id IN ${v("entities")}`,
     edges: `source_entity_id IN ${v("entities")} AND target_entity_id IN ${v("entities")} AND EXISTS(SELECT 1 FROM main.graph_claims c
       WHERE c.subject_id=source_entity_id AND c.object_id=target_entity_id AND c.predicate=relation AND c.id IN ${v("claims")})`,
     graph_aliases: `entity_id IN ${v("entities")}`,
@@ -45,6 +47,11 @@ export function shadowFilters(profileName: string): Record<string, string> {
     graph_events: `entity_id IN ${v("entities")} AND (claim_id IS NULL OR claim_id IN ${v("claims")})`,
     graph_participants: `event_id IN ${v("entities")} AND entity_id IN ${v("entities")} AND claim_id IN ${v("claims")}`,
     graph_claims: `id IN ${v("claims")}`,
+    graph_source_digests: `source_id IN ${v("sources")}`,
+    graph_digest_signals: `source_id IN ${v("sources")} AND entity_id IN ${v("entities")}`,
+    // An episode is labelled as sensitive as its most sensitive member (lib/access/classify.ts).
+    graph_episodes: `entity_id IN ${v("entities")}`,
+    graph_episode_provenance: `entity_id IN ${v("entities")} AND source_id IN ${v("sources")}`,
     graph_dependencies: `claim_id IN ${v("claims")} AND depends_on IN ${v("claims")}`,
     graph_claim_links: `source_id IN ${v("claims")} AND target_id IN ${v("claims")}`,
     graph_reviews: `claim_id IN ${v("claims")}`,
@@ -90,7 +97,8 @@ export class ScopedDatabase {
     const objects = this.db.query<{ name: string; type: string; sql: string | null }, []>(
       "SELECT name,type,sql FROM main.sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'").all();
     const storage = virtualTableStorage(this.db);
-    this.materialize();
+    // Classify and record the snapshot once; the subsequent SDK refresh can reuse it.
+    this.refresh();
     this.db.transaction(() => {
       for (const object of objects) {
         if (PASSTHROUGH_TABLES.has(object.name) || storage.has(object.name)) continue;

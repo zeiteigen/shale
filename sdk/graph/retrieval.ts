@@ -27,7 +27,8 @@ export function expandGraphResults(db: Database, graph: GraphIngestor, results: 
   let remainingClaims=options.graph?.maxClaims ?? 100;
   const neighborhoods = selected.map(start=>{
     if(remainingNodes===0 || remainingClaims===0) return {entities:[],claims:[],paths:[],truncated:true} as GraphTraversal;
-    const traversal=graph.query.traverse({...options.graph,start,
+    // Model-inferred links are retrieval signals too; weak ones stay out, and each claim carries its status.
+    const traversal=graph.query.traverse({statuses:['accepted','proposed'],minConfidence:0.6,...options.graph,start,
       maxNodes:remainingNodes,maxClaims:remainingClaims,direction:options.graph?.direction ?? 'both'});
     remainingNodes=Math.max(0,remainingNodes-traversal.entities.length);
     remainingClaims=Math.max(0,remainingClaims-traversal.claims.length);

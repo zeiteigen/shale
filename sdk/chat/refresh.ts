@@ -16,10 +16,15 @@ export function setupChatRefresh(sdk: ShaleSDK, connector: () => ChatConnector, 
       try {
         const current = connector();
         const row = current.store.windowBySource(source.id);
+        if (row) await current.policy?.restore?.(row.window_id);
         const conversation = row && current.store.conversation(row.conversation_id);
-        const messages = row ? current.store.messagesBetween(row.conversation_id, row.start_time, row.end_time) : [];
+        const ids:string[]|null=row?.message_ids ? JSON.parse(row.message_ids) : null;
+        const messages = row ? ids ? current.store.loadMessages(row.conversation_id,ids)
+          : current.store.messagesBetween(row.conversation_id, row.start_time, row.end_time) : [];
         if (!row || !conversation || !messages.length)
           return { sourceId: source.id, status: "unavailable", reason: "The stored messages for this window are gone" };
+        if (ids && messages.length!==ids.length)
+          return {sourceId:source.id,status:"unavailable",reason:"The raw archive is incomplete; missing messages could not be retrieved"};
         sdk.checkpoint.delete(chatCheckpointId(row.window_id));
         const prepared = await prepareWindow(sdk, current, { windowId: row.window_id, conversation, messages,
           startTime: row.start_time, endTime: row.end_time, messageHash: row.message_hash }, settings());

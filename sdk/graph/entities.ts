@@ -2,6 +2,7 @@ import { randomUUIDv7 } from "bun";
 import type { Database } from "bun:sqlite";
 import type { EntityInput, GraphEntity } from "./types";
 import { recordVersion } from '../knowledge/version';
+import { sameFamily } from '../../lib/graph/ontology';
 
 export class GraphEntities {
   constructor(private db: Database, private namespace: string) {}
@@ -46,6 +47,7 @@ export class GraphEntities {
           .run(input.namespace ?? this.namespace, `entity:${stableId}`, input.name, input.type, stableId);
       }
       const id = this.db.query<{id: number}, [string]>('SELECT id FROM entities WHERE stable_id=?').get(stableId)!.id;
+      this.db.query('DELETE FROM graph_entity_retirements WHERE entity_id=?').run(id);
       this.addAlias(id, input.name);
       for (const alias of input.aliases ?? [])
         this.addAlias(id, typeof alias === 'string' ? alias : alias.name, typeof alias === 'string' ? '' : alias.scope);
@@ -68,8 +70,13 @@ export class GraphEntities {
   addAlias(id: number, name: string, scope = '') {
     this.get(id);
     if (!name.trim()) throw new Error('Alias is required');
-    if (scope.startsWith('external:') && this.resolve(name.trim(),scope).some(e => e.id !== this.canonical(id).id))
-      throw new Error('External identifier already belongs to another entity');
+    if (scope.startsWith('external:')) {
+      // Retired identities still own their external IDs even though ordinary discovery omits them.
+      const owners=this.db.query<{entity_id:number},[string,string]>(
+        'SELECT entity_id FROM graph_aliases WHERE alias=? AND scope=?').all(name.trim(),scope);
+      if(owners.some(owner=>this.canonical(owner.entity_id).id!==this.canonical(id).id))
+        throw new Error('External identifier already belongs to another entity');
+    }
     this.db.query('INSERT OR IGNORE INTO graph_aliases VALUES(?,?,?)').run(id, name.trim(), scope);
   }
 
@@ -81,7 +88,8 @@ export class GraphEntities {
   resolve(name: string, scope = '', namespace?: string): GraphEntity[] {
     const ids = this.db.query<{id: number}, [string,string,string,string,string,string|null,string|null]>(`
       SELECT DISTINCT e.id FROM entities e LEFT JOIN graph_aliases a ON a.entity_id=e.id
-      WHERE (e.stable_id=? OR (a.alias=? AND a.scope=?) OR (?='' AND coalesce(e.display_name,e.name)=?))
+      WHERE NOT EXISTS(SELECT 1 FROM graph_entity_retirements r WHERE r.entity_id=e.id)
+      AND (e.stable_id=? OR (a.alias=? AND a.scope=?) OR (?='' AND coalesce(e.display_name,e.name)=?))
       AND (? IS NULL OR e.namespace=?) ORDER BY e.id`).all(name,name,scope,scope,name,namespace ?? null,namespace ?? null);
     return [...new Map(ids.map(row => { const entity = this.canonical(row.id); return [entity.id,entity]; })).values()];
   }
@@ -92,7 +100,7 @@ export class GraphEntities {
       const source = this.get(from);
       const target = this.canonical(into);
       if (source.canonicalId !== null || target.id === from) throw new Error('Invalid entity merge');
-      if (source.type !== target.type) throw new Error('Cannot merge entities with different types');
+      if (!sameFamily(source.type, target.type)) throw new Error('Cannot merge entities with different types');
       const id = randomUUIDv7();
       this.db.query('INSERT INTO graph_identity_changes VALUES(?,?,?,?,?,NULL)').run(id,from,target.id,reason,Date.now());
       this.db.query('UPDATE entities SET canonical_id=? WHERE id=?').run(target.id,from);
@@ -107,6 +115,9 @@ export class GraphEntities {
       if (!change || this.get(change.entity_id).canonicalId !== change.canonical_id) throw new Error('Merge is not active');
       this.db.query('UPDATE entities SET canonical_id=NULL WHERE id=?').run(change.entity_id);
       this.db.query('UPDATE graph_identity_changes SET undone_at=? WHERE id=?').run(Date.now(),changeId);
+      // Episode narratives must be regenerated for the now-separate member groups.
+      this.db.query('UPDATE graph_episodes SET updated_at=? WHERE entity_id IN (?,?)')
+        .run(Date.now(), change.entity_id, change.canonical_id);
     })();
   }
 }

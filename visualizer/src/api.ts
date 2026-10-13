@@ -10,7 +10,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const graphRequests=new Map<string,{promise:Promise<GraphData>;expires:number;pending:boolean}>();
-export function getGraph(filter: {context?:string;at?:number} = {}, refresh=false) {
+export function getGraph(filter: {context?:string;at?:number} = {}, refresh: boolean | "snapshot" = false) {
   const query=new URLSearchParams();
   if (filter.context !== undefined) query.set('context',filter.context);
   if (filter.at !== undefined) query.set('at',String(filter.at));
@@ -18,7 +18,7 @@ export function getGraph(filter: {context?:string;at?:number} = {}, refresh=fals
   if(cached && (cached.pending || !refresh && cached.expires>Date.now()))return cached.promise;
   const entry={promise:Promise.resolve(null as unknown as GraphData),expires:0,pending:true};
   async function load() {
-    if(!refresh && filter.context===undefined && filter.at===undefined) {
+    if(refresh!==true && filter.context===undefined && filter.at===undefined) {
       try {
         const [graph,host]=await Promise.all([
           request<GraphData>(`/knowledge-map-${location.port || '80'}.json`,{cache:'no-store'}),

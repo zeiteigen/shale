@@ -5,6 +5,7 @@ import { createTestDatabase } from './fixtures/database';
 import { run } from '../extensions/knowledge-extractor';
 import { run as recover } from '../extensions/knowledge-extractor/recover';
 import { parseExtraction } from '../extensions/knowledge-extractor/parse';
+import { consistentDatatype } from '../extensions/knowledge-extractor/commit';
 import { acquireTaskLease } from '../lib/task-lease';
 import { extractionCursorKey } from '../extensions/knowledge-extractor/source-window';
 import { TruncatedChatCompletionError } from '../lib/ai/chat-errors';
@@ -31,6 +32,15 @@ function windowLimits(sdk: ReturnType<typeof createExtensionSDK>, maxSources = 5
     : key === 'maxSourcesPerRun' ? maxSources : get(key)) as typeof sdk.settings.get;
 }
 
+it('digests selected sources through the normal pipeline without consuming unrelated backlog', async () => {
+  const { sdk, db } = fixture(2);
+  expect(await run(sdk, { sourceIds: ['source-0'] })).toMatchObject({ committed: 1 });
+  expect(db.query('SELECT source_id FROM graph_source_digests').all()).toEqual([{ source_id: 'source-0' }]);
+  expect(await run(sdk, { sourceIds: ['source-0'] })).toMatchObject({ committed: 0 });
+  expect(await run(sdk, { sourceIds: ['source-1'] })).toMatchObject({ committed: 1 });
+  await expect(run(sdk, { sourceIds: [] })).rejects.toThrow('nonempty source id');
+});
+
 it('processes the entire revision in bounded windows with correct Unicode evidence offsets', async () => {
   const { sdk, db } = fixture(0);
   windowLimits(sdk);
@@ -51,7 +61,13 @@ it('processes the entire revision in bounded windows with correct Unicode eviden
   expect((await run(sdk)).committed).toBe(1);
   expect(sdk.state.get(`extracted:${revision}`)).toBeNull();
   expect(JSON.parse(sdk.state.get(extractionCursorKey(revision))!)).toMatchObject({ offset: 150, codePointOffset: 100 });
+  // Assignment can run between extraction windows and find no episode from the prefix.
+  db.query("UPDATE graph_source_digests SET episode_state='none',signals_at=1 WHERE source_id='long'").run();
   expect((await run(sdk)).committed).toBe(1);
+  const digest = db.query<{episode_state:string;signals_at:number|null;entity_ids:string}, []>(
+    "SELECT episode_state,signals_at,entity_ids FROM graph_source_digests WHERE source_id='long'").get()!;
+  expect(digest).toMatchObject({episode_state:'pending',signals_at:null});
+  expect(JSON.parse(digest.entity_ids)).toHaveLength(2);
   const claim = sdk.graph.claims.list({ predicate: 'CHOSE' })[0];
   expect(sdk.graph.evidence.list(claim.id)[0]).toMatchObject({ quote, locator: { start: 150, end: 150 + quote.length } });
   expect(sdk.state.get(`extracted:${revision}`)).toBeNull();
@@ -84,7 +100,8 @@ it('recovers a partial window transaction without repeating chat or marking the 
 it('gives unprocessed sources a turn before continuing a long source', async () => {
   const { sdk } = fixture(2);
   windowLimits(sdk, 1);
-  sdk.ingest.sourceAndChunks({ source: { id: 'source-0', uri: 'file:///source-0.md', title: 'Long source', type: 'note', origin: 'test', hash: 'long', updated_at:100 },
+  // Newest sources go first, so the long source would otherwise keep the turn.
+  sdk.ingest.sourceAndChunks({ source: { id: 'source-0', uri: 'file:///source-0.md', title: 'Long source', type: 'note', origin: 'test', hash: 'long', updated_at:200 },
     chunks: [{ text_content: 'a'.repeat(300) }] });
   const prompts: string[] = [];
   sdk.queryLLM = (async (prompt: string) => { prompts.push(prompt); return '{"entities":[],"claims":[],"events":[]}'; }) as typeof sdk.queryLLM;
@@ -94,12 +111,15 @@ it('gives unprocessed sources a turn before continuing a long source', async () 
   expect(prompts[1]).toContain('Source title: "Source 1"');
 });
 
-it('gives fresh sources a turn after an older source exhausts output validation retries', async () => {
+it('gives other sources a turn after a source exhausts output validation retries', async () => {
   const {sdk,extraction}=fixture(2);windowLimits(sdk,1);
-  sdk.queryLLM=(async ()=>'{"entities":[],"claims":[{}],"events":[]}') as unknown as typeof sdk.queryLLM;
+  sdk.queryLLM=(async (prompt:string|{messages:Array<{content:string}>})=> {
+    expect(typeof prompt==='string' ? prompt : prompt.messages[0]!.content).toContain('Source title: "Source 1"');
+    return '{"entities":[],"claims":[{}],"events":[]}';
+  }) as unknown as typeof sdk.queryLLM;
   expect(await run(sdk)).toMatchObject({committed:0,rejected:1});
   sdk.queryLLM=(async (prompt:string)=> {
-    expect(prompt).toContain('Source title: "Source 1"');
+    expect(prompt).toContain('Source title: "Source 0"');
     return JSON.stringify(extraction);
   }) as typeof sdk.queryLLM;
   expect((await run(sdk)).committed).toBe(1);
@@ -207,13 +227,21 @@ it('rolls back claims, events, progress, and checkpoint resolution together when
   expect((await recover(sdk)).committed).toBe(2);expect(sdk.hasCheckpoints()).toBe(false);
 });
 
-it('rejects ungrounded quotes before saving checkpoints or writing knowledge',async()=> {
+it('never writes an ungrounded claim; after retries it keeps only the grounded parts of the window',async()=> {
   const {sdk,extraction}=fixture();
   extraction.claims[0].evidence[0].quote='Bob chose PostgreSQL.';
-  sdk.queryLLM=(async()=>JSON.stringify(extraction)) as unknown as typeof sdk.queryLLM;
-  expect(await run(sdk)).toMatchObject({committed:0,rejected:1});
-  expect(sdk.hasCheckpoints()).toBe(false);expect(sdk.graph.claims.list()).toHaveLength(0);
-  expect(sdk.state.getAll().some(row=>row.state_key.startsWith('extraction-rejected:'))).toBe(true);
+  let calls=0;
+  sdk.queryLLM=(async()=>{calls++;return JSON.stringify(extraction);}) as unknown as typeof sdk.queryLLM;
+  expect(await run(sdk)).toMatchObject({committed:1,rejected:0});
+  expect(calls).toBe(3);
+  expect(sdk.hasCheckpoints()).toBe(false);
+  expect(sdk.graph.claims.list({predicate:'RECOMMENDS'})).toHaveLength(0);
+  expect(sdk.graph.claims.list({predicate:'EVENT_KIND'})).toHaveLength(1);
+  // A response with nothing valid left is still rejected without progress.
+  const empty=fixture();
+  empty.sdk.queryLLM=(async()=>JSON.stringify({entities:[],claims:[{...extraction.claims[0]}],events:[]})) as unknown as typeof sdk.queryLLM;
+  expect(await run(empty.sdk)).toMatchObject({committed:0,rejected:1});
+  expect(empty.sdk.state.getAll().some(row=>row.state_key.startsWith('extraction-rejected:'))).toBe(true);
 });
 
 it('keeps checkpoint evidence on the original revision when a source changes during chat',async()=> {
@@ -245,4 +273,36 @@ it('uses persistent leases to exclude concurrent runs and allows expired ownersh
   expect(next).not.toBeNull();expect(()=>lease.renew()).toThrow('lost');
   lease.release();expect(sdk.state.get('knowledge-extractor-lease')).not.toBeNull();
   next.release();expect((await run(sdk)).committed).toBe(1);
+});
+
+it('drops a datatype the value contradicts instead of failing the commit', () => {
+  const {extraction}=fixture();
+  const parsed=parseExtraction(JSON.stringify({...extraction,claims:[{...extraction.claims[0],object:undefined,value:'three weeks',datatype:'number'}]}));
+  expect(parsed.claims[0]!.datatype).toBeUndefined();
+  expect(consistentDatatype<{value:unknown;datatype?:string}>({value:'3',datatype:'number'})).toEqual({value:'3'});
+  expect(consistentDatatype({value:3,datatype:'number'})).toEqual({value:3,datatype:'number'});
+});
+
+it('ignores literal datatypes on entity relationships during extraction', async () => {
+  const {sdk,extraction}=fixture();
+  const response={...extraction,claims:[{...extraction.claims[0],datatype:'number'}]};
+  expect(parseExtraction(JSON.stringify(response)).claims[0]!.datatype).toBeUndefined();
+  sdk.queryLLM=(async()=>JSON.stringify(response)) as unknown as typeof sdk.queryLLM;
+  expect(await run(sdk)).toMatchObject({committed:1});
+  expect(sdk.graph.claims.list({predicate:'RECOMMENDS'})[0]).toMatchObject({object:expect.any(Number),datatype:undefined});
+});
+
+it('recovers saved entity relationships with literal datatypes without repeating model calls', async () => {
+  const {sdk}=fixture(2);
+  const add=sdk.graph.claims.add.bind(sdk.graph.claims);
+  sdk.graph.claims.add=()=>{throw Error('Storage interrupted');};
+  await expect(run(sdk)).rejects.toThrow('Storage interrupted');
+  const checkpoint=sdk.checkpoint.getQueue<any>()[0]!;
+  checkpoint.data.extraction.claims[0].datatype='number';
+  sdk.checkpoint.save(checkpoint.data,{id:checkpoint.id,key:checkpoint.key});
+  sdk.graph.claims.add=add;
+  sdk.queryLLM=(()=>{throw Error('Recovery must use saved outputs');}) as typeof sdk.queryLLM;
+  expect(await recover(sdk)).toMatchObject({committed:2});
+  expect(sdk.graph.claims.list({predicate:'RECOMMENDS'})).toHaveLength(2);
+  expect(sdk.hasCheckpoints()).toBe(false);
 });

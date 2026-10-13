@@ -106,12 +106,15 @@ export function extractKeywords(
 /** Full-text chunk retrieval with graph expansion. */
 export class ChunkSearcher {
   private readonly db: Database;
-  constructor(database?: Database) { this.db = database ?? defaultDb; }
+  private ingestor?: GraphIngestor;
+  /** Pass the SDK's graph: a sealed, scoped connection cannot run graph schema setup again. */
+  constructor(database?: Database, graph?: GraphIngestor) { this.db = database ?? defaultDb; this.ingestor = graph; }
   async graph(options: GraphSearchOptions) {
     if (options.mode !== undefined && options.mode !== "bm25") throw new Error("Unsupported search mode");
     const results = await this.bm25(options);
     if(options.minScore!==undefined && (!Number.isFinite(options.minScore) || options.minScore<0)) throw new Error('minScore must be finite and nonnegative');
-    return expandGraphResults(this.db,new GraphIngestor('default',this.db),results.filter(r=>r.score>=(options.minScore ?? 0)),options);
+    this.ingestor ??= new GraphIngestor('default',this.db);
+    return expandGraphResults(this.db,this.ingestor,results.filter(r=>r.score>=(options.minScore ?? 0)),options);
   }
   async bm25(options: BM25SearchOptions): Promise<ChunkSearchResult[]> {
     const limit = options.limit ?? 10;

@@ -1,8 +1,45 @@
 import { validateValue } from '@shale/sdk/graph/values';
-import type { Extraction, ExtractedEntity, ExtractedClaim, ExtractedEvent } from './types';
+import { canonicalType } from '../../lib/graph/ontology';
+import { textReferences, urlKey } from '../../lib/graph/identity-keys';
+import type { Extraction, ExtractedEntity, ExtractedClaim, ExtractedEvent, DigestActivity, Involvement } from './types';
+import { consistentDatatype } from './claim-datatype';
+
+/** What a model reference may point at: listed registry/episode ids and text actually supplied. */
+export interface ParseContext { registryIds?: Set<number>; episodeIds?: Set<number>; text?: string; sourceUri?: string }
+
+const INVOLVEMENT = new Set<Involvement>(['none','observer','participant','author']);
+const ACTIVITY_KINDS = new Set(['application','project','learning','event','purchase','social','admin','research','other']);
+const str = (value: unknown, max: number) => typeof value === 'string' && value.trim() ? value.trim().replace(/\s+/g,' ').slice(0,max) : undefined;
+const strings = (value: unknown, count: number, max: number) => Array.isArray(value)
+  ? [...new Set(value.map(item => str(item, max)).filter((item): item is string => Boolean(item)))].slice(0,count) : undefined;
+
+/** Optional digest fields are cleaned rather than rejected: a stray value must not cost a retry. */
+function digestEntityFields(entity: Record<string, unknown>, context: ParseContext) {
+  const match = Number.isSafeInteger(entity.match) && context.registryIds?.has(entity.match as number) ? entity.match as number : null;
+  const supplied = new Set([...textReferences(context.text ?? '').urls, ...(context.sourceUri ? [context.sourceUri] : [])]
+    .map(url => urlKey(url)).filter(Boolean));
+  const emails = new Set(textReferences(context.text ?? '').emails);
+  // Identifying links must appear in the source; invented URLs would fabricate identity.
+  const urls = strings(entity.urls, 8, 500)?.filter(url => supplied.has(urlKey(url)) || emails.has(url.toLowerCase()));
+  const fields = { description: str(entity.description, 240), searchKeys: strings(entity.searchKeys, 8, 80),
+    urls: urls?.length ? urls : undefined, match: match ?? undefined };
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && !(Array.isArray(value) && !value.length)));
+}
+
+function digestActivity(value: unknown, context: ParseContext): DigestActivity | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const activity = value as Record<string, unknown>;
+  const label = str(activity.label, 120);
+  if (!label) return null;
+  const kind = str(activity.kind, 30)?.toLowerCase();
+  const episode = activity.episode === 'new' ? 'new'
+    : Number.isSafeInteger(activity.episode) && context.episodeIds?.has(activity.episode as number) ? activity.episode as number : null;
+  const confidence = typeof activity.confidence === 'number' && activity.confidence >= 0 && activity.confidence <= 1 ? activity.confidence : undefined;
+  return { label, kind: kind && ACTIVITY_KINDS.has(kind) ? kind : 'other', stage: str(activity.stage, 120), episode, confidence };
+}
 
 // JSON shapes emitted by the model are validated before committing any records.
-export function parseExtraction(raw: string): Extraction {
+export function parseExtraction(raw: string, context: ParseContext = {}): Extraction {
   const parsed=JSON.parse(raw.replace(/^\s*```(?:json)?\s*/,'').replace(/\s*```\s*$/,''));
   for (const key of ['entities','claims','events']) if (!Array.isArray(parsed[key]) || parsed[key].length>100) throw new Error(`Invalid extraction ${key}`);
   const keys=new Set<string>();
@@ -45,12 +82,17 @@ export function parseExtraction(raw: string): Extraction {
   if (parsed.entities.length+parsed.claims.length+parsed.events.reduce((sum:number,e:ExtractedEvent)=>sum+1+e.participants.length,0)>300)
     throw new Error('Extraction exceeds record budget');
   // Discard undeclared fields such as model-supplied status, namespace, or dependencies.
+  const involvement = INVOLVEMENT.has(parsed.involvement) ? parsed.involvement as Involvement : undefined;
   return {
-    entities:parsed.entities.map((e:ExtractedEntity)=>({key:e.key,name:e.name,type:e.type,aliases:e.aliases})),
+    entities:parsed.entities.map((e:ExtractedEntity)=>({key:e.key,name:e.name,type:canonicalType(e.type),aliases:e.aliases,
+      ...digestEntityFields(e as unknown as Record<string, unknown>, context)})),
     claims:parsed.claims.map((c:ExtractedClaim)=>({subject:c.subject,predicate:c.predicate,object:c.object,value:c.value,
-      datatype:c.datatype,unit:c.unit,language:c.language,polarity:c.polarity,context:c.context,qualifiers:c.qualifiers,
+      datatype:consistentDatatype(c).datatype,unit:c.unit,language:c.language,polarity:c.polarity,context:c.context,qualifiers:c.qualifiers,
       validFrom:c.validFrom,validTo:c.validTo,observedAt:c.observedAt,confidence:c.confidence,evidence:c.evidence})),
     events:parsed.events.map((e:ExtractedEvent)=>({key:e.key,name:e.name,kind:e.kind,context:e.context,occurredFrom:e.occurredFrom,
       occurredTo:e.occurredTo,participants:e.participants.map(p=>({entity:p.entity,role:p.role,position:p.position})),evidence:e.evidence})),
+    ...(str(parsed.summary, 1200) ? {summary:str(parsed.summary, 1200)} : {}),
+    ...(involvement ? {involvement} : {}),
+    ...(parsed.activity !== undefined ? {activity:digestActivity(parsed.activity, context)} : {}),
   };
 }

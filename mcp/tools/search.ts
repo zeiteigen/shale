@@ -4,6 +4,7 @@ import type { ShaleSDK } from "../../sdk";
 import type { ClaimStatus } from "../../sdk/graph/types";
 import { resolveEntityId, formatToolResponse, formatToolError } from "../types";
 import { registerMemoryTools } from "./memory";
+import { EpisodeStore } from "../../sdk/graph/episodes";
 
 const ClaimStatusEnum = z.enum([
   "proposed",
@@ -25,7 +26,7 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
 
   mcp.tool(
     "search_graph",
-    "Search retained source memories with BM25. Returns up to five distinct sources by default, with one summary or snippet preview and stable memory citation IDs per source. Graph expansion is optional and off by default; original full source content may have been discarded.",
+    "Search retained source memories with BM25. Returns up to five distinct sources by default, with one summary or snippet preview and stable memory citation IDs per source, expanded into graph neighborhoods (accepted links plus confident proposed ones; check each claim's status). Use list_episodes/get_episode for cross-source stories. Original full source content may have been discarded.",
     {
       query: z.string().describe("Search query text or keywords"),
       mode: z
@@ -43,8 +44,8 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
         .int()
         .min(0)
         .max(20)
-        .default(0)
-        .describe("Maximum chunks to expand into graph neighborhoods; zero disables graph expansion"),
+        .default(3)
+        .describe("Maximum hits to expand into graph neighborhoods; zero disables graph expansion"),
       maxDepth: z.number().int().min(1).max(5).default(2).describe("Neighborhood traversal depth"),
       maxNeighbors: z
         .number()
@@ -77,7 +78,16 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
           graphTruncated ||= result.truncated;
         }
         if(grouped.hits.length>args.maxSeeds && args.maxSeeds>0) graphTruncated=true;
-        return formatToolResponse({...grouped, neighborhoods, evidence:[...evidence.values()].slice(0,100), relatedPassages:[...passages.values()].slice(0,100), graphTruncated},args.maxChars);
+        // Which of the user's episodes each hit belongs to: the story around the passage.
+        const store=new EpisodeStore(sdk.database,sdk.graph);
+        const episodes=new Map<number,{id:number;title:string;status:string;summary:string;sourceIds:string[]}>();
+        for(const hit of grouped.hits) for(const id of store.ofSource(hit.sourceId)) {
+          const known=episodes.get(id);
+          if(known) {known.sourceIds.push(hit.sourceId);continue;}
+          const episode=store.get(id);
+          if(episode) episodes.set(id,{id,title:episode.title,status:episode.status,summary:episode.summary,sourceIds:[hit.sourceId]});
+        }
+        return formatToolResponse({...grouped, episodes:[...episodes.values()], neighborhoods, evidence:[...evidence.values()].slice(0,100), relatedPassages:[...passages.values()].slice(0,100), graphTruncated},args.maxChars);
       } catch (err) {
         return formatToolError(err);
       }

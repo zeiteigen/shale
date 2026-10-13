@@ -1,0 +1,11 @@
+{
+  "extension": "youtube",
+  "settings": {
+    "enabled": { "type": "boolean", "description": "Capture and index watched standard YouTube videos.", "default": true, "possibleValues": [true, false] },
+    "captureSubtitles": { "type": "boolean", "description": "Capture full available subtitles after unique playback covers 50% of the video, then summarize them into the same source.", "default": true, "possibleValues": [true, false] },
+    "preferredLanguages": { "type": "string[]", "description": "Subtitle language codes in preference order, followed by the video's original language. Prefer creator captions within each language. No automatic translation is requested.", "default": ["en"] },
+    "maxVideosPerRun": { "type": "number", "description": "Maximum dirty videos indexed per cron run. Interrupted transcript summaries resume from persisted intermediate results.", "default": 20, "range": { "min": 1, "max": 1000 } },
+    "llmModel": { "type": "string", "description": "Chat model override for transcript summaries; empty uses Shale's configured model.", "default": "" },
+    "namespace": { "type": "string", "description": "Namespace for YouTube sources and graph entities.", "default": "youtube" }
+  }
+}

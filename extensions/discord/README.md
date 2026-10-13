@@ -1,52 +1,35 @@
 # Discord
 
-Ingests Discord server channels, threads, DMs, and group DMs. Discord has no official API for reading a personal account's messages, so this extension uses the community tool [DiscordChatExporter](https://github.com/Tyrrrz/DiscordChatExporter) (DCE) and its JSON export format.
+Shale can import DiscordChatExporter JSON files and can run a bounded, interest-driven sync using the Discord account connected in **Accounts**. The sync evaluates recent conversation windows for relevance and indexes accepted conversations; it is not a complete archive of every server or every public message.
 
-## Feeds
+## Account sync
 
-**1. Import folder (always on).** The `discord-import` cron runs every 15 minutes and at startup. It ingests any DCE JSON file under `importDir` (default `data/discord/import/`). It skips files whose size and modification time haven't changed. Export files by hand with:
+The `discord-sync` job polls on its hourly schedule when a Discord account is connected. A run is bounded by `syncBudgetMinutes`, `syncMaxRequests`, and `syncMaxMessages`. It samples recent conversation activity and may backfill a limited number of older messages (`backfillMaxMessages`) when needed. These limits mean coverage can be incomplete between runs, and a bounded sample does not guarantee that every message from every interval is fetched.
+
+The connected user token identifies your own user ID automatically. For a bot token or imports without a connected account, set `selfUserIds`. Configure `interests`, `excludedTopics`, and the include/exclude lists for people and conversations to guide selection. Shale also derives interests from permitted personal sources and your own Discord activity using `interestProfile`. Explicit exclusions take precedence over inclusions. Missing identity or unavailable model evidence leaves uncertain work pending.
+
+Settled windows are evaluated up to `relevanceMaxWindows` per run, with at most `relevanceMaxLLMCalls` model calls. `relevanceThreshold` sets the minimum score for acceptance. Relevance checks can be disabled with `relevanceEnabled`; the sync and storage limits still apply.
+
+Sync state reports messages or windows as **accepted**, **excluded**, **pending**, **backfilled**, or **evicted**. A conversation may also be marked as having **incomplete coverage** when its bounded polling or backfill has not covered the full interval. Reusable checkpoints let interrupted work resume, and failed work can be retried without treating a partial run as complete.
+
+Raw connector messages are retained in local Discord connector SQLite tables, separate from full-text search indexing. Retention is bounded by age (`rawRetentionDays`), total size (`rawMaxMiB`), and per-conversation message count (`rawMaxConversationMessages`). Only settled windows selected as relevant are turned into searchable conversation sources; raw connector retention does not make all message history searchable.
+
+## Manual JSON imports
+
+Manual DiscordChatExporter JSON imports remain supported. Put JSON exports in `importDir` (default `data/discord/import/`) for the import job to process. For example:
 
 ```bash
 DiscordChatExporter.Cli export -t "$DISCORD_TOKEN" -c <channel-id> -f Json -o data/discord/import/
 ```
 
-You can also use the DCE GUI with the **JSON** format.
+`syncScope`, `channels`, `guilds`, `includeDMs`, and `includeThreads` still control which conversations account sync may collect. `dceCommand`, `initialSyncDays`, exporter timeouts, media-download options, and export-directory options remain available to the legacy exporter utility; bounded account sync does not use them or require an exporter installation.
 
-**2. Scheduled sync.** The `discord-sync` cron runs at startup and seven minutes past each hour. It does nothing until an account is connected.
-1. Run `bun run setup discord`. It downloads the self-contained DiscordChatExporter CLI into `data/discord/dce`, and the extension finds it automatically. Set `dceCommand` only to use a different copy.
-2. Open the Shale web interface → **Accounts** → **Discord** and connect a token:
-   - **User token:** reads your servers and DMs.
-   - **Bot token:** reads only servers the bot has joined (it needs the Message Content intent). This is the option that stays within Discord's terms.
+## Conversation indexing
 
-   The token is checked against Discord and stored in `data/credentials.json` (owner-only). It is never shown in the browser again and reaches the exporter only through its environment. On a headless setup, `DISCORD_TOKEN` in `data/.env` is a fallback.
-3. That's it. With the default `syncScope: "all"`, each run:
-   - lists every server and DM the account can see
-   - exports each channel (with its threads) separately, from that channel's own watermark
-   - on a channel's first sync, fetches its full history (`initialSyncDays: 0`)
+Messages are grouped into windows using `gapMinutes`, `maxWindowMessages`, and `maxWindowChars`. The newest window waits for `idleMinutes` of silence before it is considered settled. Accepted windows become searchable `chat_session` sources with transcript chunks and a summary. Edits can refresh the corresponding window, while backfilled messages can update windows they overlap.
 
-   An interrupted sweep resumes channel by channel. Sealed conversation windows are indexed after each changed channel, so completed channels become searchable while a long sweep continues. Channels the account can't read are skipped and retried weekly. The Accounts card shows the last sync's results; trigger a run now from **Overview** with `discord-sync`. To limit what's synced, set `syncScope` to `"selected"` and list `channels`, `guilds`, and/or `includeDMs`.
+Direct contacts and substantive contributors become `Person` entities. Incidental authors remain transcript text. Joining a thread, posting, replying, being mentioned, or reacting causes related context to be reconsidered; it does not admit every message in the parent channel or server. Durable context jobs can retrieve older thread starters and referenced messages beyond the rolling archive. Deleted or inaccessible history is reported as incomplete.
 
-   If a thread export fails while other exports succeed, those completed files are ingested and the channel watermark stays unchanged. The next run retries the missing history.
+Existing Discord sources are reclassified in resumable batches. Rejected searchable sources and connector assertions are removed from current views, while unsupported identities remain available for historical inspection. Independently supported, merged, and manually maintained records are preserved. Raw windows awaiting a decision or checkpoint recovery are protected from eviction; archive admission pauses when they consume the available capacity. SQLite may retain allocated pages for reuse, so `rawMaxMiB` caps payload rather than the whole database file.
 
-> ⚠️ Automating a user account ("self-botting") is against Discord's Terms of Service. Read-only exports are rarely flagged, but the risk is yours.
-
-## Indexing
-
-Raw messages are stored in `discord_messages` and never indexed directly. Each conversation is split into **windows**:
-- A silence longer than `gapMinutes` starts a new window.
-- A window is also cut at `maxWindowMessages` messages or `maxWindowChars` characters.
-- The newest window is indexed only after `idleMinutes` of silence.
-
-Each window becomes one `chat_session` source, with URI `discord://channel/<id>#window=<first message id>`:
-- **Verbatim chunks** hold the transcript (`[HH:MM] Name (↪ Other): text [image: x.png] {👍×2}`).
-- **The synthetic summary** comes from the chat LLM, or a heuristic when `summarize` is off.
-- **Edited messages** re-index their window in place.
-- **Backfilled history** replaces windows that overlapped it.
-
-Graph:
-- **`Person` (or `Bot`)** per author, with an `external:discord` alias holding the user id, and a `PARTICIPATED_IN` link to the conversation.
-- **`Conversation`** per channel, linked `PART_OF` its **`Server`**.
-- **`ChatSession`** per window, carrying `SUMMARY` and `COVERS_TOPIC` claims (proposed, from the LLM).
-- **A `conversation` event** listing the participants.
-
-Checkpoints let `recover.ts` commit prepared windows after a crash without calling the LLM again. `source:refresh` re-summarises a window from the stored messages.
+The `discord-reclassify` job processes stored history every five minutes without collecting more messages. To finish eligible cleanup immediately, run `bun extensions/discord/reclassify.ts --drain`. Each batch keeps the configured work limits. Missing identity, unavailable model evidence, and recent unsettled windows remain pending. After fixing a model outage or response-format issue, add `--retry-pending` to retry deferred classifier decisions once.

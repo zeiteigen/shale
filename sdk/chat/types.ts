@@ -23,6 +23,9 @@ export interface ChatMessage {
   editedAt?: number;
   text: string;
   replyToId?: string;
+  replyConversationId?: string;
+  mentionedUserIds?: string[];
+  reactedUserIds?: string[];
   attachments: ChatAttachment[];
   reactions?: ChatReaction[];
   isBot?: boolean;
@@ -47,6 +50,8 @@ export interface ChatConversation {
   server?: { id: string; name: string; uri: string };
   /** Optional key used to recognise the same conversation arriving from a different feed. */
   matchKey?: string;
+  /** Parent channel for a thread, when the connector provides it. */
+  parentId?: string;
 }
 
 export interface ChatWindowMessage extends ChatMessage {
@@ -103,5 +108,8 @@ export interface PreparedChatWindow {
   participants: Array<ChatParticipant & { messages: number }>;
   synthesis: ChatSynthesis;
   sourceHash: string;
+  policyFingerprint?: string;
+  /** Exact raw membership lets refresh detect eviction rather than use a partial transcript. */
+  rawMessageIds?: string[];
   memory: import("../../lib/memory/types").PreparedSourceMemory;
 }

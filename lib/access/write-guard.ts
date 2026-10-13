@@ -58,11 +58,16 @@ export const WRITE_REFERENCES: Record<string, Spec> = {
   create_event: [["participants[].entity", "entity"]],
   add_evidence: [["claimId", "claim"], ["sourceId", "source"], ["revisionId", "revision"]],
   define_relation: [],
+  // Episode tools (mcp/tools/episodes.ts)
+  merge_episodes: [["from", "entity"], ["into", "entity"]],
+  detach_from_episode: [["episode", "entity"], ["sourceId", "source"]],
+  split_episode: [["episode", "entity"], ["sourceIds[]", "source"]],
   infer_transitive: [],
   // Source memory tools
   edit_source_memory: [["sourceId", "source"]],
   refresh_source: [["sourceId", "source"]],
   repair_source_memory: [["sourceId", "source"], ["claims[].claimId", "claim"]],
+  discord_reconcile: [["sourceId", "source"], ["entityIds[]", "entity"], ["claimIds[]", "claim"]],
 };
 
 export class AccessScopeError extends Error {

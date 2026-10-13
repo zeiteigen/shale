@@ -4,6 +4,7 @@ Chrome/Chromium 106 or newer. The extension is a shared core that hosts **module
 - **Browser** (`extensions/browser/chrome`) captures readable page content, navigation and attention observations, bookmarks, and history.
 - **AI chats** (`extensions/ai-chats/chrome`) captures ChatGPT, Claude, and Gemini conversations from tabs where you are signed in; see [its README](../../extensions/ai-chats/README.md).
 - **Search queries** (`extensions/search-queries/chrome`) captures Google, Bing, and DuckDuckGo searches, the results you open from them, and Google's AI Overview; see [its README](../../extensions/search-queries/README.md).
+- **YouTube** (`extensions/youtube/chrome`) captures watched video metadata and full transcript summaries after 50% unique playback; see [its README](../../extensions/youtube/README.md).
 
 ## Install or upgrade
 
@@ -50,7 +51,7 @@ It contains nothing specific to one Shale extension. Each extension declares its
 - `storage.get/set` (prefixed with the module id);
 - `policy()`, from `/connectors/<id>/policy`;
 - `createJob(kind, fields)` and `resume()`;
-- `inject(tabId, name, { documentId, args })`;
+- `inject(tabId, name, { documentId, args, world })`, where `world` is `"ISOLATED"` (the default) or `"MAIN"` and applies to both injection phases;
 - `execInTab(tabId, func, args)`;
 - `claimedByOther(url)`.
 

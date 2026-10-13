@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { resolve } from "node:path";
+import { currentRevisionSQL } from "../lib/memory/freshness";
 
 /** Read-only integrity and provenance audit for an actual populated Shale graph. */
 const path = resolve(process.argv[2] ?? resolve(import.meta.dir, "../data/production.db"));
@@ -13,13 +14,13 @@ db.transaction(() => {
   if (foreignKeys.length) issues.foreignKeys = foreignKeys.length;
   const checks = {
     emptySources: "SELECT count(*) n FROM sources s WHERE NOT EXISTS(SELECT 1 FROM chunks c WHERE c.source_id=s.id)",
-    missingEvidence: "SELECT count(*) n FROM graph_claims c WHERE method NOT IN ('legacy','manual') AND NOT EXISTS(SELECT 1 FROM graph_evidence e WHERE e.claim_id=c.id)",
+    missingEvidence: "SELECT count(*) n FROM graph_claims c WHERE method NOT IN ('legacy','manual','resolver','episode-assignment') AND NOT EXISTS(SELECT 1 FROM graph_evidence e WHERE e.claim_id=c.id)",
     missingEvidenceChunks: "SELECT count(*) n FROM graph_evidence e WHERE chunk_index IS NOT NULL AND NOT EXISTS(SELECT 1 FROM graph_revision_chunks c WHERE c.revision_id=e.revision_id AND c.chunk_index=e.chunk_index)",
     missingModelProvenance: "SELECT count(*) n FROM graph_claims WHERE method IN ('llm','vision','document-summary') AND (model IS NULL OR trim(model)='')",
     unreviewedAcceptedModelClaims: "SELECT count(*) n FROM graph_claims c WHERE c.method IN ('llm','vision') AND c.status='accepted' AND NOT EXISTS(SELECT 1 FROM graph_reviews r WHERE r.claim_id=c.id AND r.status='accepted')",
     liveClaimsWithStaleSupport: `SELECT count(*) n FROM graph_claims c WHERE c.status IN ('accepted','proposed','disputed') AND EXISTS(
       SELECT 1 FROM graph_evidence e JOIN graph_source_revisions r ON r.id=e.revision_id
-      WHERE e.claim_id=c.id AND e.stance='supports' AND NOT EXISTS(SELECT 1 FROM sources s WHERE s.id=r.source_id AND s.hash=r.hash))`,
+      WHERE e.claim_id=c.id AND e.stance='supports' AND NOT ${currentRevisionSQL()})`,
   };
   for (const [name, sql] of Object.entries(checks)) {
     const n = count(sql);

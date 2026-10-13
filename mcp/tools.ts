@@ -7,6 +7,7 @@ import { registerRelationsTools } from "./tools/relations";
 import { registerEventsTools } from "./tools/events";
 import { registerEvidenceTools } from "./tools/evidence";
 import { registerStatsTools } from "./tools/stats";
+import { registerEpisodeTools } from "./tools/episodes";
 
 export function registerKnowledgeGraphTools(mcp: McpServer, sdk: ShaleSDK) {
   registerSearchTools(mcp, sdk);
@@ -16,4 +17,5 @@ export function registerKnowledgeGraphTools(mcp: McpServer, sdk: ShaleSDK) {
   registerEventsTools(mcp, sdk);
   registerEvidenceTools(mcp, sdk);
   registerStatsTools(mcp, sdk);
+  registerEpisodeTools(mcp, sdk);
 }

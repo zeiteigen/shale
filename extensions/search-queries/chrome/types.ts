@@ -25,7 +25,7 @@ export interface ModuleRuntime {
   claimedByOther(url: string): Promise<boolean>;
   createJob(kind: string, fields: Record<string, unknown>): Promise<ModuleJob>;
   resume(): Promise<void>;
-  inject<T>(tabId: number, name: string, options?: { documentId?: string; args?: unknown }): Promise<T>;
+  inject<T>(tabId: number, name: string, options?: { documentId?: string; args?: unknown; world?: "ISOLATED" | "MAIN" }): Promise<T>;
   execInTab<T, A extends unknown[]>(tabId: number, func: (...args: A) => T | Promise<T>, args: A): Promise<Awaited<T>>;
   log(...items: unknown[]): void;
 }

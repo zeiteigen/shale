@@ -112,7 +112,7 @@ function createRuntime(entry, host) {
       return host.resumeJobs().then(deliverOutbox);
     },
     /** Run one of this module's injected scripts in a tab and return its result. */
-    async inject(tabId, name, { documentId, args } = {}) {
+    async inject(tabId, name, { documentId, args, world = "ISOLATED" } = {}) {
       if (!entry.inject?.includes(name))
         throw new Error(`Chrome module ${id} has no injected script ${name}`);
       const target = documentId
@@ -120,10 +120,12 @@ function createRuntime(entry, host) {
         : { tabId };
       await chrome.scripting.executeScript({
         target,
+        world,
         files: [`modules/${id}/inject/${name}.js`],
       });
       const [result] = await chrome.scripting.executeScript({
         target,
+        world,
         func: (slot, input) => globalThis.__shaleInjected[slot](input),
         args: [`${id}/${name}`, args ?? null],
       });

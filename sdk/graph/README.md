@@ -26,6 +26,14 @@ const candidates = sdk.graph.entities.resolve("Alice", "team:atlas");
 
 Labels are not identity proof. `resolve` returns every candidate, collapsing confirmed merges; ambiguity requires an explicit choice. External IDs are scoped by authority. Modern entities store their label in `display_name`; the legacy `name` column remains a unique storage key. Use `entities.get(id)` when displaying labels.
 
+Cross-source identity lives in three modules:
+
+- **`registry.ts`** keeps identity keys (`graph_aliases` scope `key:<kind>`, from `lib/graph/identity-keys.ts`) and an FTS index (`entity_registry_fts`) of canonical people, organizations, projects, artifacts, and episodes. `shortlist` returns the entries a model prompt should offer.
+- **`identity.ts`** (`IdentityResolver`) resolves extracted mentions. Strong keys for the entity's family merge automatically; corroborated model matches merge; name-only collisions queue for model adjudication. It also keys connector entities, links pages to the repositories and accounts they show (`REFERS_TO`) and servers to organizations (`COMMUNITY_OF`), and gathers the user's accounts into the `self` Person.
+- **`episodes.ts`** (`EpisodeStore`) reads and writes episodes: `Episode` entities joined by `PART_OF_EPISODE` claims, with timelines and `INVOLVES` links.
+
+Entity types share an identity when their families agree (`lib/graph/ontology.ts`), e.g. `Bot` and `Person`.
+
 Merge operations redirect identity without rewriting historical claims:
 
 ```ts
@@ -130,7 +138,7 @@ const path = sdk.graph.query.path({ start: alice.id, target: atlas.id, maxDepth:
 const search = await sdk.search.graph({ query: "Atlas", mode: "bm25" });
 ```
 
-Traversal defaults to accepted, positive claims and follows merged identities. It returns shortest discovery paths with claim IDs and a `truncated` flag. Depth, entity, and inspected-claim budgets prevent unlimited traversal. Scalar properties are available through `claims.list` rather than treated as entity links.
+Traversal defaults to accepted, positive claims and follows merged identities. `search.graph` expansion also follows proposed claims at `minConfidence` 0.6 or above; check each returned claim's status. It returns shortest discovery paths with claim IDs and a `truncated` flag. Depth, entity, and inspected-claim budgets prevent unlimited traversal. Scalar properties are available through `claims.list` rather than treated as entity links.
 
 `at` filters real-world validity using half-open intervals `[validFrom, validTo)`. `knownAt` filters recorded knowledge and reconstructs claim status at that time. Entity labels and merges are resolved in their current state. `claims.list` supports predicate, entity, namespace, context, status, polarity, limit, and offset filters; each page is capped at 1,000 claims.
 

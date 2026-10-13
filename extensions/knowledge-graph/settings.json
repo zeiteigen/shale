@@ -1,0 +1,10 @@
+{
+  "resolverEnabled": true,
+  "selfNames": [],
+  "selfEmails": [],
+  "selfHandles": [
+    "github:zeiteigen"
+  ],
+  "maxAdjudicationsPerRun": 32,
+  "llmModel": null
+}

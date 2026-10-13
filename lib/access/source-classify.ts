@@ -8,12 +8,12 @@ const SOURCE_TEXT_LIMIT = 200_000;
 /** Classify live sources and removed snapshots, including metadata-only edits. */
 export function classifySources(db: Database, deadline: number, batch: number, sourceIds?: string[]) {
   let classified = 0;
-  const textRows = db.query<{ text_content: string }, [string, string]>(`
+  const textSQL = `
     SELECT text_content,chunk_index FROM chunks WHERE source_id=?
     UNION ALL SELECT json_extract(c.value,'$.text_content'),json_extract(c.value,'$.chunk_index')
       FROM graph_source_archives a,json_each(a.snapshot,'$.chunks') c
       WHERE a.source_id=? AND NOT EXISTS(SELECT 1 FROM sources WHERE id=a.source_id)
-    ORDER BY chunk_index`);
+    ORDER BY chunk_index`;
   const snapshot = (key: keyof SourceContent) => `coalesce(json_extract(a.snapshot,'$.source.${key}'),'')`;
   for (;;) {
     if (!sourceIds && Date.now() > deadline) return { classified, pending: true };
@@ -31,15 +31,19 @@ export function classifySources(db: Database, deadline: number, batch: number, s
     db.transaction(() => {
       for (const source of rows) {
         let text = "";
-        for (const chunk of textRows.iterate(source.id, source.id)) {
-          text += `${chunk.text_content}\n`;
-          if (text.length >= SOURCE_TEXT_LIMIT) break;
-        }
+        // A truncated cached iterator retains its read snapshot until reset/finalized.
+        const textRows=db.prepare<{text_content:string},[string,string]>(textSQL);
+        try {
+          for (const chunk of textRows.iterate(source.id, source.id)) {
+            text += `${chunk.text_content}\n`;
+            if (text.length >= SOURCE_TEXT_LIMIT) break;
+          }
+        } finally {textRows.finalize();}
         const verdict = classifySource({ ...source, text });
         setLabel(db, "source", source.id, "heuristic", verdict.tier,
           { hard: verdict.hard, reason: verdict.reason, contentHash: sourceContentHash(source) });
       }
-    })();
+    }).immediate();
     classified += rows.length;
   }
 }

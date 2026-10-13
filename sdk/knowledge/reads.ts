@@ -11,7 +11,7 @@ export class KnowledgeReads {
   async read(name:string,raw:Record<string,unknown>):Promise<unknown> {
     switch(name) {
       case 'list_entities': {
-        const a=readSchemas.list_entities.parse(raw),where:string[]=[],params:(string|number)[]=[];
+        const a=readSchemas.list_entities.parse(raw),where:string[]=['NOT EXISTS(SELECT 1 FROM graph_entity_retirements r WHERE r.entity_id=e.id)'],params:(string|number)[]=[];
         if(a.name!==undefined) {where.push(`(instr(lower(coalesce(e.display_name,e.name)),lower(?))>0 OR EXISTS(
           SELECT 1 FROM graph_aliases a WHERE a.entity_id=e.id AND instr(lower(a.alias),lower(?))>0))`);params.push(a.name,a.name);}
         if(a.type!==undefined) {where.push('e.type=?');params.push(a.type);}

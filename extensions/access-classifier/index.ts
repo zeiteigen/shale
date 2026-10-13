@@ -11,7 +11,8 @@ const MAX_ATTEMPTS = 3;
 const ITEM_LIMIT = 40;
 
 const tier = z.enum(TIERS);
-const verdict = z.object({ tier, reason: z.string().max(300).default("") });
+// Verbose explanations do not invalidate an otherwise valid sensitivity decision.
+const verdict = z.object({ tier, reason: z.string().transform(value => value.slice(0, 300)).default("") });
 export const llmResponse = z.object({
   source: verdict,
   entities: z.array(verdict.extend({ id: z.coerce.number().int() })).default([]),
@@ -31,11 +32,15 @@ function pendingSources(sdk: ShaleSDK, limit: number): PendingSource[] {
 
 function sourceContext(sdk: ShaleSDK, source: PendingSource, maxChars: number) {
   let text = "";
-  for (const chunk of sdk.database.query<{ text_content: string }, [string]>(
-    "SELECT text_content FROM chunks WHERE source_id=? ORDER BY chunk_index").iterate(source.id)) {
-    text += `${chunk.text_content}\n`;
-    if (text.length >= maxChars) break;
-  }
+  // A truncated iterator must not leave a cached statement active for the next source.
+  const statement = sdk.database.prepare<{ text_content: string }, [string]>(
+    "SELECT text_content FROM chunks WHERE source_id=? ORDER BY chunk_index");
+  try {
+    for (const chunk of statement.iterate(source.id)) {
+      text += `${chunk.text_content}\n`;
+      if (text.length >= maxChars) break;
+    }
+  } finally { statement.finalize(); }
   const entities: Item[] = sdk.database.query<{ id: number; name: string; type: string }, [string, string, string, number]>(
     `SELECT e.id,coalesce(e.display_name,e.name) AS name,e.type FROM entities e WHERE e.id IN (
       SELECT entity_id FROM source_entities WHERE source_id=?
@@ -61,7 +66,7 @@ Tiers, least to most sensitive:
 - private: health, finances, legal matters, intimate relationships, private conversations, home address and contact details, other people's personal details.
 - secret: credentials, passwords, API keys, financial account or card numbers, government ID numbers, anything enabling account access or fraud.
 Judge each entity and claim by what it reveals on its own. A private individual is personal; their health or finances are private.
-Return JSON {"source":{"tier","reason"},"entities":[{"id","tier","reason"}],"claims":[{"id","tier","reason"}]} covering every listed entity and claim, with short reasons.
+Return JSON {"source":{"tier","reason"},"entities":[{"id","tier","reason"}],"claims":[{"id","tier","reason"}]} covering every listed entity and claim. Keep each reason under 100 characters.
 Source: ${JSON.stringify({ title: source.title, uri: source.uri, origin: source.origin, type: source.type })}
 Content: ${JSON.stringify(context.text)}
 Entities: ${JSON.stringify(context.entities)}
@@ -109,15 +114,19 @@ export async function run(sdkOverride?: ShaleSDK) {
     const context = sourceContext(sdk, source, maxChars);
     try {
       const raw = await sdk.queryLLM(buildPrompt(source, context), {
-        model, responseFormat: { type: "json_object" }, temperature: 0, reasoningEffort: "none", maxThinkingTokens: null, maxTokens: 4096,
+        // A source can include forty entities and forty claims with long claim ids.
+        model, responseFormat: { type: "json_object" }, temperature: 0, reasoningEffort: "none", maxThinkingTokens: null,
+        maxTokens: Math.max(4096, (context.entities.length + context.claims.length + 1) * 160),
       });
-      store(sdk, source, llmResponse.parse(JSON.parse(raw)), context);
+      // Local models sometimes fence JSON in markdown despite JSON mode.
+      store(sdk, source, llmResponse.parse(JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""))), context);
       classified++;
     } catch (error) {
       failed++;
       const key = `llm-failed:${source.id}:${sourceContentHash(source)}`;
       sdk.state.set(key, String(Number(sdk.state.get(key) ?? 0) + 1));
-      sdk.logger.warn(`Access classification failed for ${source.id}; heuristic tier remains in effect:`, error);
+      sdk.logger.warn(`Access classification failed for ${source.id}; heuristic tier remains in effect:`,
+        error instanceof Error ? error.message : String(error));
     }
   });
   sdk.logger.log(`Access classification: ${heuristic.sources + heuristic.entities + heuristic.claims + heuristic.revisions} heuristic, ${classified} sources refined by the model, ${failed} failed.`);

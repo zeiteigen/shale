@@ -168,6 +168,32 @@ class IMAPTests(unittest.TestCase):
         self.assertEqual([int(c[1]) for c in fake.calls if c[0] == "FETCH"], [8, 9])
         self.assertEqual([e["uid"] for e in events if e["type"] == "message"], [8, 9])
 
+    def test_newest_batch_first_reports_skipped_range_then_drains_gaps_newest_first(self):
+        fake = FakeIMAP(uids=b"1 2 3 4 5 6 7 8 9")
+        events = []
+        request = {**self.request, "maxMessagesPerMailbox": 3, "cursors": {"INBOX": {"uidValidity": "42", "uid": 2}}}
+        imap_reader.sync_mailbox(fake, "INBOX", request, events.append)
+        messages = [e for e in events if e["type"] == "message"]
+        self.assertEqual([e["uid"] for e in messages], [7, 8, 9])
+        self.assertEqual(messages[0]["gapBelow"], 3)
+        self.assertNotIn("gapBelow", messages[1])
+
+        fake = FakeIMAP(uids=b"1 2 3 4 5 6 7 8 9")
+        events = []
+        request = {**self.request, "maxMessagesPerMailbox": 2,
+                   "cursors": {"INBOX": {"uidValidity": "42", "uid": 9, "gaps": [[3, 6]]}}}
+        imap_reader.sync_mailbox(fake, "INBOX", request, events.append)
+        self.assertEqual([(e["uid"], e["gap"]) for e in events if e["type"] == "message"], [(6, 3), (5, 3)])
+        self.assertFalse(any(e["type"] == "gap-done" for e in events))
+
+        fake = FakeIMAP(uids=b"1 2 3 4 5 6 7 8 9")
+        events = []
+        request = {**self.request, "maxMessagesPerMailbox": 5,
+                   "cursors": {"INBOX": {"uidValidity": "42", "uid": 9, "gaps": [[3, 4]]}}}
+        imap_reader.sync_mailbox(fake, "INBOX", request, events.append)
+        self.assertEqual([e["uid"] for e in events if e["type"] == "message"], [4, 3])
+        self.assertIn({"type": "gap-done", "mailbox": "INBOX", "uidValidity": "42", "gap": 3}, events)
+
     def test_fetch_failure_keeps_prior_event_and_emits_no_later_messages(self):
         fake = FakeIMAP(uids=b"1 2 3", fail_uid=2)
         events = []

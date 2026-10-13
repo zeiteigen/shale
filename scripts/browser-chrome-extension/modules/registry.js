@@ -2,8 +2,10 @@
 import register0 from "./browser/background.js";
 import register1 from "./ai-chats/background.js";
 import register2 from "./search-queries/background.js";
+import register3 from "./youtube/background.js";
 export default [
   { id: "browser", register: register0, inject: ["extract"] },
   { id: "ai-chats", register: register1, inject: ["gemini-dom"] },
   { id: "search-queries", register: register2, inject: ["serp"] },
+  { id: "youtube", register: register3, inject: ["video","tracker","subtitles"] },
 ];

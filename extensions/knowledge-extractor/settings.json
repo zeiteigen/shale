@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "maxSourcesPerRun": 5,
+  "maxSourcesPerRun": 12,
   "maxContentChars": 12000,
   "namespace": "knowledge",
   "llmModel": null

@@ -44,6 +44,13 @@ export async function run(
   options?: RunOptions,
 ): Promise<ProcessLinksResult> {
   const sdk = sdkOverride ?? getSDK();
+  // Superseded by identity resolution and episodes; kept for explicit runs over older data.
+  if (sdk.settings.get<boolean>("enabled") === false) {
+    sdk.logger.log("Source linker is disabled; cross-source links come from knowledge-graph identity resolution and episodes.");
+    const watermark = Number(sdk.state.getWatermark(WATERMARK_KEY) ?? 0);
+    return { sourcesAnalyzed: 0, candidatePairsEvaluated: 0, linksCreated: 0, edgesCommitted: 0,
+      watermarkAdvancedTo: Number.isFinite(watermark) ? watermark : 0, checkpointsResolved: 0 };
+  }
   return processSourceLinks(sdk, options);
 }
 

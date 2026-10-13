@@ -217,6 +217,24 @@ describe("email extension", () => {
     expect(sdk.state.getJson<MailboxCursor>(mailboxCursorKey(account, "INBOX"))).toEqual({ uidValidity: "42", uid: 2 });
   });
 
+  it("records skipped ranges from newest-first batches and drains them downward", async () => {
+    sdk.credentials.set({ ...account, port: "993" });
+    sdk.state.setJson(mailboxCursorKey(account, "INBOX"), { uidValidity: "42", uid: 2 });
+    fakeReader({ sync: [mailbox(), { ...mailEvent(8, "<eight>"), gapBelow: 3 }, mailEvent(9, "<nine>"), { type: "done" }] });
+    expect((await sync(sdk))!.synced.messages).toBe(2);
+    expect(sdk.state.getJson<MailboxCursor>(mailboxCursorKey(account, "INBOX"))).toEqual({ uidValidity: "42", uid: 9, gaps: [[3, 7]] });
+    fakeReader({ sync: [mailbox(), { ...mailEvent(7, "<seven>"), gap: 3 }, { ...mailEvent(5, "<five>"), gap: 3 }, { type: "done" }] });
+    await sync(sdk);
+    expect(request().cursors.INBOX).toEqual({ uidValidity: "42", uid: 9, gaps: [[3, 7]] });
+    expect(sdk.state.getJson<MailboxCursor>(mailboxCursorKey(account, "INBOX"))).toEqual({ uidValidity: "42", uid: 9, gaps: [[3, 4]] });
+    fakeReader({ sync: [mailbox(), { ...mailEvent(6, "<outside>"), gap: 3 }, { type: "done" }] });
+    expect((await sync(sdk))!.synced.errors.join(" ")).toContain("invalid UID sequence");
+    fakeReader({ sync: [mailbox(), { type: "gap-done", mailbox: "INBOX", uidValidity: "42", gap: 3 }, { type: "done" }] });
+    await sync(sdk);
+    expect(sdk.state.getJson<MailboxCursor>(mailboxCursorKey(account, "INBOX"))).toEqual({ uidValidity: "42", uid: 9 });
+    expect(emailConnector(sdk).store.stats().messages).toBe(4);
+  });
+
   it("connects and verifies through the generic account contract without returning passwords", async () => {
     fakeReader({ verify: [{ type: "verified" }, { type: "done" }] });
     const status = await auth.connect(sdk, "imap", { ...account, port: "993" });

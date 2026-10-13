@@ -114,7 +114,7 @@ integration(
       expect(connection.modules["ai-chats"]).toMatchObject({ available: false });
       await control.reload();
       await eventually(async () =>
-        (await control.locator("#modules [data-module]").count()) === 2 &&
+        (await control.locator("#modules [data-module]").count()) === Object.keys(connection.modules).length &&
         (await control.locator('[data-module="ai-chats"] .module-notice').innerText()).includes("not loaded"),
       );
       host.stop(true);

@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createExtensionSDK, createMessageBus, type ShaleSDK } from "../sdk";
 import { run } from "../extensions/discord";
-import { run as sync } from "../extensions/discord/sync";
+import { run as boundedSync } from "../extensions/discord/sync";
 import { run as recover } from "../extensions/discord/recover";
-import { exporterArgs, parseListing } from "../extensions/discord/dce";
+import { exporterArgs, parseListing, syncDiscord } from "../extensions/discord/dce";
+import { indexChatWindows, withChatLease } from "../sdk/chat/commit";
+import { discordSettings } from "../extensions/discord/connector";
 import { ProgressiveImport } from "../extensions/discord/progressive-import";
 import { discordConnector } from "../extensions/discord/connector";
 import { summarizeOutput } from "../extensions/discord/dce-runner";
@@ -32,9 +34,22 @@ let directory: string;
 let database: ReturnType<typeof createTestDatabase>;
 let sdk: ShaleSDK;
 let llmCalls: number;
+let previousCredentialsPath:string|undefined;
+
+// Preserve regression coverage of the supported legacy exporter utility independently of REST sync.
+async function sync(sdk: ShaleSDK) {
+  const settings=discordSettings(sdk);
+  if(settings.syncEnabled===false)return null;
+  const connector=discordConnector(sdk,settings),indexed={windows:0,indexed:0,errors:[] as string[]};
+  return withChatLease(sdk,async()=>{
+    const index=async()=>{const result=await indexChatWindows(sdk,connector,settings);
+      indexed.windows+=result.windows;indexed.indexed+=result.indexed;indexed.errors.push(...result.errors);};
+    const synced=await syncDiscord(sdk,connector,settings,index);await index();return {synced,indexed};
+  });
+}
 
 function configure(settings: Record<string, unknown>) {
-  writeFileSync(join(directory, "settings.json"), JSON.stringify({ importDir: join(directory, "import"),
+  writeFileSync(join(directory, "settings.json"), JSON.stringify({ relevanceEnabled:false,rawRetentionDays:36500,importDir: join(directory, "import"),
     exportDir: join(directory, "exports"), namespace: "discord", ...settings }));
 }
 
@@ -42,6 +57,8 @@ const count = (sql: string) => database.query<{ n: number }, []>(`SELECT count(*
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "shale-discord-"));
+  previousCredentialsPath=process.env.SHALE_CREDENTIALS_PATH;
+  process.env.SHALE_CREDENTIALS_PATH=join(directory,'credentials.json');
   mkdirSync(join(directory, "import"));
   database = createTestDatabase();
   sdk = createExtensionSDK("discord", { database, messageBus: createMessageBus(), extensionDir: directory });
@@ -60,6 +77,8 @@ afterEach(() => {
   sdk.messages.clear();
   database.close();
   rmSync(directory, { recursive: true, force: true });
+  if(previousCredentialsPath===undefined)delete process.env.SHALE_CREDENTIALS_PATH;
+  else process.env.SHALE_CREDENTIALS_PATH=previousCredentialsPath;
 });
 
 describe("discord extension", () => {
@@ -300,7 +319,7 @@ describe("discord extension", () => {
 
   it("does nothing on the sync cron while sync is disabled", async () => {
     configure({ syncEnabled: false });
-    expect(await sync(sdk)).toBeNull();
+    expect(await boundedSync(sdk)).toBeNull();
   });
 
   it("ingests successful partial exports without advancing past a failed thread", async () => {

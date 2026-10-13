@@ -68,7 +68,7 @@ export function pendingWindows(store: ChatStore, platform: string, settings: Cha
       resumeFrom ??= startTime;
       if (state?.message_hash === messageHash && state.next_attempt_at > now) { retryLater = true; continue; }
       if (windows.length >= limit) { retryLater = true; continue; }
-      store.recordWindow(windowId, conversationId, startTime, endTime, messageHash);
+      store.recordWindow(windowId, conversationId, startTime, endTime, messageHash,segment.map(([id])=>id));
       windows.push({ windowId, conversation, startTime, endTime, messageHash,
         messages: store.loadMessages(conversationId, segment.map(([id]) => id)) });
     }

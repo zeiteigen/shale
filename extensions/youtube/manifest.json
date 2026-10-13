@@ -1,0 +1,13 @@
+{
+  "name": "youtube",
+  "namespace": "youtube",
+  "version": "0.1.0",
+  "description": "Capture watched YouTube videos and enrich them with transcript summaries after half of the video has actually played.",
+  "subscribe_ingest": "subscribe.ts",
+  "chrome_module": {
+    "background": "chrome/background.ts",
+    "popup": "chrome/popup.ts",
+    "inject": { "video": "chrome/inject/video.ts", "tracker": "chrome/inject/tracker.ts", "subtitles": "chrome/inject/subtitles.ts" }
+  },
+  "crons": [{ "name": "youtube-index", "schedule": "*/2 * * * *", "script": "index.ts", "run_on_startup": true }]
+}

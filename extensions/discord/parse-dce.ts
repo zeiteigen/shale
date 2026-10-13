@@ -17,7 +17,9 @@ const message = z.object({
   attachments: z.array(z.object({ url: nullableString, fileName: nullableString })).default([]),
   embeds: z.array(z.object({ title: nullableString, url: nullableString, description: nullableString })).default([]),
   stickers: z.array(z.object({ name: nullableString })).default([]),
-  reactions: z.array(z.object({ emoji: z.object({ name: nullableString, code: nullableString }), count: z.number() })).default([]),
+  reactions: z.array(z.object({ emoji: z.object({ name: nullableString, code: nullableString }), count: z.number(),
+    users: z.array(z.object({ id: z.string() })).default([]) })).default([]),
+  mentions: z.array(z.object({ id: z.string() })).default([]),
   reference: z.object({ messageId: nullableString, channelId: nullableString }).nullish(),
 });
 
@@ -72,6 +74,7 @@ export function parseDiscordExport(raw: unknown): ParsedDiscordExport {
   const conversation: ChatConversation = {
     conversationId: channel.id, kind, title, uri: `discord://channel/${channel.id}`,
     server: inGuild ? { id: guild.id, name: guild.name, uri: `discord://guild/${guild.id}` } : undefined,
+    parentId: kind === "thread" ? channel.categoryId ?? undefined : undefined,
   };
   const messages: ChatMessage[] = [];
   let skipped = 0;
@@ -100,8 +103,11 @@ export function parseDiscordExport(raw: unknown): ParsedDiscordExport {
       sentAt,
       editedAt: Number.isNaN(edited) ? undefined : edited,
       text: m.content,
-      replyToId: m.reference?.messageId && (!m.reference.channelId || m.reference.channelId === channel.id)
-        ? m.reference.messageId : undefined,
+      replyToId: m.reference?.messageId ?? undefined,
+      replyConversationId: m.reference?.channelId && m.reference.channelId!==channel.id ? m.reference.channelId : undefined,
+      mentionedUserIds: m.mentions.length ? m.mentions.map(user => user.id) : undefined,
+      reactedUserIds: m.reactions.some(reaction => reaction.users.length)
+        ? [...new Set(m.reactions.flatMap(reaction => reaction.users.map(user => user.id)))] : undefined,
       attachments,
       reactions: m.reactions.length
         ? m.reactions.map(r => ({ emoji: r.emoji.name || r.emoji.code || "?", count: r.count })) : undefined,

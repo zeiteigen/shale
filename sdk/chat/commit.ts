@@ -3,6 +3,7 @@ import type { CheckpointContext } from "../types";
 import { SourceGraph } from "../graph/source";
 import { acquireTaskLease } from "../../lib/task-lease";
 import { contentFingerprint, memoryChunks, prepareSourceMemory } from "../../lib/memory/prepare";
+import { textReferences } from "../../lib/graph/identity-keys";
 import type { ChatStore } from "./store";
 import { summarizeWindow } from "./summarize";
 import { transcriptChunks } from "./transcript";
@@ -10,6 +11,7 @@ import { pendingWindows } from "./windows";
 import type { ChatParticipant, ChatWindow, ChatWindowSettings, PreparedChatWindow } from "./types";
 import { chatHash } from "./store";
 import { conversationHash } from "./conversation-hash";
+import type { ChatWindowPolicy } from "./policy";
 
 export const CHAT_SOURCE_TYPE = "chat_session";
 
@@ -18,6 +20,7 @@ export interface ChatConnector {
   platform: string;
   namespace: string;
   store: ChatStore;
+  policy?: ChatWindowPolicy;
 }
 
 export const chatCheckpointId = (windowId: string) => `chat_window:${windowId}`;
@@ -62,8 +65,28 @@ export function resetConversationWindows(sdk: ShaleSDK, connector: ChatConnector
 export async function prepareWindow(sdk: ShaleSDK, connector: ChatConnector, window: ChatWindow,
   settings: ChatWindowSettings): Promise<{ id: string; data: PreparedChatWindow } | null> {
   const id = chatCheckpointId(window.windowId);
+  const previousSource=connector.store.windowState(window.windowId)?.source_id;
+  if (previousSource && connector.policy?.preserve?.(previousSource)) {
+    sdk.checkpoint.delete(id);
+    connector.store.markIndexed(window.windowId,window.conversation.conversationId,window.startTime,window.endTime,window.messageHash,previousSource);
+    return null;
+  }
+  const fingerprint = connector.policy?.fingerprint(window.conversation.conversationId);
   const cached = sdk.checkpoint.get<PreparedChatWindow>(id);
-  if (cached?.data.type === "chat_window" && cached.data.messageHash === window.messageHash) return { id, data: cached.data };
+  if (cached?.data.type === "chat_window" && cached.data.messageHash === window.messageHash
+      && cached.data.policyFingerprint === fingerprint) return { id, data: cached.data };
+  if (cached) sdk.checkpoint.delete(id);
+  const decision = await connector.policy?.decide(window);
+  if (decision?.status === "pending") {
+    connector.store.deferWindow(window.windowId, decision.retryAt ?? Date.now() + 60_000);
+    return null;
+  }
+  if (decision?.status === "excluded") {
+    await connector.policy!.exclude(window);
+    connector.store.markIndexed(window.windowId, window.conversation.conversationId, window.startTime, window.endTime,
+      window.messageHash, null);
+    return null;
+  }
   const messages = window.messages.filter(message => !(settings.excludeBots && message.isBot));
   const chunks = transcriptChunks(messages);
   if (!chunks.length) {
@@ -73,18 +96,25 @@ export async function prepareWindow(sdk: ShaleSDK, connector: ChatConnector, win
   }
   const transcript = chunks.map(chunk => chunk.text_content).join("\n");
   const synthesis = await summarizeWindow(sdk, window.conversation, messages, transcript,
-    { enabled: settings.summarize !== false, model: settings.llmModel });
+    { enabled: settings.summarize !== false, model: settings.llmModel,
+      signal:connector.policy?.deadline ? AbortSignal.timeout(Math.max(1,connector.policy.deadline-Date.now())) : undefined });
   const memory = prepareSourceMemory(chunks, { title: synthesis.title, summary: synthesis.summary });
   const data: PreparedChatWindow = {
     type: "chat_window", platform: connector.platform, namespace: connector.namespace, windowId: window.windowId,
     conversation: window.conversation, startTime: window.startTime, endTime: window.endTime,
     messageCount: messages.filter(message => !message.isSystem).length, messageHash: window.messageHash,
-    firstMessageId: window.messages[0]!.messageId, participants: participants({ ...window, messages }),
-    synthesis, sourceHash: chatHash([conversationHash(window.conversation), contentFingerprint(chunks)]), memory,
+    firstMessageId: window.messages[0]!.messageId,
+    participants: participants({ ...window, messages }).filter(person => !decision?.participantIds || decision.participantIds.includes(person.id)),
+    synthesis, sourceHash: chatHash([conversationHash(window.conversation), contentFingerprint(chunks),
+      ...(decision ? [decision.fingerprint, decision.participantIds,decision.revision] : []),
+      ...(connector.policy ? [synthesis] : [])]), memory,
+    policyFingerprint: decision?.fingerprint, rawMessageIds: window.messages.map(message => message.messageId),
   };
   sdk.saveCheckpoint(data, { id, key: id });
   return { id, data };
 }
+
+const MAX_SHARED_LINKS = 20;
 
 function commitGraph(sdk: ShaleSDK, sourceId: string, uri: string, data: PreparedChatWindow) {
   const { conversation, synthesis, platform } = data;
@@ -112,6 +142,10 @@ function commitGraph(sdk: ShaleSDK, sourceId: string, uri: string, data: Prepare
     evidence: graph.evidence(0, undefined, "generated", "mentions"),
   };
   graph.claim(session, "SUMMARY", { value: synthesis.summary }, interpretation);
+  // Links shared in the conversation become pages; identity keys later join them with visits of the same URL.
+  const text = memoryChunks(data.memory).filter(chunk => chunk.chunk_type === "verbatim").map(chunk => chunk.text_content).join("\n");
+  for (const url of textReferences(text).urls.slice(0, MAX_SHARED_LINKS))
+    graph.link(session, "SHARES_LINK", graph.entity(url, url, "WebPage"), { evidence: graph.quote(url) });
   for (const topic of synthesis.topics)
     graph.link(session, "COVERS_TOPIC", graph.entity(topic.toLocaleLowerCase(), topic, "Topic", topic), interpretation);
   graph.event(`chat:${data.windowId}`, {
@@ -129,6 +163,15 @@ export function commitWindow(sdk: ShaleSDK, connector: ChatConnector, id: string
   const { store } = connector;
   const uri = windowUri(data.conversation.uri, data.firstMessageId);
   return sdk.database.transaction(() => {
+    if (connector.policy && connector.policy.fingerprint(data.conversation.conversationId) !== data.policyFingerprint)
+      throw new Error("Chat admission policy changed; prepare this window again");
+    const previous= sdk.database.query<{hash:string},[string]>("SELECT hash FROM sources WHERE id=?")
+      .get(`${data.platform}-window:${data.windowId}`);
+    if (previous && connector.policy?.preserve?.(`${data.platform}-window:${data.windowId}`)) {
+      store.markIndexed(data.windowId,data.conversation.conversationId,data.startTime,data.endTime,data.messageHash,`${data.platform}-window:${data.windowId}`);
+      sdk.checkpoint.delete(id);
+      return {sourceId:`${data.platform}-window:${data.windowId}`,chunksCount:0,chunkIds:[] as number[],skipped:'excluded' as const,uri};
+    }
     const result = sdk.ingest.sourceAndChunks({
       namespace: data.namespace,
       source: { id: `${data.platform}-window:${data.windowId}`, type: CHAT_SOURCE_TYPE, uri, origin: data.platform,
@@ -136,18 +179,24 @@ export function commitWindow(sdk: ShaleSDK, connector: ChatConnector, id: string
       chunks: memoryChunks(data.memory),
       memory: data.memory,
     });
-    if (!result.skipped) commitGraph(sdk, result.sourceId, uri, data);
+    if (!result.skipped) {
+      if (previous?.hash!==data.sourceHash) connector.policy?.reconcile?.(data, result.sourceId);
+      commitGraph(sdk, result.sourceId, uri, data);
+    }
     // Backfilled or re-cut history can replace windows that covered the same span.
-    for (const stale of store.overlappingWindows(data.conversation.conversationId, data.startTime, data.endTime, data.windowId)) {
-      if (stale.source_id && stale.source_id !== result.sourceId)
+    for (const stale of store.overlappingWindows(data.conversation.conversationId, data.startTime, data.endTime, data.windowId,data.rawMessageIds)) {
+      if (stale.source_id && connector.policy?.preserve?.(stale.source_id)) continue;
+      if (stale.source_id && stale.source_id !== result.sourceId) {
+        connector.policy?.reconcile?.(data,stale.source_id);
         sdk.database.query("DELETE FROM sources WHERE id=?").run(stale.source_id);
+      }
       store.deleteWindow(stale.window_id);
     }
     store.markIndexed(data.windowId, data.conversation.conversationId, data.startTime, data.endTime, data.messageHash,
       result.skipped ? null : result.sourceId);
     sdk.checkpoint.delete(id);
     return { ...result, uri };
-  })();
+  }).immediate();
 }
 
 export async function finalizeWindows(sdk: ShaleSDK, connector: ChatConnector,
@@ -157,7 +206,9 @@ export async function finalizeWindows(sdk: ShaleSDK, connector: ChatConnector,
   for (const { id, data } of prepared) {
     try {
       const current = connector.store.conversation(data.conversation.conversationId);
-      if (current && conversationHash(current) !== conversationHash(data.conversation)) {
+      if ((current && conversationHash(current) !== conversationHash(data.conversation))
+          || connector.policy?.fingerprint(data.conversation.conversationId) !== data.policyFingerprint
+          || connector.store.windowState(data.windowId)?.message_hash !== data.messageHash) {
         // A renamed conversation must be prepared again instead of restoring an old summary.
         sdk.checkpoint.delete(id);
         continue;
@@ -208,11 +259,17 @@ export async function withChatLease<T>(sdk: ShaleSDK, work: () => Promise<T>,
 }
 
 /** Index every sealed, changed window: summaries are prepared in a model batch, then committed. */
-export async function indexChatWindows(sdk: ShaleSDK, connector: ChatConnector, settings: ChatWindowSettings) {
+export async function indexChatWindows(sdk: ShaleSDK, connector: ChatConnector, settings: ChatWindowSettings,
+  options: { maxWindows?: number; deadline?: number } = {}) {
   const totals = { windows: 0, indexed: 0, errors: [] as string[] };
   for (;;) {
-    const windows = pendingWindows(connector.store, connector.platform, settings);
+    const remaining = (options.maxWindows ?? Infinity) - totals.windows;
+    if (remaining <= 0 || Date.now() >= (options.deadline ?? Infinity)) break;
+    const windows = pendingWindows(connector.store, connector.platform,
+      { ...settings, maxWindowsPerRun: Math.min(settings.maxWindowsPerRun ?? 50, remaining) });
     if (!windows.length) break;
+    // Observe the entire batch before parallel preparation so all checkpoints share current evidence.
+    for (const window of windows) connector.policy?.observe?.(window.conversation,window.messages);
     totals.windows += windows.length;
     const result = await sdk.models.batch(
       async () => (await sdk.models.mapChat(windows, async window => {

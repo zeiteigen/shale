@@ -15,6 +15,8 @@ const BUILTINS: RelationDefinition[] = [
   {name:'HAS_TAG',inverse:'TAG_OF'}, {name:'FEATURES_IMAGE',inverse:'IMAGE_OF'},
   {name:'REFERS_TO',inverse:'REFERRED_BY'}, {name:'IN_FOLDER',inverse:'HAS_BOOKMARK'},
   {name:'BOOKMARKED_IN',inverse:'HAS_BOOKMARKED_PAGE'}, {name:'CONTAINS_PAGE',inverse:'IN_SESSION'},
+  {name:'PART_OF_EPISODE',inverse:'HAS_EPISODE_MEMBER'}, {name:'INVOLVES',inverse:'INVOLVED_IN'},
+  {name:'COMMUNITY_OF',inverse:'HAS_COMMUNITY'}, {name:'SHARES_LINK',inverse:'SHARED_IN'},
 ];
 
 export class GraphRelations {

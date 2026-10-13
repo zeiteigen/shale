@@ -26,7 +26,7 @@ export function classifyRevisions(db: Database, deadline: number, batch: number,
           content_hash=excluded.content_hash,updated_at=excluded.updated_at`)
           .run(row.id, verdict.tier, verdict.hard ? 1 : 0, row.content_hash, Date.now());
       }
-    })();
+    }).immediate();
     classified += rows.length;
   }
 }

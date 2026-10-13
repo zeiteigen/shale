@@ -1,9 +1,10 @@
 import type { ShaleSDK } from "../sdk";
 import type { ClaimFilter, ClaimStatus, TraversalOptions } from "../sdk/graph/types";
+import { EpisodeStore } from "../sdk/graph/episodes";
 
 /** Local graph inspection/correction endpoints, guarded by the server's origin checks. */
 export async function knowledgeApi(req: Request, url: URL, sdk: ShaleSDK): Promise<Response | undefined> {
-  const match = url.pathname.match(/^\/api\/knowledge\/(claims|inspect|review|traverse|entity|merge|unmerge|event|revision|memory)$/);
+  const match = url.pathname.match(/^\/api\/knowledge\/(claims|inspect|review|traverse|entity|merge|unmerge|event|revision|memory|episodes|episode)$/);
   if (!match) return;
   try {
     if (req.method === 'GET') {
@@ -13,6 +14,17 @@ export async function knowledgeApi(req: Request, url: URL, sdk: ShaleSDK): Promi
         return Response.json(sdk.memory.get(sourceId));
       }
       if (match[1] === 'entity') return Response.json(sdk.graph.entities.inspect(Number(url.searchParams.get('id'))));
+      if (match[1] === 'episodes') {
+        const entity=url.searchParams.get('entityId');
+        const status=url.searchParams.get('status') ?? undefined;
+        if (entity!==null && !/^\d+$/.test(entity)) throw new Error('Invalid entity ID');
+        return Response.json({episodes:new EpisodeStore(sdk.database,sdk.graph).list({query:url.searchParams.get('query') ?? undefined,
+          status,entityId:entity===null ? undefined : Number(entity),limit:100})});
+      }
+      if (match[1] === 'episode') {
+        const episode=new EpisodeStore(sdk.database,sdk.graph).get(Number(url.searchParams.get('id')));
+        return episode ? Response.json(episode) : Response.json({error:'Episode not found'},{status:404});
+      }
       if (match[1] === 'claims') {
         const entityId=url.searchParams.has('entityId') ? Number(url.searchParams.get('entityId')) : undefined;
         if (entityId!==undefined && !Number.isSafeInteger(entityId)) throw new Error('Invalid entity ID');

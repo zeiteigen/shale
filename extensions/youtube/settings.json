@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "captureSubtitles": true,
+  "preferredLanguages": ["en"],
+  "maxVideosPerRun": 20,
+  "llmModel": "",
+  "namespace": "youtube"
+}

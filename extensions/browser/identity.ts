@@ -152,8 +152,9 @@ export function sanitizeTopics(
 export function topicFromPageTitle(title: string): string | null {
   const topic = cleanTopic(
     title
-      .replace(/\s+[-|]\s+(?:Google Search|Google Gemini|Bing|DuckDuckGo)$/i, "")
-      .replace(/\s+[-|]\s+[^-|]{1,40}$/i, ""),
+      .replace(/\s+[-|·•–—]\s+(?:Google Search|Google Gemini|Bing|DuckDuckGo)$/i, "")
+      // Site suffixes: "Repo · GitHub", "Docs – MDN", "Post | Blog".
+      .replace(/\s+[-|·•–—]\s+[^-|·•–—]{1,40}$/i, ""),
   );
   if (!topic || topic.length < 3 || topic.length > 100) return null;
   return topic;

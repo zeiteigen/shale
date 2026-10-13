@@ -1,4 +1,5 @@
 {
+  "enabled": false,
   "maxPairsPerRun": 20,
   "bidirectional": true,
   "defaultRelation": "RELATES_TO",

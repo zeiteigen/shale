@@ -49,6 +49,8 @@ export class ChatStore {
       ) STRICT;
       CREATE INDEX IF NOT EXISTS ${this.windows}_conversation ON ${this.windows}(extension_id,conversation_id,start_time);
     `);
+    if (!db.query<{name:string},[]>(`PRAGMA table_info(${this.windows})`).all().some(column=>column.name==='message_ids'))
+      db.run(`ALTER TABLE ${this.windows} ADD COLUMN message_ids TEXT`);
   }
 
   /** Reuse an existing conversation that another feed registered under the same match key. */
@@ -95,8 +97,8 @@ export class ChatStore {
   }
 
   windowBySource(sourceId: string) {
-    return this.db.query<{ window_id: string; conversation_id: string; start_time: number; end_time: number; message_hash: string }, [string, string]>(
-      `SELECT window_id,conversation_id,start_time,end_time,message_hash FROM ${this.windows} WHERE extension_id=? AND source_id=?`)
+    return this.db.query<{ window_id: string; conversation_id: string; start_time: number; end_time: number; message_hash: string;message_ids:string|null }, [string, string]>(
+      `SELECT window_id,conversation_id,start_time,end_time,message_hash,message_ids FROM ${this.windows} WHERE extension_id=? AND source_id=?`)
       .get(this.extensionId, sourceId);
   }
 
@@ -183,13 +185,13 @@ export class ChatStore {
       .get(this.extensionId, windowId);
   }
 
-  recordWindow(windowId: string, conversationId: string, start: number, end: number, messageHash: string) {
-    this.db.query(`INSERT INTO ${this.windows}(extension_id,window_id,conversation_id,start_time,end_time,message_hash)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(extension_id,window_id) DO UPDATE SET start_time=excluded.start_time,
+  recordWindow(windowId: string, conversationId: string, start: number, end: number, messageHash: string, messageIds?:string[]) {
+    this.db.query(`INSERT INTO ${this.windows}(extension_id,window_id,conversation_id,start_time,end_time,message_hash,message_ids)
+      VALUES(?,?,?,?,?,?,?) ON CONFLICT(extension_id,window_id) DO UPDATE SET start_time=excluded.start_time,
       end_time=excluded.end_time,attempts=CASE WHEN message_hash=excluded.message_hash THEN attempts ELSE 0 END,
       next_attempt_at=CASE WHEN message_hash=excluded.message_hash THEN next_attempt_at ELSE 0 END,
-      message_hash=excluded.message_hash`)
-      .run(this.extensionId, windowId, conversationId, start, end, messageHash);
+      message_hash=excluded.message_hash,message_ids=coalesce(excluded.message_ids,message_ids)`)
+      .run(this.extensionId, windowId, conversationId, start, end, messageHash,messageIds ? JSON.stringify(messageIds) : null);
   }
 
   markIndexed(windowId: string, conversationId: string, start: number, end: number, messageHash: string, sourceId: string | null) {
@@ -205,12 +207,31 @@ export class ChatStore {
       .run(message, Date.now(), this.extensionId, windowId);
   }
 
+  /** Admission or external coverage is pending; defer without exhausting failure attempts. */
+  deferWindow(windowId: string, until: number) {
+    this.db.query(`UPDATE ${this.windows} SET next_attempt_at=? WHERE extension_id=? AND window_id=?`)
+      .run(until, this.extensionId, windowId);
+  }
+
+  /** Reevaluate unchanged history without deleting existing searchable sources first. */
+  invalidate(conversationId: string) {
+    this.db.query(`UPDATE ${this.windows} SET indexed_hash=NULL,attempts=0,next_attempt_at=0
+      WHERE extension_id=? AND conversation_id=?`).run(this.extensionId, conversationId);
+    this.db.query(`UPDATE ${this.conversations} SET dirty=1,scan_from=0 WHERE extension_id=? AND conversation_id=?`)
+      .run(this.extensionId, conversationId);
+  }
+
   /** Windows of a conversation that strictly overlap a time range, excluding one window. */
-  overlappingWindows(conversationId: string, start: number, end: number, exceptId: string) {
-    return this.db.query<{ window_id: string; source_id: string | null }, [string, string, number, number, string]>(
-      `SELECT window_id,source_id FROM ${this.windows} WHERE extension_id=? AND conversation_id=?
-       AND start_time<? AND end_time>? AND window_id!=?`)
-      .all(this.extensionId, conversationId, end, start, exceptId);
+  overlappingWindows(conversationId: string, start: number, end: number, exceptId: string, messageIds?:string[]) {
+    return this.db.query<{ window_id: string; source_id: string | null }, [string,string,string,number,number,string|null,string|null,string|null]>(
+      `SELECT w.window_id,w.source_id FROM ${this.windows} w LEFT JOIN sources s ON s.id=w.source_id
+       WHERE w.extension_id=? AND w.conversation_id=? AND w.window_id!=? AND (
+         (w.start_time<? AND w.end_time>?)
+         OR (? IS NOT NULL AND EXISTS(SELECT 1 FROM json_each(w.message_ids) old
+           JOIN json_each(?) current ON current.value=old.value))
+         OR substr(s.uri,instr(s.uri,'#window=')+8) IN (SELECT value FROM json_each(?)))`)
+      .all(this.extensionId,conversationId,exceptId,end,start,messageIds ? JSON.stringify(messageIds) : null,
+        messageIds ? JSON.stringify(messageIds) : null,messageIds ? JSON.stringify(messageIds.map(encodeURIComponent)) : null);
   }
 
   deleteWindow(windowId: string) {

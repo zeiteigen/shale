@@ -1,4 +1,5 @@
 export * from "./types";
+export type { ChatWindowPolicy, ChatWindowDecision } from "./policy";
 export { ChatStore, chatHash, type UpsertOptions } from "./store";
 export { pendingWindows, CHAT_WINDOW_DEFAULTS } from "./windows";
 export { transcriptChunks, transcriptLines, transcriptLine } from "./transcript";

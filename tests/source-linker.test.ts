@@ -562,6 +562,8 @@ describe("Source Linker Extension", () => {
     });
 
     it("recovers uncommitted LLM link decisions via recover.ts", async () => {
+      const get = sdk.settings.get.bind(sdk.settings);
+      sdk.settings.get = ((key: string, fallback?: unknown) => key === 'enabled' ? true : get(key, fallback)) as typeof sdk.settings.get;
       // Simulate crash: checkpoints exist in SQLite, but graph edges were not committed
       sdk.saveCheckpoint(
         {

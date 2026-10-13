@@ -4,9 +4,12 @@ import {
   Layers3,
   Network,
   Search,
+  RefreshCw,
 } from "lucide-react";
-import { getGraph, search } from "./api";
-import type { GraphData, GraphNode, SearchMode, SearchResult } from "./types";
+import { search } from "./api";
+import type { GraphNode, SearchMode, SearchResult } from "./types";
+import { useLiveGraph } from "./use-live-graph";
+import { searchGraphNodes } from "./graph-node-search";
 import { NodeReader } from './NodeReader';
 import { searchPreview } from './search-preview';
 import { GraphMap, colorFor } from './GraphMap';
@@ -18,7 +21,6 @@ import { createOrganicSession } from './use-force-layout';
 import './graph-view.css';
 
 function Notebook() {
-  const [data, setData] = useState<GraphData | null>(null);
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [visibleTypes, setVisibleTypes] = useState(new Set<string>());
   const [query, setQuery] = useState("");
@@ -33,6 +35,7 @@ function Notebook() {
   const [graphDate,setGraphDate]=useState('');
   const [graphPreferences, setGraphPreferences] = useState(readGraphPreferences);
   const [organicSession] = useState(createOrganicSession);
+  const knownTypes = useRef(new Set<string>());
   const classicCamera = useRef({ width: 1, height: 1, zoom: 1, x: 0, y: 0 });
   useEffect(() => { saveGraphPreferences(graphPreferences); }, [graphPreferences]);
   const sourceResults = useMemo(() => {
@@ -41,25 +44,17 @@ function Notebook() {
     return [...bySource.values()];
   }, [results]);
   const at=graphDate ? new Date(`${graphDate}T00:00:00Z`).getTime() : undefined;
-
-  function refreshGraph() {
-    getGraph({context:appliedContext || undefined,at},true).then(graph=> {
-      setData(graph);setSelected(current=>current ? graph.nodes.find(n=>n.id===current.id) ?? null : null);
-    }).catch(reason=>setError(reason.message));
-  }
-
+  const { data, error: graphError, refresh: refreshGraph } = useLiveGraph(appliedContext || undefined, at);
+  const displayError = error || graphError;
+  const entityResults = useMemo(() => searchGraphNodes(data?.nodes ?? [], query), [data, query]);
   useEffect(() => {
-    let cancelled=false;
-    getGraph({context:appliedContext || undefined,at})
-      .then((graph) => {
-        if (cancelled) return;
-        setData(graph);
-        setSelected(current => current ? graph.nodes.find(node => node.id === current.id) ?? null : null);
-        setVisibleTypes(new Set(graph.nodes.map((node) => node.type)));
-      })
-      .catch((reason) => {if (!cancelled) setError(reason.message);});
-    return ()=>{cancelled=true;};
-  }, [appliedContext,graphDate]);
+    if (!data) return;
+    const types = new Set(data.nodes.map(node => node.type));
+    const added = [...types].filter(type => !knownTypes.current.has(type));
+    knownTypes.current = new Set([...knownTypes.current, ...types]);
+    setVisibleTypes(current => new Set([...current, ...added]));
+    setSelected(current => current ? data.nodes.find(node => node.id === current.id) ?? null : null);
+  }, [data]);
 
   useEffect(() => {
     if (!selected) setFocusSelection(false);
@@ -74,7 +69,7 @@ function Notebook() {
     return data.edges
       .filter((edge) => edge.source === selected.id || edge.target === selected.id)
       .map((edge) => ({ edge, node: byId.get(edge.source === selected.id ? edge.target : edge.source) }))
-      .filter((item): item is { edge: GraphData["edges"][number]; node: GraphNode } => Boolean(item.node));
+      .filter((item): item is { edge: typeof data.edges[number]; node: GraphNode } => Boolean(item.node));
   }, [data, selected]);
 
   function toggleType(type: string) {
@@ -105,12 +100,17 @@ function Notebook() {
     const node = data?.nodes.find((item) => item.id === result.entity_id)
       || data?.nodes.find((item) => item.sourceUri === result.source_uri)
       || data?.nodes.find((item) => item.name === result.source_title);
-    if (node) setSelected(node);
+    if (node) selectNode(node);
+  }
+
+  function selectNode(node: GraphNode) {
+    setVisibleTypes(current => new Set([...current, node.type]));
+    setSelected(node);
   }
 
   return (
     <main className="notebook-shell">
-      <header className="notebook-summary"><span>Knowledge notebook</span><span>{data?.stats.totalSources ?? 0} sources · {data?.stats.totalChunks ?? 0} passages · {data?.stats.totalEntities ?? 0} entries · {data?.stats.totalEdges ?? 0} links</span><button className="text-button" onClick={refreshGraph}>Refresh map</button></header>
+      <header className="notebook-summary"><span>Knowledge notebook</span><span>{data?.stats.totalSources ?? 0} sources · {data?.stats.totalChunks ?? 0} passages · {data?.stats.totalEntities ?? 0} entries · {data?.stats.totalEdges ?? 0} links</span><button className="text-button" onClick={refreshGraph}><RefreshCw size={14} /> Refresh map</button></header>
 
       <section className={`workspace${selected ? ' has-selection' : ''}`}>
         <aside className="index-pane">
@@ -122,6 +122,11 @@ function Notebook() {
               {(["bm25"] as SearchMode[]).map((item) => <button type="button" key={item} className={mode === item ? "mode active" : "mode"} onClick={() => setMode(item)}>{item === "bm25" ? "text" : item}</button>)}
             </div>
           </form>
+
+          {entityResults.length > 0 && <div className="result-list" aria-label="Matching graph entries">
+            <p className="section-label">Graph entries</p>
+            {entityResults.map(node => <button key={node.id} className="result-card" onClick={() => selectNode(node)}><strong>{node.name}</strong><span>{node.type} · {node.namespace}</span></button>)}
+          </div>}
 
           {results.length > 0 && <div className="result-list">
             <p className="section-label">Search notes</p>
@@ -154,7 +159,7 @@ function Notebook() {
           <div className="map-heading"><div><p className="eyebrow"><Network size={14} /> relationships</p><h1>Map of the collection</h1></div><div className="map-heading-actions"><span className="entry-count">{!data ? 'Loading graph…' : focusSelection && selected ? `${connectionDepth}-hop focus` : `${visibleCount} visible`}</span><div className="graph-mode-toggle" role="group" aria-label="Graph view">
             {(['organic', 'classic'] as const).map(view => <button key={view} type="button" aria-pressed={graphPreferences.mode === view} onClick={() => setGraphPreferences(current => ({ ...current, mode: view }))}>{view === 'organic' ? 'Organic' : 'Classic'}</button>)}
           </div></div></div>
-          {error ? <div className="error-note">{error}</div> : data ? graphPreferences.mode === 'classic'
+          {displayError ? <div className="error-note">{displayError}</div> : data ? graphPreferences.mode === 'classic'
             ? <GraphMap data={data} selected={selected} visibleTypes={visibleTypes} focusSelection={focusSelection} connectionDepth={connectionDepth} onSelect={setSelected} viewState={classicCamera.current} />
             : <OrganicGraphMap data={data} selected={selected} visibleTypes={visibleTypes} focusSelection={focusSelection} connectionDepth={connectionDepth} onSelect={setSelected} forces={graphPreferences.forces} session={organicSession} />
             : <div className="map-loading" role="status">Loading relationships… Search and navigation are available.</div>}

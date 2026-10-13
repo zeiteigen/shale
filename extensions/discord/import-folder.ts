@@ -25,7 +25,9 @@ async function* jsonFiles(dir: string): AsyncGenerator<string> {
 /** Ingest one exporter JSON file; returns the newest message timestamp it contained. */
 export async function importExportFile(connector: ChatConnector, path: string) {
   const parsed = parseDiscordExport(await Bun.file(path).json());
-  const { changed } = connector.store.ingest(parsed.conversation, parsed.messages);
+  const { changed } = connector.policy?.ingest?.(parsed.conversation,parsed.messages)
+    ?? connector.store.ingest(parsed.conversation, parsed.messages);
+  connector.policy?.observe?.(parsed.conversation, parsed.messages);
   const newest = parsed.messages.reduce((max, m) => Math.max(max, m.sentAt), 0);
   return { changed, newest, skipped: parsed.skipped, conversation: parsed.conversation };
 }

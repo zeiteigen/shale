@@ -101,7 +101,7 @@ export class ShaleSDK {
     this.graph = new GraphIngestor(this.namespace, this.database);
     this.ingest = new UnifiedIngestor(this.namespace, this.database);
     const batchStore = modelBatchStore(this.state);
-    this.search = new ChunkSearcher(this.database);
+    this.search = new ChunkSearcher(this.database, this.graph);
     this.knowledge = new KnowledgeEditor(this.database,this.graph,this.search,this.namespace);
 
     this.llm = new LLMClient({ batchStore, ...defaultLLMOptions });

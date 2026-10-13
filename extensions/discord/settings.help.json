@@ -3,12 +3,12 @@
   "settings": {
     "importDir": {
       "type": "string",
-      "description": "Folder scanned (recursively) for DiscordChatExporter JSON exports (`-f Json`). Relative paths resolve from the Shale project root; ~/ is supported.",
+      "description": "Folder scanned recursively for manually created DiscordChatExporter JSON imports (`-f Json`). Manual imports remain supported.",
       "default": "./data/discord/import"
     },
     "syncEnabled": {
       "type": "boolean",
-      "description": "Run DiscordChatExporter on the discord-sync cron with the account connected on the Accounts page. Nothing is fetched until an account is connected. Automating a user account is against Discord's Terms of Service; use at your own risk.",
+      "description": "Enable hourly bounded account sync. No data is fetched until an account is connected or tokenEnv is configured.",
       "default": true,
       "possibleValues": [
         true,
@@ -17,7 +17,7 @@
     },
     "syncScope": {
       "type": "string",
-      "description": "\"all\" syncs every server and DM the connected account can see; \"selected\" syncs only the channels, guilds, and (with includeDMs) DMs listed below.",
+      "description": "all considers every visible server and DM; selected collects only configured channels, guilds, and optionally DMs. Both modes use bounded reads rather than full-history exports.",
       "default": "all",
       "possibleValues": [
         "all",
@@ -26,27 +26,27 @@
     },
     "dceCommand": {
       "type": "string[]",
-      "description": "Command that launches the DiscordChatExporter CLI. Empty uses the copy installed by `bun run setup discord` (data/discord/dce), then DiscordChatExporter.Cli on PATH.",
+      "description": "Legacy DiscordChatExporter command override. The bounded account sync does not invoke this exporter.",
       "default": []
     },
     "tokenEnv": {
       "type": "string",
-      "description": "Fallback environment variable (e.g. in data/.env) for the Discord token, used only when no account is connected on the Accounts page. The token reaches the exporter via its environment, never the command line.",
+      "description": "Environment variable providing a Discord token when no account is connected. Stored account credentials take precedence.",
       "default": "DISCORD_TOKEN"
     },
     "channels": {
       "type": "string[]",
-      "description": "Extra channel or thread ids to sync (with syncScope \"selected\", the only channels synced besides guilds and DMs).",
+      "description": "Channel or thread IDs to collect. With selected scope, these and the configured guilds determine eligibility; child threads follow their parent channel.",
       "default": []
     },
     "guilds": {
       "type": "string[]",
-      "description": "Extra server (guild) ids whose channels are synced.",
+      "description": "Server IDs to consider for bounded collection. With selected scope, only these servers and configured channels are eligible.",
       "default": []
     },
     "includeDMs": {
       "type": "boolean",
-      "description": "With syncScope \"selected\", also sync all direct messages and group DMs (always included with \"all\" for user tokens).",
+      "description": "Include direct messages and group DMs with selected scope. User-token all scope always includes them; bot accounts cannot read personal DMs.",
       "default": false,
       "possibleValues": [
         true,
@@ -55,7 +55,7 @@
     },
     "includeThreads": {
       "type": "string",
-      "description": "Which threads to include when syncing a guild or channel.",
+      "description": "none omits threads; active discovers active threads; all also rotates through archived thread metadata. Messages are fetched under the shared run budget.",
       "default": "all",
       "possibleValues": [
         "none",
@@ -65,7 +65,7 @@
     },
     "initialSyncDays": {
       "type": "number",
-      "description": "How far back the first sync of each channel reaches. 0 fetches the full history.",
+      "description": "Legacy exporter initial-history setting retained for existing configurations.",
       "default": 0,
       "range": {
         "min": 0,
@@ -74,7 +74,7 @@
     },
     "downloadMedia": {
       "type": "boolean",
-      "description": "Download attachments next to the exports (exportDir/media).",
+      "description": "Legacy exporter media-download setting retained for existing configurations.",
       "default": false,
       "possibleValues": [
         true,
@@ -83,12 +83,12 @@
     },
     "exportDir": {
       "type": "string",
-      "description": "Working folder for sync exports.",
+      "description": "Legacy exporter working folder retained for existing configurations.",
       "default": "./data/discord/exports"
     },
     "keepExports": {
       "type": "boolean",
-      "description": "Keep each sync's JSON files after ingestion instead of deleting them.",
+      "description": "Legacy exporter file-retention setting retained for existing configurations.",
       "default": false,
       "possibleValues": [
         true,
@@ -97,7 +97,7 @@
     },
     "syncTimeoutMinutes": {
       "type": "number",
-      "description": "Maximum run time for exporting one channel (with its threads).",
+      "description": "Legacy exporter per-channel timeout retained for existing configurations.",
       "default": 120,
       "range": {
         "min": 1,
@@ -106,7 +106,7 @@
     },
     "exportParallel": {
       "type": "number",
-      "description": "Threads exported at once within a channel (forums can have hundreds). The exporter still respects Discord's rate limits.",
+      "description": "Legacy exporter parallelism setting retained for existing configurations.",
       "default": 3,
       "range": {
         "min": 1,
@@ -115,7 +115,7 @@
     },
     "gapMinutes": {
       "type": "number",
-      "description": "A silence longer than this starts a new conversation window (one searchable source per window).",
+      "description": "A silence longer than this starts a new conversation window.",
       "default": 30,
       "range": {
         "min": 1,
@@ -124,7 +124,7 @@
     },
     "maxWindowMessages": {
       "type": "number",
-      "description": "Maximum messages per conversation window.",
+      "description": "Maximum messages per indexed conversation window.",
       "default": 120,
       "range": {
         "min": 5,
@@ -133,7 +133,7 @@
     },
     "maxWindowChars": {
       "type": "number",
-      "description": "Maximum transcript characters per window; keep at or below 12000 so whole windows stay searchable.",
+      "description": "Maximum transcript characters per indexed window.",
       "default": 11000,
       "range": {
         "min": 1000,
@@ -142,7 +142,7 @@
     },
     "idleMinutes": {
       "type": "number",
-      "description": "The newest window of a conversation is indexed only after this much silence.",
+      "description": "A settled conversation window waits this long without new messages before relevance evaluation.",
       "default": 60,
       "range": {
         "min": 0,
@@ -151,7 +151,7 @@
     },
     "maxWindowsPerRun": {
       "type": "number",
-      "description": "Windows summarised per batch.",
+      "description": "Legacy summarization batch limit retained for existing configurations.",
       "default": 50,
       "range": {
         "min": 1,
@@ -185,6 +185,150 @@
       "type": "string",
       "description": "Namespace for Discord sources and graph entities.",
       "default": "discord"
+    },
+    "relevanceEnabled": {
+      "type": "boolean",
+      "description": "Evaluate settled conversation windows against your configured interests and explicit include/exclude rules.",
+      "default": true,
+      "possibleValues": [
+        true,
+        false
+      ]
+    },
+    "selfUserIds": {
+      "type": "string[]",
+      "description": "Your Discord user IDs. The connected user token identifies you automatically; set IDs explicitly for bot-token syncs and manual imports.",
+      "default": []
+    },
+    "interests": {
+      "type": "string[]",
+      "description": "Topics and themes relevant to you. These are combined with activity from Shale and the configured interestProfile.",
+      "default": []
+    },
+    "excludedTopics": {
+      "type": "string[]",
+      "description": "Topics that should always exclude a window. Explicit exclusions take precedence over inclusions.",
+      "default": []
+    },
+    "includedPeople": {
+      "type": "string[]",
+      "description": "People whose conversations should be included; entries may be Discord user IDs or names.",
+      "default": []
+    },
+    "excludedPeople": {
+      "type": "string[]",
+      "description": "People whose conversations should always be excluded; entries may be Discord user IDs or names. Exclusions take precedence.",
+      "default": []
+    },
+    "includedConversations": {
+      "type": "string[]",
+      "description": "Conversation/channel IDs or names to include explicitly.",
+      "default": []
+    },
+    "excludedConversations": {
+      "type": "string[]",
+      "description": "Conversation/channel IDs or names to exclude explicitly. Exclusions take precedence.",
+      "default": []
+    },
+    "interestProfile": {
+      "type": "string",
+      "description": "Access profile used to read Shale activity when deriving interests. Keep this scoped to data you permit Discord relevance evaluation to use.",
+      "default": "local"
+    },
+    "relevanceThreshold": {
+      "type": "number",
+      "description": "Minimum relevance score required to index a settled window.",
+      "default": 0.75,
+      "range": {
+        "min": 0,
+        "max": 1
+      }
+    },
+    "relevanceModel": {
+      "type": "string",
+      "description": "Optional model override for relevance evaluation. Empty uses the configured default.",
+      "default": ""
+    },
+    "rawRetentionDays": {
+      "type": "number",
+      "description": "Maximum age in days for retained raw connector records.",
+      "default": 30,
+      "range": {
+        "min": 1,
+        "max": 36500
+      }
+    },
+    "rawMaxMiB": {
+      "type": "number",
+      "description": "Maximum total size in MiB for retained raw connector records.",
+      "default": 256,
+      "range": {
+        "min": 1,
+        "max": 1048576
+      }
+    },
+    "rawMaxConversationMessages": {
+      "type": "number",
+      "description": "Maximum raw messages retained for one conversation.",
+      "default": 5000,
+      "range": {
+        "min": 1,
+        "max": 10000000
+      }
+    },
+    "syncBudgetMinutes": {
+      "type": "number",
+      "description": "Maximum time spent in one hourly sync run. Bounded polling samples recent activity and does not guarantee complete historical intervals.",
+      "default": 10,
+      "range": {
+        "min": 1,
+        "max": 1440
+      }
+    },
+    "syncMaxRequests": {
+      "type": "number",
+      "description": "Maximum Discord API requests in one sync run.",
+      "default": 100,
+      "range": {
+        "min": 1,
+        "max": 1000000
+      }
+    },
+    "syncMaxMessages": {
+      "type": "number",
+      "description": "Maximum messages fetched in one sync run.",
+      "default": 5000,
+      "range": {
+        "min": 1,
+        "max": 10000000
+      }
+    },
+    "relevanceMaxWindows": {
+      "type": "number",
+      "description": "Maximum settled windows evaluated in one run.",
+      "default": 50,
+      "range": {
+        "min": 1,
+        "max": 1000000
+      }
+    },
+    "relevanceMaxLLMCalls": {
+      "type": "number",
+      "description": "Maximum relevance model calls in one run; zero disables model calls.",
+      "default": 25,
+      "range": {
+        "min": 0,
+        "max": 1000000
+      }
+    },
+    "backfillMaxMessages": {
+      "type": "number",
+      "description": "Maximum older messages fetched per conversation during bounded backfill.",
+      "default": 1000,
+      "range": {
+        "min": 1,
+        "max": 10000000
+      }
     }
   }
 }

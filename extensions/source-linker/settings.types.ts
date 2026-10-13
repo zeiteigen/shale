@@ -1,4 +1,5 @@
 export interface SourceLinkerSettings {
+  enabled: boolean;
   candidatesPerChunk: number;
   maxPairsPerRun: number;
   bidirectional: boolean;

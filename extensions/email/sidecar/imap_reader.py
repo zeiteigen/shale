@@ -40,40 +40,72 @@ def examine(client, name):
     return validity
 
 
-def sync_mailbox(client, name, request, emit):
-    validity = examine(client, name)
-    emit({"type": "mailbox", "mailbox": name, "uidValidity": validity})
-    saved = request.get("cursors", {}).get(name) or {}
-    after = int(saved.get("uid", 0)) if str(saved.get("uidValidity")) == validity else 0
-    criteria = ["UID", f"{after + 1}:*"]
-    days = float(request.get("initialSyncDays", 0))
-    if after == 0 and days > 0:
-        date = datetime.now(timezone.utc) - timedelta(days=days)
-        # IMAP date tokens use English month names independently of machine locale.
-        months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-        criteria += ["SINCE", f"{date.day:02d}-{months[date.month - 1]}-{date.year}"]
+def since_criteria(days):
+    date = datetime.now(timezone.utc) - timedelta(days=days)
+    # IMAP date tokens use English month names independently of machine locale.
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    return ["SINCE", f"{date.day:02d}-{months[date.month - 1]}-{date.year}"]
+
+
+def search_uids(client, criteria):
     status, data = client.uid("SEARCH", None, *criteria)
     if status != "OK":
         raise RuntimeError("Mailbox search failed")
-    # n:* includes the highest UID when n exceeds it. Filter that reversed-range result explicitly.
-    uids = sorted({int(uid) for uid in (data[0] or b"").split() if int(uid) > after})
+    return {int(uid) for uid in (data[0] or b"").split()}
+
+
+def fetch_message(client, uid):
+    status, fetched = client.uid("FETCH", str(uid), "(UID BODY.PEEK[])")
+    if status != "OK":
+        raise RuntimeError("Message fetch failed")
+    for item in fetched:
+        if isinstance(item, tuple) and isinstance(item[1], bytes):
+            returned = re.search(rb"\bUID (\d+)\b", item[0])
+            if returned and int(returned.group(1)) == uid:
+                return item[1]
+    raise RuntimeError("Message disappeared or had an invalid UID response; retry next sync")
+
+
+def sync_mailbox(client, name, request, emit):
+    """Newest mail first: UIDs above the head cursor are read before older gaps are backfilled.
+
+    When more new mail exists than the per-run budget, only the newest batch is read and its first
+    message carries gapBelow so the host records the skipped range as a gap. Gaps drain newest first."""
+    validity = examine(client, name)
+    emit({"type": "mailbox", "mailbox": name, "uidValidity": validity})
+    saved = request.get("cursors", {}).get(name) or {}
+    same = str(saved.get("uidValidity")) == validity
+    after = int(saved.get("uid", 0)) if same else 0
+    gaps = [(int(lo), int(hi)) for lo, hi in (saved.get("gaps") or [])] if same else []
     limit = int(request.get("maxMessagesPerMailbox", 200))
     if limit < 1:
         raise ValueError("maxMessagesPerMailbox must be positive")
-    for uid in uids[:limit]:
-        status, fetched = client.uid("FETCH", str(uid), "(UID BODY.PEEK[])")
-        if status != "OK":
-            raise RuntimeError("Message fetch failed")
-        raw = None
-        for item in fetched:
-            if isinstance(item, tuple) and isinstance(item[1], bytes):
-                returned = re.search(rb"\bUID (\d+)\b", item[0])
-                if returned and int(returned.group(1)) == uid:
-                    raw = item[1]
-                    break
-        if raw is None:
-            raise RuntimeError("Message disappeared or had an invalid UID response; retry next sync")
-        emit({"type": "message", "mailbox": name, "uidValidity": validity, "uid": uid, "record": parse_mail(raw)})
+    days = float(request.get("initialSyncDays", 0))
+    bounded = after == 0 and days > 0
+    criteria = ["UID", f"{after + 1}:*"] + (since_criteria(days) if bounded else [])
+    # n:* includes the highest UID when n exceeds it. Filter that reversed-range result explicitly.
+    uids = sorted(uid for uid in search_uids(client, criteria) if uid > after)
+    batch = uids[-limit:]
+    if len(batch) < len(uids):
+        # A bounded first sync (initialSyncDays) never backfills below its window.
+        gaps.append((uids[0] if bounded else after + 1, batch[0] - 1))
+    for index, uid in enumerate(batch):
+        event = {"type": "message", "mailbox": name, "uidValidity": validity, "uid": uid,
+                 "record": parse_mail(fetch_message(client, uid))}
+        if index == 0 and len(batch) < len(uids):
+            event["gapBelow"] = uids[0] if bounded else after + 1
+        emit(event)
+    budget = limit - len(batch)
+    for lo, hi in sorted(gaps, key=lambda gap: gap[1], reverse=True):
+        if budget <= 0:
+            break
+        older = sorted((uid for uid in search_uids(client, ["UID", f"{lo}:{hi}"]) if lo <= uid <= hi), reverse=True) if hi >= lo else []
+        for uid in older[:budget]:
+            emit({"type": "message", "mailbox": name, "uidValidity": validity, "uid": uid, "gap": lo,
+                  "record": parse_mail(fetch_message(client, uid))})
+        if len(older) <= budget:
+            emit({"type": "gap-done", "mailbox": name, "uidValidity": validity, "gap": lo})
+        budget -= min(budget, len(older))
 
 
 def read_account(request, emit):

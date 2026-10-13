@@ -2,6 +2,8 @@ import type { Database } from 'bun:sqlite';
 
 /** Text is stored once; immutable revision passages contain references and provenance. */
 export function ensureMemorySchema(db: Database): void {
+  if (db.query("SELECT 1 FROM sqlite_master WHERE name='chunk_entities' AND type='table'").get())
+    db.run('CREATE INDEX IF NOT EXISTS chunk_entities_entity ON chunk_entities(entity_id,chunk_id)');
   db.run(`CREATE TABLE IF NOT EXISTS graph_memory_texts (
     id INTEGER PRIMARY KEY, text_content TEXT NOT NULL UNIQUE
   ) STRICT;
@@ -45,6 +47,7 @@ export function ensureMemorySchema(db: Database): void {
     source_id TEXT NOT NULL, entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     PRIMARY KEY(source_id,entity_id)
   ) STRICT;
+  CREATE INDEX IF NOT EXISTS source_entities_entity ON source_entities(entity_id,source_id);
   CREATE TABLE IF NOT EXISTS source_memory_changes (
     id INTEGER PRIMARY KEY, source_id TEXT NOT NULL, version INTEGER NOT NULL, actor TEXT NOT NULL,
     reason TEXT NOT NULL, request_id TEXT UNIQUE, fingerprint TEXT NOT NULL, result TEXT NOT NULL CHECK(json_valid(result)), created_at INTEGER NOT NULL

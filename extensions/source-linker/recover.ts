@@ -15,6 +15,10 @@ export async function run(
   sdk: ShaleSDK,
   contextOverride?: CheckpointContext,
 ): Promise<RecoverResult> {
+  // The host invokes recovery before the cron runner; disabling the retired pipeline must cover both.
+  if (sdk.settings.get<boolean>('enabled') === false) return {
+    recoveredCount: 0, edgesCommitted: 0, watermarkAdvancedTo: Number(sdk.state.getWatermark(WATERMARK_KEY) ?? '0'),
+  };
   const context = contextOverride ?? sdk.getCheckpointContext();
   const links: DiscoveredLink[] = [];
   const completed = new Set<string>();

@@ -23,6 +23,7 @@ shale/
 ├── data/                    # Entirely gitignored local databases, credentials, backups, and connector files
 ├── lib/                     # Low-level core infrastructure (database, message bus, models)
 │   ├── db.ts                # SQLite database setup, schema migrations
+│   ├── graph/               # Graph schema; ontology.ts, identity-keys.ts, story-schema.ts (registry, digests, episodes)
 │   ├── messages.ts          # Core pub/sub and request/response message broker
 │   ├── ai.ts                # LLM API clients
 │   ├── access/              # Sensitivity tiers, access profiles, scoped connections, write guard
@@ -43,11 +44,15 @@ shale/
 │   ├── browser/             # Chrome browser tab sync, session clustering, history/bookmarks ingestion (Chrome module in chrome/)
 │   ├── ai-chats/            # ChatGPT, Claude, and Gemini conversations captured by its Chrome module
 │   ├── search-queries/      # Google, Bing, and DuckDuckGo searches, with opened results and AI Overviews, via its Chrome module
+│   ├── youtube/             # Watched video metadata and transcript summaries after 50% unique playback
 │   ├── process-image/       # Multimodal visual extraction (layout, OCR, synthetic meaning chunks)
 │   ├── source-linker/       # Cross-source entity discovery and knowledge graph linker
 │   ├── discord/             # Discord ingestion via DiscordChatExporter JSON (import folder + optional sync)
 │   ├── instagram/           # Instagram DM ingestion via official data export (+ optional instagrapi sidecar)
 │   ├── access-classifier/   # Heuristic + LLM sensitivity tiers for sources, entities, claims
+│   ├── knowledge-extractor/ # Per-source digest: summary, user activity, grounded claims, registry-resolved entities
+│   ├── knowledge-graph/     # Graph message handlers + identity-resolver cron (keys, self, adjudication)
+│   ├── episodes/            # Cross-source episodes: assignment, review, nightly consolidation
 │   └── db-backup/           # Automated background SQLite database hot backups
 ├── main/                    # Host daemon and orchestration
 │   ├── index.ts             # Main process entry, Bun.serve HTTP server, startup runner
@@ -248,7 +253,7 @@ bun run scripts/serve-visualizer.ts
 - **`extensions/obsidian`**: Deep integration with Obsidian vaults. Automatically parses frontmatter, wikilinks (`[[Page]]`), chunks notes by headings, expands short atomic notes via Chat LLM, batch-delegates image descriptions to `process-image`, and commits graph nodes.
 - **`extensions/browser`**: Syncs Chrome browser tabs and visits. Aggregates tabs into browsing sessions, generates synthetic narrative summaries, and stores web history/bookmarks as verbatim chunks.
 - **`extensions/process-image`**: Multimodal image processing service. Deconstructs diagrams, charts, and photos into verbatim visual layout and synthetic conceptual meaning chunks. Handles `file:process`, `files:process`, and `files:can-process`.
-- **`extensions/source-linker`**: Cross-source graph linker. Discovers unlinked entity references across disparate sources and generates semantic edges.
+- **`extensions/source-linker`**: BM25 source-pair linker. Disabled by default (`enabled: false`), superseded by identity resolution and episodes.
 - **`extensions/discord`**: Ingests Discord channels, threads, and DMs from DiscordChatExporter JSON exports dropped into `data/discord/import`. The hourly `discord-sync` cron uses the account connected on the web interface's Accounts page (user or bot token) and the exporter installed by `bun run setup discord`. It sweeps every visible server and DM channel by channel, with per-channel watermarks; the first sync of a channel fetches its full history. Messages are split into conversation windows (one source each) with LLM summaries, and authors become `Person` entities with `external:discord` aliases.
 - **`extensions/instagram`**: Ingests Instagram DMs from the official "Download your information" JSON export (`data/instagram/import`), repairing the export's mojibake. An optional `instagram-sync` cron runs a Python instagrapi sidecar (`sidecar/ig_sync.py`), signed in from the Accounts page (password with 2FA/challenge codes, or a session cookie), that merges into the same threads without duplicates. Uses the same windowing as Discord.
 - **`extensions/ai-chats`**: Ingests ChatGPT, Claude, and Gemini conversations through its Chrome module, which reads them from tabs where the user is signed in.
@@ -261,6 +266,10 @@ bun run scripts/serve-visualizer.ts
   - **Snippets:** Google's AI Overview, then each result opened from the search (same tab or a new tab from the results page; not links followed further).
   - **Indexing:** admission writes a raw log; the `search-queries-index` cron writes a search's source once it has been quiet for `settleMinutes`.
 - **`extensions/access-classifier`**: Assigns sensitivity tiers to sources, entities, and claims. Heuristics catch credentials, account numbers, PII, sensitive topics, and direct messages; an LLM pass refines them. Access profiles use the tiers.
+- **`extensions/youtube`**: Captures standard watched YouTube videos through its Chrome module. One `youtube_video` source per video contains metadata and description; after unique played portions cover 50% of its duration, its summary becomes a whole-transcript LLM overview and its snippets contain detailed LLM-chosen section summaries with timestamps. Played ranges persist across visits and restarts. Raw captures and intermediate summaries remain extension-private; `youtube-index` runs every two minutes.
+- **`extensions/knowledge-extractor`**: Digests every source revision, newest first, every ten minutes. The digest holds a summary, the user's involvement and activity, grounded claims and events, and typed entities with descriptions, search keys, and identifying URLs. The prompt carries metadata and a shortlist of known registry entities and open episodes, so the model links mentions by id. Every entity goes through the identity resolver. Digests land in `graph_source_digests`.
+- **`extensions/knowledge-graph`**: Graph message handlers plus the `identity-resolver` cron. The cron keys connector entities (accounts, guilds, URLs), merges on strong keys, links pages to what they show and servers to their organizations, gathers the user's accounts into the `self` Person, and adjudicates name collisions with the model. Merges are audited and reversible. See `sdk/graph/identity.ts`.
+- **`extensions/episodes`**: Assigns digested sources to cross-source episodes. Scoring uses the IDF of shared canonical entities, recency, and the digest's own pick; the model reviews the middle band. A nightly pass rewrites titles, summaries, and steps and merges split stories. Episodes are read with `list_episodes`, `get_episode`, and `entity_timeline`, and on the web interface's Episodes page.
 - **`extensions/db-backup`**: Hot backup utility. Uses SQLite backup APIs to create consistent database snapshots without stopping host operations.
 
 ---
@@ -270,6 +279,7 @@ bun run scripts/serve-visualizer.ts
 Users decide which data each consumer may use (`docs/access-control.md`).
 - **Tiers and profiles.** Records have a tier (`public < personal < private < secret`), set automatically by heuristics and `access-classifier`, or manually. Profiles in `resources/access.json` (read fresh, created with defaults on first use) set a clearance plus `allow`/`deny` source patterns and `write`.
 - **Enforcement lives in the database layer.** `lib/access/scoped-database.ts` gives each restricted profile a read-only connection whose TEMP views shadow every `main` table. Unknown tables are shadowed by empty views. Readers need no permission code of their own; just use the scoped SDK.
-- **New tables.** Add a row filter to `shadowFilters` if a scoped consumer should see the table's rows; otherwise it stays hidden. New `chunks_fts` queries must join `chunks`.
+- **New tables.** Add a row filter to `shadowFilters` if a scoped consumer should see the table's rows; otherwise it stays hidden. New `chunks_fts` queries must join `chunks`. New `entity_registry_fts` queries must join `entities` (or `graph_episodes`).
+- **Episodes.** An `Episode` entity is visible only when every member source is (`lib/access/visibility.ts`), because its title and summary are written from all of them.
 - **New write paths.** Add every write tool or knowledge operation to `WRITE_REFERENCES` in `lib/access/write-guard.ts`, listing the record ids it references. Unlisted writes are refused for restricted profiles. Audited writes must go through `sdk.knowledge` (`record`/`apply`) so the guard runs inside the transaction.
 - **MCP.** Clients authenticate with `Authorization: Bearer <token>`; tokens are created on the web interface's Access page. Requests without a token use `unauthenticatedProfile`.

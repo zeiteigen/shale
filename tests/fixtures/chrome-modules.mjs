@@ -53,6 +53,8 @@ const chatTab = {
   windowId: 1,
 };
 const opened = [];
+const injectedCalls = [];
+globalThis.__shaleInjected = { "ai-chats/gemini-dom": () => "fixture result" };
 globalThis.chrome = {
   storage: { local: storage(local), session: storage(session) },
   runtime: {
@@ -101,7 +103,10 @@ globalThis.chrome = {
   },
   // Functions run "in the page": here, against the fake ChatGPT below.
   scripting: {
-    executeScript: async ({ func, args }) => [{ result: await func(...args) }],
+    executeScript: async (details) => {
+      injectedCalls.push(details);
+      return details.func ? [{ result: await details.func(...details.args) }] : [{}];
+    },
   },
 };
 
@@ -235,6 +240,12 @@ const host = createHost([
 ]);
 await readySettings();
 const runtime = (id) => host.get(id).runtime;
+
+// The requested execution world is consistent across script registration and invocation.
+await runtime("ai-chats").inject(7, "gemini-dom", { world: "MAIN" });
+assert.deepEqual(injectedCalls.slice(-2).map(({ world }) => world), ["MAIN", "MAIN"]);
+await runtime("ai-chats").inject(7, "gemini-dom");
+assert.deepEqual(injectedCalls.slice(-2).map(({ world }) => world), ["ISOLATED", "ISOLATED"]);
 
 // Claims: the browser module stays off hosts other enabled modules own.
 assert.equal(await runtime("browser").claimedByOther(chatTab.url), true);
@@ -373,6 +384,7 @@ assert.deepEqual(
     ["browser", true],
     ["ai-chats", false],
     ["search-queries", true],
+    ["youtube", true],
   ],
 );
 console.log("Chrome module checks passed");

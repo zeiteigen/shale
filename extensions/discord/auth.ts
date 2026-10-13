@@ -31,8 +31,11 @@ function lastSync(sdk: ShaleSDK): string {
   if (settings.syncEnabled === false) return " Sync is turned off (syncEnabled).";
   const last = sdk.state.getJson<{ channels: number; skipped: number; messages: number; errors: number; finishedAt: number }>(LAST_SYNC_KEY);
   if (!last) return " The first sync runs on the next discord-sync cron (hourly), or run it now from Overview.";
+  const relevance=sdk.state.getJson<{accepted:number;excluded:number;pending:number;backfilled:number;evicted:number;incomplete:number}>("relevance:last");
   return ` Last sync ${new Date(last.finishedAt).toLocaleString()}: ${last.channels} channel(s), ${last.messages} new message(s)`
-    + `${last.skipped ? `, ${last.skipped} without access` : ""}${last.errors ? `, ${last.errors} error(s) — see the logs` : ""}.`;
+    + `${last.skipped ? `, ${last.skipped} without access` : ""}${last.errors ? `, ${last.errors} error(s) — see the logs` : ""}.`
+    + (relevance ? ` Relevance: ${relevance.accepted} accepted, ${relevance.excluded} excluded, ${relevance.pending} pending; `
+      + `${relevance.backfilled} messages backfilled, ${relevance.evicted} evicted, ${relevance.incomplete} incomplete coverage.` : '');
 }
 
 function status(sdk: ShaleSDK, error?: string): AuthStatus {
@@ -58,7 +61,7 @@ async function connectToken(sdk: ShaleSDK, token: string, kind: DiscordTokenKind
 
 export const auth: AuthProvider = {
   title: "Discord",
-  description: "Used by the discord-sync cron to export new messages with DiscordChatExporter. Exports you drop into the import folder need no account.",
+  description: "Used by hourly bounded Discord sync and contextual backfill. DiscordChatExporter JSON imports need no connected account; set selfUserIds to identify yourself.",
   warning: "Automating a user account is against Discord's Terms of Service. A bot token in servers you manage is the compliant option but cannot read DMs.",
   methods: [
     { id: "user", label: "User token", description: "Your account's token, from the browser's developer tools (Network tab → any request to discord.com → the Authorization header). Treat it like a password.",

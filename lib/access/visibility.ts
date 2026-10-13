@@ -137,8 +137,23 @@ export function materializeVisibility(db: Database, profile: ResolvedProfile, po
         OR EXISTS(SELECT 1 FROM main.graph_claims c JOIN main.graph_evidence ev ON ev.claim_id=c.id
           WHERE c.object_id=e.id${revisions}))`;
     };
-    db.run(`INSERT INTO ${t("entities")} SELECT e.id FROM main.entities e
-      WHERE ${entityTier} <= ${clearance} AND (${grounded(true)} OR NOT ${grounded(false)})`);
+    // An episode's title and summary are written from all of its members: every member must be visible.
+    db.run(`WITH RECURSIVE episode_group(episode_id,member_id) AS MATERIALIZED (
+        SELECT id,id FROM main.entities WHERE type='Episode'
+        UNION SELECT g.episode_id,e.id FROM main.entities e JOIN episode_group g ON e.canonical_id=g.member_id),
+      blocked_episodes AS MATERIALIZED (
+        -- Source removal clears source_entities; durable claims still ground the narrative.
+        SELECT DISTINCT g.episode_id FROM episode_group g JOIN main.graph_claims c ON c.object_id=g.member_id
+        WHERE c.predicate='PART_OF_EPISODE' AND c.status IN ('accepted','proposed')
+          AND json_extract(c.qualifiers,'$.sourceId') NOT IN (SELECT id FROM ${t("sources")})
+        UNION SELECT g.episode_id FROM episode_group g JOIN main.graph_episode_provenance p ON p.entity_id=g.member_id
+          WHERE p.source_id NOT IN (SELECT id FROM ${t("sources")}))
+      INSERT INTO ${t("entities")} SELECT e.id FROM main.entities e
+      WHERE ${entityTier} <= ${clearance} AND (${grounded(true)} OR NOT ${grounded(false)})
+        AND (e.type!='Episode' OR (
+          NOT EXISTS(SELECT 1 FROM main.source_entities se JOIN episode_group g ON g.member_id=se.entity_id WHERE g.episode_id=e.id
+            AND se.source_id NOT IN (SELECT id FROM ${t("sources")}))
+          AND e.id NOT IN (SELECT episode_id FROM blocked_episodes)))`);
 
     const claimTier = effectiveTierSql("claim", "c.id", "''", "0");
     db.run(`INSERT INTO ${t("claims")} SELECT c.id FROM main.graph_claims c

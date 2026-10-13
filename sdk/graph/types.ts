@@ -46,6 +46,8 @@ export interface ClaimFilter {
 export interface TraversalOptions extends ClaimFilter {
   start: number; direction?: 'out' | 'in' | 'both'; maxDepth?: number; maxNodes?: number; maxClaims?: number;
   predicates?: string[];
+  /** Skip proposed claims whose confidence is below this; accepted claims and unscored proposals are kept. */
+  minConfidence?: number;
 }
 export interface GraphPath { entityId: number; depth: number; entityIds: number[]; claimIds: string[] }
 export interface GraphTraversal { entities: GraphEntity[]; claims: Claim[]; paths: GraphPath[]; truncated: boolean }

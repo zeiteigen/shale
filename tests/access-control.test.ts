@@ -17,6 +17,8 @@ import { createToken, profileForRequest } from "../lib/access/tokens";
 import { readAccessPolicy, validateAccessPolicy, writeAccessPolicy } from "../lib/access/policy";
 import { WRITE_REFERENCES } from "../lib/access/write-guard";
 import { ChatStore } from "../sdk/chat/store";
+import { EpisodeStore } from "../sdk/graph/episodes";
+import { indexEntity } from "../sdk/graph/registry";
 
 const directory = mkdtempSync(join(tmpdir(), "shale-access-"));
 const policyPath = process.env.SHALE_ACCESS_PATH!;
@@ -111,6 +113,24 @@ describe("access policy", () => {
 });
 
 describe("scoped database", () => {
+  it("keeps detached member narrative hidden, including through a merge and source removal", async () => {
+    const store = new EpisodeStore(db, sdk.graph);
+    const winner = store.create({ title: 'Cedar planning', kind: 'project', at: 1 });
+    const loser = store.create({ title: 'Earlier planning', kind: 'project', at: 1 });
+    for (const [episode, sourceId] of [[winner, 'note-cedar'], [loser, 'dm-alice']] as const)
+      store.attach(episode, sourceId, { role: 'progress', step: 'planning', at: 1, confidence: 1, status: 'accepted', basis: 'test' });
+    db.query('UPDATE graph_episodes SET summary=? WHERE entity_id=?').run('Earlier private conversation', loser);
+    store.merge(loser, winner, 'same planning');
+    store.detach(winner, 'dm-alice', 'test', 'wrong member');
+    const access = createScopedSDK('cloud', sdk);
+    expect(new EpisodeStore(access.read.database, access.read.graph).get(winner)).toBeNull();
+    expect(new EpisodeStore(access.read.database, access.read.graph).get(loser)).toBeNull();
+    await sdk.knowledge.mutate('remove_source', { sourceId: 'dm-alice' }, { actor: 'test', reason: 'remove detached source' });
+    access.refresh();
+    expect(new EpisodeStore(access.read.database, access.read.graph).get(winner)).toBeNull();
+    expect(new EpisodeStore(access.read.database, access.read.graph).get(loser)).toBeNull();
+  });
+
   it("keeps email private with an older policy and hides its raw connector tables", () => {
     ingest("email-update", "email", "email://thread/1", "Project Cedar update.");
     const store = new ChatStore(db, sdk.extensionId, "email");
@@ -155,6 +175,53 @@ describe("scoped database", () => {
     const storage = virtualTableStorage(read.database);
     expect(main.filter(name => !shadowed.has(name) && !PASSTHROUGH_TABLES.has(name) && !storage.has(name))).toEqual([]);
     expect(read.database.query("SELECT count(*) AS n FROM extension_private_cache").get()).toEqual({ n: 0 });
+  });
+
+  it("hides an episode, its digest rows, and its registry entry unless every member source is cleared", () => {
+    const store = new EpisodeStore(db, sdk.graph);
+    const mixed = store.create({ title: "Retrieval roadmap with Alice", kind: "project", at: 1 });
+    const open = store.create({ title: "Cedar planning", kind: "project", at: 1 });
+    for (const [episode, source] of [[mixed, "note-cedar"], [mixed, "dm-alice"], [open, "note-cedar"]] as const)
+      store.attach(episode, source, { role: "progress", step: "step", at: 1, confidence: 1, status: "accepted", basis: "test" });
+    for (const source of ["note-cedar", "dm-alice"]) db.query(`INSERT INTO graph_source_digests(source_id,revision_id,digested_at,summary)
+      SELECT id,(SELECT id FROM graph_source_revisions WHERE source_id=sources.id),1,'digest' FROM sources WHERE id=?`).run(source);
+    for (const id of [mixed, open]) indexEntity(db, id);
+    const { read } = createScopedSDK("cloud", sdk);
+    const visible = new EpisodeStore(read.database, read.graph);
+    expect(visible.list().map(episode => episode.id)).toEqual([open]);
+    expect(visible.get(mixed)).toBeNull();
+    expect(visible.list({ query: "Alice roadmap" })).toEqual([]);
+    expect(read.database.query("SELECT source_id FROM graph_source_digests").all()).toEqual([{ source_id: "note-cedar" }]);
+    expect(new EpisodeStore(db, sdk.graph).list().map(episode => episode.id).sort()).toEqual([mixed, open].sort());
+    expect(WRITE_REFERENCES.merge_episodes).toBeDefined();
+  });
+
+  it("hides an episode while a member source is archived and restores its membership on restore", async () => {
+    const store=new EpisodeStore(db,sdk.graph);
+    const episode=store.create({title:'Cedar planning',kind:'project',at:1});
+    store.attach(episode,'note-cedar',{role:'progress',step:'kickoff',at:1,confidence:1,status:'accepted',basis:'test'});
+    const visible=()=>{
+      const {read}=createScopedSDK('cloud',sdk);
+      return new EpisodeStore(read.database,read.graph).get(episode);
+    };
+    expect(visible()?.members.map(member=>member.sourceId)).toEqual(['note-cedar']);
+    await sdk.knowledge.mutate('remove_source',{sourceId:'note-cedar'},{actor:'test',reason:'archive member'});
+    expect(store.isMember(episode,'note-cedar')).toBe(true);
+    expect(visible()).toBeNull();
+    await sdk.knowledge.mutate('restore_source',{sourceId:'note-cedar'},{actor:'test',reason:'restore member'});
+    expect(visible()?.members.map(member=>member.sourceId)).toEqual(['note-cedar']);
+  });
+
+  it("keeps a merged episode hidden when an inherited member source is removed", async () => {
+    const store=new EpisodeStore(db,sdk.graph);
+    const winner=store.create({title:'Cedar planning',kind:'project',at:1});
+    const loser=store.create({title:'Cedar follow-up',kind:'project',at:2});
+    for (const [episode,sourceId] of [[winner,'note-cedar'],[loser,'web-history']] as const)
+      store.attach(episode,sourceId,{role:'progress',step:'planning',at:1,confidence:1,status:'accepted',basis:'test'});
+    store.merge(loser,winner,'same project');
+    await sdk.knowledge.mutate('remove_source',{sourceId:'web-history'},{actor:'test',reason:'archive inherited member'});
+    const {read}=createScopedSDK('cloud',sdk);
+    expect(new EpisodeStore(read.database,read.graph).get(winner)).toBeNull();
   });
 
   it("keeps full-text search joined to filtered chunks", () => {

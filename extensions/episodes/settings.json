@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "maxSourcesPerRun": 200,
+  "attachScore": 4,
+  "reviewScore": 2,
+  "recencyDays": 45,
+  "maxAdjudicationsPerRun": 12,
+  "dormantDays": 45,
+  "llmModel": null
+}

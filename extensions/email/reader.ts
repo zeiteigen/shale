@@ -4,10 +4,12 @@ import type { ChatMessage } from "@shale/sdk/chat/types";
 import type { EmailSettings } from "./settings.types";
 
 export interface EmailRecord { subject: string; references: string[]; message: ChatMessage }
-export interface MailboxCursor { uidValidity: string; uid: number }
+/** `uid` is the highest committed UID; `gaps` are older [lo, hi] UID ranges still to backfill, newest first. */
+export interface MailboxCursor { uidValidity: string; uid: number; gaps?: Array<[number, number]> }
 export interface EmailAccount { host: string; port: number; username: string; password: string }
 export type ReaderEvent =
-  | { type: "message"; record: EmailRecord; mailbox?: string; uidValidity?: string; uid?: number }
+  | { type: "message"; record: EmailRecord; mailbox?: string; uidValidity?: string; uid?: number; gapBelow?: number; gap?: number }
+  | { type: "gap-done"; mailbox: string; uidValidity: string; gap: number }
   | { type: "mailbox"; mailbox: string; uidValidity: string }
   | { type: "verified" }
   | { type: "done" }
@@ -48,7 +50,7 @@ export async function* readerEvents(settings: EmailSettings, request: ReaderRequ
         buffered = buffered.slice(newline + 1);
         if (!line.trim()) continue;
         const event = JSON.parse(line) as ReaderEvent;
-        if (!["message", "mailbox", "verified", "done", "error"].includes(event.type))
+        if (!["message", "mailbox", "gap-done", "verified", "done", "error"].includes(event.type))
           throw new Error("Email reader returned an invalid event.");
         if (event.type === "done") done = true;
         yield event;

@@ -1,8 +1,7 @@
 {
   "OPENAI_BASE_URL": "http://localhost:8080/v1",
-  "OPENAI_CHAT_MODEL": "gemma4-26b",
-  "OPENAI_CHAT_CONCURRENCY": 4,
-  "OPENAI_CHAT_BATCH_MODE": "api",
-  "OPENAI_CHAT_BATCH_SIZE": 8,
-  "OPENAI_CHAT_BATCH_ENDPOINT": "http://127.0.0.1:8080/upstream/gemma4-26b/v1/chat/completions/batch"
+  "OPENAI_CHAT_MODEL": "qwen3.8gguf",
+  "OPENAI_CHAT_CONCURRENCY": 2,
+  "OPENAI_CHAT_BATCH_MODE": "concurrent",
+  "OPENAI_CHAT_BATCH_SIZE": 8
 }
