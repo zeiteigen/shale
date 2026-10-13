@@ -7,6 +7,7 @@ import { run } from "../extensions/discord";
 import { run as sync } from "../extensions/discord/sync";
 import { run as recover } from "../extensions/discord/recover";
 import { exporterArgs, parseListing } from "../extensions/discord/dce";
+import { summarizeOutput } from "../extensions/discord/dce-runner";
 import { parseDiscordExport } from "../extensions/discord/parse-dce";
 import { auth } from "../extensions/discord/auth";
 import { isTExtensionManifest } from "../lib/extension";
@@ -196,6 +197,13 @@ describe("discord extension", () => {
     expect(exporterArgs("200", "/out", {}, "2026-01-01T00:00:00.000Z")).toContain("2026-01-01T00:00:00.000Z");
   });
 
+  it("reports the exporter's reason rather than its stack trace", () => {
+    // Captured from DiscordChatExporter 2.48 for a channel the account cannot read.
+    const output = "Resolving channel(s)...\nERROR\nDiscordChatExporter.Core.Exceptions.DiscordChatExporterException: Request to 'channels/1423745568038977557' failed: forbidden.\n"
+      + "   at DiscordChatExporter.Core.Discord.DiscordClient.GetJsonResponseAsync(String url, CancellationToken cancellationToken)\n".repeat(7);
+    expect(summarizeOutput(output)).toBe("Request to 'channels/1423745568038977557' failed: forbidden.");
+  });
+
   it("sweeps every server and DM the account can see, one channel at a time", async () => {
     const fake = join(directory, "fake-dce.ts");
     const log = join(directory, "calls.log");
@@ -211,18 +219,23 @@ describe("discord extension", () => {
       const listings = { guilds: "0 | Direct Messages\\n100 | Shale Dev", channels: "200 | Text / general\\n300 | Text / secret\\n400 | Text / broken", dm: "500 | Bob" };
       if (listings[args[0]]) { console.log(listings[args[0]]); process.exit(0); }
       const id = args[args.indexOf("-c") + 1];
-      if (id === "300") { console.error("ERROR: Access is forbidden."); process.exit(1); }
+      if (id === "300") { console.log("Resolving channel(s)..."); console.error("ERROR\\nDiscordChatExporter.Core.Exceptions.DiscordChatExporterException: Request to 'channels/300' failed: forbidden.\\n" + "   at DiscordChatExporter.Core.Discord.DiscordClient.GetJsonResponseAsync(String url)\\n".repeat(8)); process.exit(1); }
       if (id === "400") { console.error("ERROR: Something broke."); process.exit(1); }
       await Bun.write(args[args.indexOf("-o") + 1].replace("%c", id), Bun.file(${JSON.stringify(fixtures)} + "/" + id + ".json"));
     `);
     sdk.credentials.set({ token: "secret-token", kind: "user" });
     configure({ dceCommand: [process.execPath, fake] });
     const calls = async () => (await Bun.file(log).text()).trim().split("\n").map(line => JSON.parse(line));
+    const indexedAfterExports: string[][] = [];
+    sdk.messages.on("source:ingested", async () => {
+      indexedAfterExports.push((await calls()).filter(call => call.args[0] === "export").map(call => call.args[2]));
+    });
 
     const result = await sync(sdk);
     expect(result!.synced).toMatchObject({ channels: 2, skipped: 1, messages: 6 });
     expect(result!.synced.errors).toEqual([expect.stringContaining("Something broke")]);
     expect(result!.indexed.indexed).toBe(2);
+    expect(indexedAfterExports).toEqual([["200"], ["200", "300", "400", "500"]]);
     const first = await calls();
     expect(first.map(c => c.args[0])).toEqual(["guilds", "channels", "dm", "export", "export", "export", "export"]);
     expect(first.every(c => c.token === "secret-token" && !c.args.includes("secret-token"))).toBe(true);

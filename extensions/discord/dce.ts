@@ -57,7 +57,9 @@ export function exporterArgs(channelId: string, outDir: string, settings: Discor
 export interface SyncResult { channels: number; skipped: number; messages: number; errors: string[] }
 
 /** Export every channel since its own watermark and ingest the files; an interrupted sweep resumes per channel. */
-export async function syncDiscord(sdk: ShaleSDK, connector: ChatConnector, settings: DiscordSettings): Promise<SyncResult> {
+export async function syncDiscord(sdk: ShaleSDK, connector: ChatConnector, settings: DiscordSettings,
+  /** Runs after each channel that brought new messages, e.g. to index them before the sweep ends. */
+  afterChannel?: () => Promise<void>): Promise<SyncResult> {
   const result: SyncResult = { channels: 0, skipped: 0, messages: 0, errors: [] };
   const token = discordToken(sdk);
   if (!token) {
@@ -108,7 +110,10 @@ export async function syncDiscord(sdk: ShaleSDK, connector: ChatConnector, setti
         result.errors.push(`${channel.label}: ${partial.message}`);
         sdk.logger.error(`Discord sync incomplete for ${channel.label}:`, partial.message);
       }
-      if (changed) sdk.logger.log(`Discord sync [${index + 1}/${channels.length}] ${channel.label}: ${changed} new/edited message(s).`);
+      if (changed) {
+        sdk.logger.log(`Discord sync [${index + 1}/${channels.length}] ${channel.label}: ${changed} new/edited message(s).`);
+        await afterChannel?.();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/forbidden|missing access|unauthorized to view/i.test(message)) {

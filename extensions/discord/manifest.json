@@ -9,6 +9,6 @@
   "install_script": "install.ts",
   "crons": [
     { "name": "discord-import", "schedule": "*/15 * * * *", "script": "index.ts", "run_on_startup": true },
-    { "name": "discord-sync", "schedule": "0 * * * *", "script": "sync.ts" }
+    { "name": "discord-sync", "schedule": "7 * * * *", "script": "sync.ts", "run_on_startup": true }
   ]
 }

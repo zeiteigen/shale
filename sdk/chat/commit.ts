@@ -181,19 +181,29 @@ export async function finalizeWindows(sdk: ShaleSDK, connector: ChatConnector,
   return { indexed, errors };
 }
 
-/** Hold a persistent lease so a cron run and checkpoint recovery never overlap. */
-export async function withChatLease<T>(sdk: ShaleSDK, work: () => Promise<T>): Promise<T | null> {
-  const lease = acquireTaskLease(sdk.database, sdk.extensionId, "chat-index-lease", 600_000);
+/**
+ * Hold a persistent lease so a connector's import, sync, and checkpoint recovery never overlap.
+ * A busy lease is waited for (imports finish in seconds) and only given up after `waitMs`.
+ */
+export async function withChatLease<T>(sdk: ShaleSDK, work: () => Promise<T>,
+  { waitMs = 300_000, pollMs = 1_000 }: { waitMs?: number; pollMs?: number } = {}): Promise<T | null> {
+  const deadline = Date.now() + waitMs;
+  let lease = acquireTaskLease(sdk.database, sdk.extensionId, "chat-index-lease", 600_000);
+  while (!lease && Date.now() < deadline) {
+    await Bun.sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+    lease = acquireTaskLease(sdk.database, sdk.extensionId, "chat-index-lease", 600_000);
+  }
   if (!lease) {
-    sdk.logger.log("Another run of this connector is in progress; skipping.");
+    sdk.logger.warn(`Another ${sdk.extensionId} run held the lock for over ${Math.round(waitMs / 1000)}s; skipping this run.`);
     return null;
   }
-  const timer = setInterval(() => { try { lease.renew(); } catch { /* reported by the next renew */ } }, 60_000);
+  const held = lease;
+  const timer = setInterval(() => { try { held.renew(); } catch { /* reported by the next renew */ } }, 60_000);
   try {
     return await work();
   } finally {
     clearInterval(timer);
-    lease.release();
+    held.release();
   }
 }
 

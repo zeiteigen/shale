@@ -12,7 +12,7 @@ DiscordChatExporter.Cli export -t "$DISCORD_TOKEN" -c <channel-id> -f Json -o da
 
 You can also use the DCE GUI with the **JSON** format.
 
-**2. Scheduled sync.** The `discord-sync` cron runs hourly. It does nothing until an account is connected.
+**2. Scheduled sync.** The `discord-sync` cron runs at startup and seven minutes past each hour. It does nothing until an account is connected.
 1. Run `bun run setup discord`. It downloads the self-contained DiscordChatExporter CLI into `data/discord/dce`, and the extension finds it automatically. Set `dceCommand` only to use a different copy.
 2. Open the Shale web interface → **Accounts** → **Discord** and connect a token:
    - **User token:** reads your servers and DMs.
@@ -24,7 +24,7 @@ You can also use the DCE GUI with the **JSON** format.
    - exports each channel (with its threads) separately, from that channel's own watermark
    - on a channel's first sync, fetches its full history (`initialSyncDays: 0`)
 
-   An interrupted sweep resumes channel by channel. Channels the account can't read are skipped and retried weekly. The Accounts card shows the last sync's results; trigger a run now from **Overview** with `discord-sync`. To limit what's synced, set `syncScope` to `"selected"` and list `channels`, `guilds`, and/or `includeDMs`.
+   An interrupted sweep resumes channel by channel. Sealed conversation windows are indexed after each changed channel, so completed channels become searchable while a long sweep continues. Channels the account can't read are skipped and retried weekly. The Accounts card shows the last sync's results; trigger a run now from **Overview** with `discord-sync`. To limit what's synced, set `syncScope` to `"selected"` and list `channels`, `guilds`, and/or `includeDMs`.
 
    If a thread export fails while other exports succeed, those completed files are ingested and the channel watermark stays unchanged. The next run retries the missing history.
 

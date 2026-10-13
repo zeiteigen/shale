@@ -124,3 +124,29 @@ describe("chat transcripts", () => {
     expect(lines).not.toContain("pinned");
   });
 });
+
+describe("chat run lease", () => {
+  it("waits for a concurrent run instead of skipping, and gives up only after the wait", async () => {
+    const { withChatLease } = await import("../sdk/chat/commit");
+    const { createExtensionSDK, createMessageBus } = await import("../sdk");
+    const sdk = createExtensionSDK("lease-test", { database, messageBus: createMessageBus() });
+    sdk.logger.warn = () => {};
+    const order: string[] = [];
+    let release!: () => void;
+    const first = withChatLease(sdk, () => new Promise<void>(resolve => { order.push("import"); release = resolve; }));
+    await Bun.sleep(5);
+    const second = withChatLease(sdk, async () => { order.push("sync"); return "synced"; }, { pollMs: 5 });
+    await Bun.sleep(30);
+    expect(order).toEqual(["import"]);
+    release();
+    await first;
+    expect(await second).toBe("synced");
+    expect(order).toEqual(["import", "sync"]);
+    let hold!: () => void;
+    const blocking = withChatLease(sdk, () => new Promise<void>(resolve => { hold = resolve; }));
+    await Bun.sleep(5);
+    expect(await withChatLease(sdk, async () => "never", { waitMs: 20, pollMs: 5 })).toBeNull();
+    hold();
+    await blocking;
+  });
+});
