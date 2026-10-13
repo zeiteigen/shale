@@ -1,5 +1,6 @@
 import { Readability } from "@mozilla/readability";
 import type { PageBlock, ExtractionInfo } from "./browser-contract";
+import { isDecorativeImage } from "./decorative-images";
 
 const CLUTTER =
   'script,style,noscript,nav,footer,aside,form,dialog,iframe,svg,[hidden],[aria-hidden="true"],[role="navigation"],.advertisement,.cookie-banner';
@@ -214,6 +215,7 @@ export function extractDocument(
       ),
     }))
     .filter((x) => x.url)
+    .filter((image) => !isDecorativeImage(image))
     .filter((x, i, all) => all.findIndex((y) => y.url === x.url) === i)
     .slice(0, 25);
   const text = blocks.map((b) => b.text).join("\n\n");

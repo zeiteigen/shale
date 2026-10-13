@@ -12,6 +12,7 @@
   "dependencies": {
     "@vitejs/plugin-react": "latest",
     "concurrently": "latest",
+    "d3-force": "^3.0.0",
     "katex": "^0.19.0",
     "lucide-react": "latest",
     "react": "latest",
@@ -23,6 +24,7 @@
     "vite": "latest"
   },
   "devDependencies": {
+    "@types/d3-force": "^3.0.10",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "typescript": "latest"

@@ -7,6 +7,7 @@ import { dynamicChunkNote, type MarkdownChunk } from "./chunker";
 import { expansionPrompt } from "./expansion-prompt";
 import { fingerprintText } from "../../lib/memory/fingerprint";
 import { prepareSourceMemory, type PreparedSourceMemory } from "../../lib/memory/prepare";
+import { NOTE_IMAGE_POLICY_VERSION } from "./note-relevance";
 
 export interface ContextualChunk {
   metadata?: Record<string, unknown>;
@@ -28,6 +29,7 @@ export interface ParsedFile {
   contextualChunks: ContextualChunk[];
   memory?: PreparedSourceMemory;
   sourceFingerprint?: string;
+  imagePolicyVersion?: number;
 }
 
 export interface ParseFileOptions {
@@ -319,6 +321,7 @@ export async function parseFile(
     contextualChunks,
     memory,
     sourceFingerprint: fingerprintText(rawContent),
+    imagePolicyVersion: NOTE_IMAGE_POLICY_VERSION,
   };
 }
 

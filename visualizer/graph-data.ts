@@ -4,6 +4,7 @@ import type { ClaimFilter, ClaimStatus } from "../sdk/graph/types";
 import { sourceMap, sourceRank } from "./source-map";
 import { graphEdges, MAP_HIDDEN_TYPES } from "./graph-edges";
 import { recentChunksBySource } from './recent-chunks';
+import { retiredImageIds } from "./retired-images";
 
 export interface GraphData {
   nodes: Array<{
@@ -45,7 +46,8 @@ function graphSnapshot(sdk: ShaleSDK, filter: ClaimFilter): GraphData {
     }
     return current;
   };
-  const entities = allEntities.filter(e => e.canonicalId === null && !MAP_HIDDEN_TYPES.has(e.type));
+  const retiredImages = retiredImageIds(db, filter);
+  const entities = allEntities.filter(e => e.canonicalId === null && !MAP_HIDDEN_TYPES.has(e.type) && !retiredImages.has(e.id));
   const visible = new Set(entities.map(e => e.id));
   const { claims, truncated } = graphEdges(sdk, filter);
   const edges=claims.filter(c=>c.object!==undefined).map(c=>({id:c.id,source_entity_id:rootOf(c.subject),

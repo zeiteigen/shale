@@ -1,0 +1,29 @@
+.notebook-shell .map-heading { flex-wrap: wrap; }
+.map-heading-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.graph-mode-toggle { display: flex; border: 1px solid #c8c0b3; border-radius: 5px; overflow: hidden; }
+.graph-mode-toggle button { border: 0; background: #f8f5ee; padding: 6px 10px; color: #756e63; font-size: 11px; }
+.graph-mode-toggle button[aria-pressed="true"] { background: #e2dacb; color: #302d27; font-weight: 600; }
+.graph-mode-toggle button:hover { background: #ebe4d7; }
+.graph-mode-toggle button:focus-visible, .graph-forces summary:focus-visible { outline: 2px solid #47786d; outline-offset: -2px; }
+.graph-forces { position: absolute; z-index: 3; right: 14px; bottom: 14px; width: 208px; border: 1px solid #c8c0b3; border-radius: 5px; color: #5e574d; background: rgba(245, 241, 232, .97); box-shadow: 0 8px 24px #433a2d14; font-size: 11px; }
+.graph-forces summary { padding: 12px; cursor: pointer; }
+.graph-forces:not([open]) { width: auto; }
+.graph-force-fields { display: grid; gap: 13px; padding: 0 12px 12px; }
+.graph-force-fields label { display: grid; gap: 5px; }
+.graph-force-fields label > span { display: flex; justify-content: space-between; gap: 8px; }
+.graph-force-fields output { font-variant-numeric: tabular-nums; color: #857d71; }
+.graph-force-fields input { width: 100%; margin: 0; accent-color: #47786d; }
+.graph-force-fields button { border: 1px solid #c8c0b3; border-radius: 3px; padding: 7px; background: #f8f5ee; color: inherit; font-size: inherit; }
+.graph-arranging { position: absolute; bottom: 108px; left: 14px; color: #857d71; font-size: 11px; pointer-events: none; }
+.graph-message { position: absolute; top: 50%; left: 20px; right: 20px; text-align: center; color: #756e63; font-size: 12px; pointer-events: none; }
+.notebook-shell .organic-map .map-hover { top: 118px; pointer-events: none; }
+@media (max-width: 700px) {
+  .notebook-shell .map-heading { gap: 6px; padding: 8px; }
+  .notebook-shell .map-heading h1 { font-size: 18px; }
+  .map-heading-actions { gap: 5px; }
+  .graph-mode-toggle button { padding: 6px 8px; }
+  .graph-forces { right: 10px; bottom: 10px; }
+  .graph-arranging { left: 10px; bottom: 57px; }
+}
+.notebook-shell .workspace { height: calc(100dvh - 116px); }
+@media (max-width: 560px) { .notebook-shell .workspace { height: calc(100dvh - 162px); } }

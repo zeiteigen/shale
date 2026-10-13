@@ -114,7 +114,7 @@ export class UnifiedIngestor {
       if(sameContent && refreshing && (refreshing.sourceId===sourceId||refreshing.uri===source.uri)) {
         const current=new SourceMemoryStore(this.db).get(sourceId);
         memory=refineObservedMemory({summary:current.summary.text,summaryMethod:current.summary.method,
-          snippets:current.snippets,coverage:current.coverage},memory);
+          snippets:current.snippets,coverage:current.coverage},memory,refreshing.mode);
         validateMemory(memory);
       }
       const hash=memoryHash(memory,fingerprint);
