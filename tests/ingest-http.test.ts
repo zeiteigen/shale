@@ -17,13 +17,18 @@ it("delivers the Chrome payload shape to the durable inbox and rejects bad routi
     content: JSON.stringify({ type: "page_visit", url: "https://example.com", textContent: "Captured DOM" }),
     metadata: { connector: "chrome-extension", data_origin: "chrome", time: Date.now() },
   };
+  const post = (payload: string, contentType = "application/json") =>
+    fetch(url, { method: "POST", headers: { "Content-Type": contentType }, body: payload });
   try {
-    const accepted = await fetch(url, { method: "POST", body: JSON.stringify(body) });
+    const accepted = await post(JSON.stringify(body));
     expect(accepted.status).toBe(202);
     expect(getQueuedBrowserPayloads(sdk)).toHaveLength(1);
-    const unknown = await fetch(url, { method: "POST", body: JSON.stringify({ ...body, target_processor: "missing" }) });
+    const unknown = await post(JSON.stringify({ ...body, target_processor: "missing" }));
     expect(unknown.status).toBe(404);
-    expect((await fetch(url, { method: "POST", body: "{" })).status).toBe(400);
+    expect((await post("{")).status).toBe(400);
+    // A page's CORS-simple POST (no preflight) is refused before the body is read.
+    expect((await post(JSON.stringify(body), "text/plain;charset=UTF-8")).status).toBe(415);
+    expect((await fetch(url, { method: "POST", body: JSON.stringify(body) })).status).toBe(415);
     expect((await fetch(url)).status).toBe(405);
     expect(getQueuedBrowserPayloads(sdk)).toHaveLength(1);
   } finally {

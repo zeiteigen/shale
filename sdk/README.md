@@ -121,7 +121,7 @@ graph TD
 
 ### Standard Implementation Example
 
-> **Chat and message sources:** re-ingesting a URI *replaces* that source, and each source keeps a bounded memory (a summary plus at most 16 snippets). Don't append messages to one source per channel as the generic sketch below suggests. Use `@shale/sdk/chat` instead: it stores raw messages in connector-owned tables, cuts each conversation into time windows, and indexes one summarised source per window, with participants as graph `Person` entities. `extensions/discord`, `extensions/instagram`, and `extensions/email` are reference implementations.
+> **Chat and message sources:** re-ingesting a URI *replaces* that source, and each source keeps a bounded memory (a summary plus at most 16 snippets). Don't append messages to one source per channel as the generic sketch below suggests. Use `@shale/sdk/chat` instead: it stores raw messages in connector-owned tables, cuts each conversation into time windows, and indexes one summarised source per window, with participants as graph `Person` entities. `extensions/discord`, `extensions/instagram`, `extensions/email`, and `extensions/ai-chats` are reference implementations.
 
 ```typescript
 // extensions/my-extension/index.ts

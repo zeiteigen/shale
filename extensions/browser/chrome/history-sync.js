@@ -1,6 +1,5 @@
+import { settings, enqueueRecords, nextSequence, hasRecord } from "./runtime.js";
 import { allowedTab } from "./capture.js";
-import { settings } from "./settings.js";
-import { enqueueRecords, nextSequence, hasRecord } from "./outbox.js";
 const DAY = 86400000;
 
 function cleanDisplayTitle(title, url) {

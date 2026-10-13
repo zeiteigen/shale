@@ -11,6 +11,13 @@ export async function handleIngestRequest(
       { error: "POST required" },
       { status: 405, headers: { Allow: "POST" } },
     );
+  // Web pages can send CORS-simple text/plain POSTs to localhost without a preflight; requiring
+  // JSON makes any cross-origin page fail its preflight, while the Chrome extension and CLIs are unaffected.
+  if (!/^application\/json\s*(;|$)/i.test(req.headers.get("content-type") ?? ""))
+    return Response.json(
+      { error: "Content-Type must be application/json" },
+      { status: 415 },
+    );
   if (Number(req.headers.get("content-length")) > MAX_HTTP_BYTES)
     return Response.json({ error: "Payload too large" }, { status: 413 });
   const reader = req.body?.getReader();

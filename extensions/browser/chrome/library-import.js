@@ -1,16 +1,10 @@
-import { settings } from "./settings.js";
-import { importJobs, saveImport, hasRecord } from "./outbox.js";
+import { hasRecord, runtime } from "./runtime.js";
 import { captureTab } from "./capture.js";
 import { bookmarkSnapshot, queueBookmark } from "./bookmark-sync.js";
 import { historyWindows, historyStep } from "./history-sync.js";
-let running;
+/** Open tabs, then bookmarks, then history, as one resumable core job. */
 export async function createImport(options = {}) {
-  const config = await settings();
   const job = {
-    id: crypto.randomUUID(),
-    state: "running",
-    endpoint: config.serverUrl,
-    createdAt: Date.now(),
     stage: "tabs",
     options: {
       importTabs: true,
@@ -29,13 +23,10 @@ export async function createImport(options = {}) {
     job.historyWindows = historyWindows(job.options.historyRange);
     job.historyBounds = { ...job.historyWindows[0] };
   }
-  await saveImport(job);
-  return { success: true, jobId: job.id };
+  const created = await runtime().createJob("library-import", job);
+  return { success: true, jobId: created.id };
 }
-async function step(job) {
-  const config = await settings();
-  if (config.serverUrl !== job.endpoint)
-    throw new Error("Restore the import destination before resuming this job");
+export async function step(job) {
   if (job.stage === "tabs") {
     if (!job.options.importTabs) {
       job.stage = "bookmarks";
@@ -103,36 +94,7 @@ async function step(job) {
     });
   }
 }
-export function resumeImports() {
-  return (running ??= (async () => {
-    for (const job of (await importJobs())
-      .filter((job) => job.state === "running")
-      .slice(0, 1)) {
-      for (let i = 0; i < 20 && job.state === "running"; i++) {
-        const before = (await importJobs()).find(
-          (saved) => saved.id === job.id,
-        );
-        if (before?.state !== "running") break;
-        try {
-          await step(job);
-          job.error = "";
-        } catch (error) {
-          job.state = "failed";
-          job.error = error.message;
-        }
-        const after = (await importJobs()).find((saved) => saved.id === job.id);
-        if (after?.state === "cancelled") job.state = "cancelled";
-        await saveImport(job);
-      }
-    }
-  })().finally(() => {
-    running = undefined;
-  }));
-}
-export async function updateImport(id, action) {
-  const job = (await importJobs()).find((job) => job.id === id);
-  if (!job) throw new Error("Unknown import job");
-  job.state = action === "cancel" ? "cancelled" : "running";
-  job.error = "";
-  await saveImport(job);
+export function summary(job) {
+  const c = job.counts;
+  return `Import ${job.state} (${job.stage}): ${c.tabs} tabs, ${c.bookmarks} bookmarks, ${c.history} history, ${c.historyVisits || 0} backfilled visits, ${c.skipped} skipped. ${job.error || job.warnings.join(" ")}`;
 }

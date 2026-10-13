@@ -4,7 +4,10 @@
   "originTiers": {
     "discord": "private",
     "instagram": "private",
-    "email": "private"
+    "email": "private",
+    "chatgpt": "private",
+    "claude": "private",
+    "gemini": "private"
   },
   "tierRules": [],
   "profiles": {

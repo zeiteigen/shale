@@ -106,8 +106,16 @@ integration(
       await worker.evaluate(
         `chrome.storage.local.set({serverUrl:${JSON.stringify(endpoint)},excludeDomains:[],autoSyncActive:true,currentGoal:'Learn SQLite',totalIngestedCount:500,initialSyncCompleted:true})`,
       );
-      await control.evaluate(
-        `import(chrome.runtime.getURL('delivery.js')).then(m=>m.checkConnection())`,
+      const connection = await control.evaluate<any>(
+        `chrome.runtime.sendMessage({action:'test_connection'})`,
+      );
+      expect(connection.modules.browser.available).toBe(true);
+      // The fake host runs only the browser extension; other modules report it.
+      expect(connection.modules["ai-chats"]).toMatchObject({ available: false });
+      await control.reload();
+      await eventually(async () =>
+        (await control.locator("#modules [data-module]").count()) === 2 &&
+        (await control.locator('[data-module="ai-chats"] .module-notice').innerText()).includes("not loaded"),
       );
       host.stop(true);
       let stopped = false;
@@ -167,7 +175,7 @@ integration(
       const popup = await context!.newPage();
       await popup.goto(worker.url().replace("background.js", "popup.html"));
       const result = await popup.evaluate<any>(
-        `chrome.runtime.sendMessage({action:'run_full_import',options:{importTabs:true,importBookmarks:false,importHistory:false}})`,
+        `chrome.runtime.sendMessage({action:'browser:run_full_import',options:{importTabs:true,importBookmarks:false,importHistory:false}})`,
       );
       expect(result.success).toBe(true);
       await popup.close();

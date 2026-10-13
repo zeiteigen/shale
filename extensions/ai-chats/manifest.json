@@ -1,0 +1,17 @@
+{
+  "name": "ai-chats",
+  "namespace": "ai-chats",
+  "version": "0.1.0",
+  "description": "Ingest your ChatGPT, Claude, and Gemini conversations, captured by the Shale Chrome extension from the sites you are signed in to.",
+  "subscribe_ingest": "subscribe.ts",
+  "checkpoint_recover": "recover.ts",
+  "setup_script": "refresh.ts",
+  "chrome_module": {
+    "background": "chrome/background.ts",
+    "popup": "chrome/popup.ts",
+    "inject": { "gemini-dom": "chrome/inject/gemini-dom.ts" }
+  },
+  "crons": [
+    { "name": "ai-chats-index", "schedule": "*/5 * * * *", "script": "index.ts", "run_on_startup": true }
+  ]
+}

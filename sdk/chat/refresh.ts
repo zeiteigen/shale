@@ -3,7 +3,10 @@ import { withSourceRefresh } from "../../lib/memory/refresh-scope";
 import { chatCheckpointId, commitWindow, prepareWindow, type ChatConnector } from "./commit";
 import type { ChatWindowSettings } from "./types";
 
-/** Answer `source:refresh` for this connector's windows by re-summarising stored messages. */
+/**
+ * Answer `source:refresh` for this connector's windows by re-summarising stored messages.
+ * The handler is named after the platform because refresh requests target a source's origin.
+ */
 export function setupChatRefresh(sdk: ShaleSDK, connector: () => ChatConnector, settings: () => ChatWindowSettings) {
   sdk.messages.handle("source:refresh", async request => {
     const source = sdk.context.getSource(request.sourceId);
@@ -27,5 +30,5 @@ export function setupChatRefresh(sdk: ShaleSDK, connector: () => ChatConnector, 
         return { sourceId: source.id, status: "unavailable", reason: String(error).slice(0, 300) };
       }
     });
-  });
+  }, { name: connector().platform });
 }

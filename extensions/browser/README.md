@@ -1,6 +1,6 @@
 # Browser connector
 
-Durable browser ingestion for Shale's local SQLite and evidence graph. The companion [Chrome extension](../../scripts/browser-chrome-extension/README.md) collects structured page captures and immutable activity observations. Catalog records, page content, activity, observed sessions, and inferred research threads have separate identities.
+Durable browser ingestion for Shale's local SQLite and evidence graph. The companion [Chrome extension](../../scripts/browser-chrome-extension/README.md) collects structured page captures and immutable activity observations through this extension's Chrome module in `chrome/` (bundled by `bun run browser:build`). Sites claimed by other Chrome modules, such as AI chat sites while the ai-chats module is enabled, are left to those modules. Catalog records, page content, activity, observed sessions, and inferred research threads have separate identities.
 
 ## Admission and processing
 
@@ -103,7 +103,7 @@ Bookmarks use collector-scoped IDs and real folder ancestry. Newer sequences win
 
 `bun run test:browser` covers durable admission, atomic overload/migration, immutable replay conflicts, preparation/recovery, graph rollback, late sessions, SPA attention, contexts/corrections, catalog lifecycle, extraction, and outbox/import recovery. `browser-relevance.test.ts` establishes a small deterministic baseline with two interleaved goals and a returning goal across sessions.
 
-`bun run test:browser:chrome` runs actual unpacked Chromium against temporary fixtures/database/profile, including service-worker termination and offline/profile recovery. Model endpoints are mocked. `bun run browser:check` verifies generated protocol and content artifacts; `bun run typecheck` checks the repository.
+`bun run test:browser:chrome` runs actual unpacked Chromium against temporary fixtures/database/profile, including service-worker termination and offline/profile recovery. Model endpoints are mocked. `bun run browser:check` verifies the generated Chrome module bundles; `bun run typecheck` checks the repository.
 
 For a local read-only queue view, run `bun run queue:view` and open `http://127.0.0.1:7426`. It reads browser job rows, including failures, without migrating or changing queue state.
 

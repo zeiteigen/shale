@@ -1,0 +1,18 @@
+{
+  "extension": "ai-chats",
+  "settings": {
+    "providers": { "type": "string[]", "description": "Chat providers captured by the Chrome extension's AI chats module and accepted by the server: chatgpt, claude, gemini. Captures from a provider not listed are skipped.", "default": ["chatgpt", "claude", "gemini"], "examples": [["chatgpt", "claude"]] },
+    "userName": { "type": "string", "description": "Name used for your own messages in transcripts and for your Person entity.", "default": "Me" },
+    "autoSyncMinutes": { "type": "number", "description": "How often the Chrome module re-checks ChatGPT and Claude conversation lists while a tab of that site is open. 0 turns background sync off; captures still happen when you open a conversation, and Sync buttons still work.", "default": 360, "range": { "min": 0, "max": 10080 } },
+    "fetchDelayMs": { "type": "number", "description": "Pause between conversation fetches during a sync, to stay well under the sites' rate limits.", "default": 1500, "range": { "min": 250, "max": 60000 } },
+    "maxConversationsPerSync": { "type": "number", "description": "Most changed conversations one sync job fetches; the next sync continues with the rest.", "default": 1000, "range": { "min": 1, "max": 100000 } },
+    "gapMinutes": { "type": "number", "description": "A silence longer than this starts a new conversation window (one searchable source per window).", "default": 30, "range": { "min": 1, "max": 1440 } },
+    "maxWindowMessages": { "type": "number", "description": "Maximum messages per conversation window.", "default": 120, "range": { "min": 2, "max": 1000 } },
+    "maxWindowChars": { "type": "number", "description": "Maximum transcript characters per window; keep at or below 12000 so whole windows stay searchable. Long replies make windows hold fewer turns.", "default": 11000, "range": { "min": 1000, "max": 12000 } },
+    "idleMinutes": { "type": "number", "description": "The newest window of a conversation is indexed only after this much silence, so an ongoing chat is summarised once.", "default": 60, "range": { "min": 0, "max": 10080 } },
+    "maxWindowsPerRun": { "type": "number", "description": "Windows summarised per batch.", "default": 50, "range": { "min": 1, "max": 1000 } },
+    "summarize": { "type": "boolean", "description": "Summarise each window with the chat LLM; otherwise a heuristic summary is used.", "default": true, "possibleValues": [true, false] },
+    "llmModel": { "type": "string", "description": "Optional chat model override for window summaries. Empty uses the default.", "default": "" },
+    "namespace": { "type": "string", "description": "Namespace for AI chat sources and graph entities.", "default": "ai-chats" }
+  }
+}

@@ -1,6 +1,5 @@
+import { settings, nextSequence, enqueueRecords, hasRecord, runtime } from "./runtime.js";
 import { fitCapture } from "./capture-budget.js";
-import { settings } from "./settings.js";
-import { nextSequence, enqueueRecords, hasRecord } from "./outbox.js";
 export async function allowedTab(tab) {
   const config = await settings();
   if (tab.incognito)
@@ -13,7 +12,10 @@ export async function allowedTab(tab) {
   }
   if (!["http:", "https:"].includes(url.protocol))
     return { allowed: false, reason: "Restricted browser page" };
-  const policy = config.capturePolicies?.[config.serverUrl] || {
+  // Sites another module owns (e.g. AI chats) are captured by that module instead.
+  if (await runtime().claimedByOther(url.href))
+    return { allowed: false, reason: "Captured by another Shale module" };
+  const policy = (await runtime().policy()) || {
     excludePatterns: [
       "*mail.google.com*",
       "*accounts.google.com*",
@@ -61,14 +63,7 @@ export async function captureTab(
   const config = check.config;
   let page;
   try {
-    const target = documentId
-      ? { tabId: tab.id, documentIds: [documentId] }
-      : { tabId: tab.id };
-    const result = await chrome.scripting.executeScript({
-      target,
-      files: ["content.js"],
-    });
-    page = result[0]?.result;
+    page = await runtime().inject(tab.id, "extract", { documentId });
     if (!page) throw new Error("Page extractor returned no data");
   } catch (error) {
     page = {

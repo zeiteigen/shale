@@ -1,0 +1,15 @@
+{
+  "providers": ["chatgpt", "claude", "gemini"],
+  "userName": "Me",
+  "autoSyncMinutes": 360,
+  "fetchDelayMs": 1500,
+  "maxConversationsPerSync": 1000,
+  "gapMinutes": 30,
+  "maxWindowMessages": 120,
+  "maxWindowChars": 11000,
+  "idleMinutes": 60,
+  "maxWindowsPerRun": 50,
+  "summarize": true,
+  "llmModel": "",
+  "namespace": "ai-chats"
+}

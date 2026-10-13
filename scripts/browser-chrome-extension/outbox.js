@@ -1,4 +1,3 @@
-import { validateBrowserPayload } from "./protocol.js";
 let connection;
 const request = (req) =>
   new Promise((resolve, reject) => {
@@ -50,15 +49,32 @@ export async function nextSequence() {
     return value;
   });
 }
-export async function enqueueRecords(records, config) {
-  const batch = {
-    type: "browser_batch",
-    protocolVersion: 1,
+/** Rows queued before modules existed belong to the browser protocol. */
+export const LEGACY_ROUTE = {
+  processor: "browser",
+  batchType: "browser_batch",
+  protocolVersion: 1,
+};
+export function rowRoute(row) {
+  return row.processor
+    ? {
+        processor: row.processor,
+        batchType: row.batchType,
+        protocolVersion: row.protocolVersion,
+      }
+    : LEGACY_ROUTE;
+}
+/** Queue records for one module; `route` names its processor and validates its wire format. */
+export async function enqueueRecords(records, config, route) {
+  if (!route?.processor || !route.batchType || !route.validate)
+    throw new Error("Records need a module route");
+  route.validate({
+    type: route.batchType,
+    protocolVersion: route.protocolVersion,
     collectorId: config.collectorId,
     batchId: "validation",
     records,
-  };
-  validateBrowserPayload(batch);
+  });
   return transaction(["outbox", "meta"], "readwrite", async (tx) => {
     const store = tx.objectStore("outbox");
     const current = await request(store.getAll());
@@ -86,6 +102,9 @@ export async function enqueueRecords(records, config) {
         record,
         bytes: size,
         endpoint: config.serverUrl,
+        processor: route.processor,
+        batchType: route.batchType,
+        protocolVersion: route.protocolVersion,
         collectorId: config.collectorId,
         state: "pending",
         createdAt: Date.now(),
@@ -141,15 +160,21 @@ export async function updateItems(ids, update) {
     }
   });
 }
-export async function importJobs() {
+export async function storedJobs() {
   return transaction(["imports"], "readonly", (tx) =>
     request(tx.objectStore("imports").getAll()),
   );
 }
-export async function saveImport(job) {
-  return transaction(["imports"], "readwrite", (tx) =>
-    request(tx.objectStore("imports").put({ ...job, updatedAt: Date.now() })),
-  );
+/** A runner saving progress never overwrites a cancellation that landed mid-step. */
+export async function saveJob(job, { keepCancellation = false } = {}) {
+  return transaction(["imports"], "readwrite", async (tx) => {
+    const store = tx.objectStore("imports");
+    if (keepCancellation && job.state === "running") {
+      const stored = await request(store.get(job.id));
+      if (stored?.state === "cancelled") job.state = "cancelled";
+    }
+    return request(store.put({ ...job, updatedAt: Date.now() }));
+  });
 }
 export async function outboxSummary() {
   const rows = await outboxItems();

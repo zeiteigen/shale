@@ -1,6 +1,5 @@
+import { settings, enqueueRecords, nextSequence, hasRecord } from "./runtime.js";
 import { allowedTab } from "./capture.js";
-import { settings } from "./settings.js";
-import { enqueueRecords, nextSequence, hasRecord } from "./outbox.js";
 export async function bookmarkSnapshot() {
   const tree = await chrome.bookmarks.getTree(),
     items = [],

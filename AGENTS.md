@@ -38,7 +38,8 @@ shale/
 │   └── chat/                # Shared chat-connector toolkit: message store, time windows, transcripts, summaries, graph commit
 ├── extensions/              # Autonomous modular extensions
 │   ├── obsidian/            # Obsidian vault ingestion, frontmatter/wikilink parsing, note chunking
-│   ├── browser/             # Chrome browser tab sync, session clustering, history/bookmarks ingestion
+│   ├── browser/             # Chrome browser tab sync, session clustering, history/bookmarks ingestion (Chrome module in chrome/)
+│   ├── ai-chats/            # ChatGPT, Claude, and Gemini conversations captured by its Chrome module
 │   ├── process-image/       # Multimodal visual extraction (layout, OCR, synthetic meaning chunks)
 │   ├── source-linker/       # Cross-source entity discovery and knowledge graph linker
 │   ├── discord/             # Discord ingestion via DiscordChatExporter JSON (import folder + optional sync)
@@ -51,7 +52,8 @@ shale/
 │   └── load-extensions.ts   # Auto-discovery of manifests, crons, hooks, and message handlers
 ├── scripts/                 # Developer tools, CLIs, browser extensions
 │   ├── settings.ts          # Settings CLI and Clack TUI runner
-│   └── browser-chrome-extension/ # Chrome extension for pushing browser tabs to Shale
+│   ├── build-browser-modules.ts # Bundles every extension's chrome_module into the Chrome extension
+│   └── browser-chrome-extension/ # Chrome extension core (outbox, delivery, jobs, popup shell) + generated modules/
 └── tests/                   # Automated Bun test suites
 ```
 
@@ -90,11 +92,32 @@ extensions/<name>/
   "checkpoint_recover": "recover.ts",
   "auth_script": "auth.ts",
   "install_script": "install.ts",
-  "hooks": {
-    "ingest": "index.ts"
+  "setup_script": "refresh.ts",
+  "subscribe_ingest": "subscribe.ts",
+  "chrome_module": {
+    "background": "chrome/background.ts",
+    "popup": "chrome/popup.ts",
+    "inject": { "page-reader": "chrome/inject/page-reader.ts" }
   }
 }
 ```
+
+`subscribe_ingest` receives `POST /ingest` envelopes whose `target_processor` is the extension's name. Export `accept` for durable admission with receipts, `inspect` for `/connectors/<name>/*`, and `capabilities` for `/health`.
+
+### Chrome Extension Modules (`chrome_module`)
+
+The Chrome extension in `scripts/browser-chrome-extension` is a core runtime shared by all extensions. It owns Chrome's listeners, the IndexedDB outbox, delivery and receipts, resumable jobs, and the popup shell. Extensions contribute their own code as modules; never add extension-specific code to the core.
+- **Background entry.** Default-export `register(runtime)` and return a definition:
+  - `id` must equal the manifest `name`, which is also the delivery processor;
+  - `protocol: { batchType, version, validate }`;
+  - optional `claims.hosts` (the browser module skips those hosts);
+  - `listeners` (`navigation`, `tabComplete`, `alarm`, …);
+  - `actions`, called from the popup as `<id>:<action>`;
+  - `jobs: { kind: { step, summary } }`;
+  - `wake`, `status`, and `defaults`.
+- **Runtime.** It is scoped to the module: `enqueue`, `hasRecord`, `deliver`, `storage`, `policy` (the cached `/connectors/<id>/policy`), `createJob`, `resume`, `inject`, `execInTab`, and `claimedByOther`. Modules import nothing from the core.
+- **Popup and inject entries.** A popup entry exports `render(container, popup)`. Inject entries default-export a function that `runtime.inject(tabId, name, { args })` runs in the page.
+- **Build.** `bun run browser:build` bundles the modules into `scripts/browser-chrome-extension/modules/` and generates static registries. Commit the output. `bun run browser:check`, run by the test suite, fails when the output is stale.
 
 ### One-time Setup (`install_script`)
 
@@ -225,6 +248,11 @@ bun run scripts/serve-visualizer.ts
 - **`extensions/source-linker`**: Cross-source graph linker. Discovers unlinked entity references across disparate sources and generates semantic edges.
 - **`extensions/discord`**: Ingests Discord channels, threads, and DMs from DiscordChatExporter JSON exports dropped into `data/discord/import`. The hourly `discord-sync` cron uses the account connected on the web interface's Accounts page (user or bot token) and the exporter installed by `bun run setup discord`. It sweeps every visible server and DM channel by channel, with per-channel watermarks; the first sync of a channel fetches its full history. Messages are split into conversation windows (one source each) with LLM summaries, and authors become `Person` entities with `external:discord` aliases.
 - **`extensions/instagram`**: Ingests Instagram DMs from the official "Download your information" JSON export (`data/instagram/import`), repairing the export's mojibake. An optional `instagram-sync` cron runs a Python instagrapi sidecar (`sidecar/ig_sync.py`), signed in from the Accounts page (password with 2FA/challenge codes, or a session cookie), that merges into the same threads without duplicates. Uses the same windowing as Discord.
+- **`extensions/ai-chats`**: Ingests ChatGPT, Claude, and Gemini conversations through its Chrome module, which reads them from tabs where the user is signed in.
+  - **ChatGPT and Claude:** read through the sites' own JSON endpoints. A conversation is captured when opened and re-checked while visible. A resumable `sync` job lists conversations and fetches the ones that changed.
+  - **Gemini:** read from the open page.
+  - **Snapshots:** the active branch only. An edit or regeneration prunes the abandoned branch.
+  - **Indexing:** each provider (origin `chatgpt`, `claude`, or `gemini`) has its own `sdk/chat` store. The `ai-chats-index` cron cuts conversation windows into summarised `chat_session` sources.
 - **`extensions/access-classifier`**: Assigns sensitivity tiers to sources, entities, and claims. Heuristics catch credentials, account numbers, PII, sensitive topics, and direct messages; an LLM pass refines them. Access profiles use the tiers.
 - **`extensions/db-backup`**: Hot backup utility. Uses SQLite backup APIs to create consistent database snapshots without stopping host operations.
 

@@ -1,15 +1,6 @@
 import { validatedEndpoint } from "./settings.js";
+import popupModules from "./modules/popup-registry.js";
 const el = (id) => document.getElementById(id);
-const social = [
-  "x.com",
-  "twitter.com",
-  "reddit.com",
-  "facebook.com",
-  "instagram.com",
-  "tiktok.com",
-  "linkedin.com",
-  "youtube.com",
-];
 function feedback(message, error = false) {
   el("feedbackBanner").textContent = message;
   el("feedbackBanner").className =
@@ -23,16 +14,81 @@ async function command(action, extra = {}) {
 }
 async function connection() {
   try {
-    await command("test_connection");
-    el("connectionStatus").className = "status-indicator online";
+    const result = await command("test_connection");
+    const missing = Object.entries(result.modules || {}).filter(
+      ([, module]) => !module.available,
+    );
+    el("connectionStatus").className =
+      `status-indicator ${missing.length ? "checking" : "online"}`;
     el("connectionStatus").querySelector(".status-text").textContent =
-      "Connector ready";
+      missing.length ? "Partly ready" : "Connector ready";
+    if (missing.length)
+      feedback(missing.map(([, module]) => module.error).join(" "), true);
   } catch (error) {
     el("connectionStatus").className = "status-indicator offline";
     el("connectionStatus").querySelector(".status-text").textContent =
       "Offline";
     feedback(error.message, true);
   }
+}
+async function act(work) {
+  try {
+    const result = await work();
+    feedback(
+      result?.jobId
+        ? "Job queued; progress remains available here."
+        : result?.queued
+          ? "Captured locally; waiting for indexing."
+          : result?.message || "Saved.",
+    );
+    await refresh();
+  } catch (error) {
+    feedback(error.message, true);
+  }
+}
+const sections = popupModules.map(({ id, render }) => {
+  const container = document.createElement("div");
+  container.className = "module-section";
+  container.dataset.module = id;
+  const notice = document.createElement("p");
+  notice.className = "module-notice hidden";
+  const body = document.createElement("div");
+  container.append(notice, body);
+  el("modules").append(container);
+  const instance = render(body, {
+    id,
+    // Plain names address this module's own actions.
+    command: (action, extra) =>
+      command(action.includes(":") ? action : `${id}:${action}`, extra),
+    act,
+    feedback,
+  });
+  return { id, container, notice, instance };
+});
+function renderToggles(status) {
+  el("moduleToggles").replaceChildren(
+    ...status.modules.map((module) => {
+      const row = document.createElement("label");
+      row.className = "setting-item toggle-row";
+      const text = document.createElement("span");
+      text.className = "setting-name";
+      text.textContent = `${module.label} capture`;
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.className = "toggle-input";
+      input.checked = module.enabled;
+      input.addEventListener("change", () =>
+        act(() =>
+          command("set_module_enabled", {
+            id: module.id,
+            enabled: input.checked,
+          }),
+        ),
+      );
+      row.append(text, input);
+      return row;
+    }),
+  );
 }
 let loaded = false;
 async function refresh() {
@@ -41,36 +97,26 @@ async function refresh() {
     c = box.counts;
   if (!loaded) {
     el("serverUrlInput").value = status.serverUrl;
-    el("excludeDomainsText").value = status.excludeDomains.join("\n");
-    el("toggleAutoSync").checked = status.autoSyncActive;
-    el("toggleSocialMedia").checked = status.excludeSocialMedia;
-    el("goalInput").value = status.currentGoal;
+    renderToggles(status);
     loaded = true;
   }
-  el("sessionId").textContent = status.collectorId.slice(0, 16);
-  el("sessionPageCount").textContent = c.pending || 0;
-  el("totalIngestedCount").textContent =
-    (status.totalIngestedCount || 0) + box.sentCount;
   el("deliverySummary").textContent =
     `${c.pending || 0} captured locally · ${c.received || 0} indexing · ${c.indexed || 0} indexed · ${c.skipped || 0} skipped · ${c.failed || 0} failed · ${c.expired || 0} expired (resubmit). Oldest unsent: ${Math.round(box.oldestUnsentAgeMs / 60000)} min.`;
   el("deliveryError").textContent =
     box.lastError || status.lastCaptureError || "";
-  el("onboardingBanner").classList.toggle(
-    "hidden",
-    status.initialSyncCompleted,
-  );
   el("lastSyncLabel").textContent = status.lastSyncTime
     ? `Last receipt: ${new Date(status.lastSyncTime).toLocaleTimeString()}`
     : "No server receipts yet";
-  el("importJobs").replaceChildren();
-  for (const job of status.imports
+  el("jobList").replaceChildren();
+  for (const job of status.jobs
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 5)) {
     const row = document.createElement("p");
-    row.textContent = `Import ${job.state} (${job.stage}): ${job.counts.tabs} tabs, ${job.counts.bookmarks} bookmarks, ${job.counts.history} history, ${job.counts.historyVisits || 0} backfilled visits, ${job.counts.skipped} skipped. ${job.error || job.warnings.join(" ")}`;
-    const button = document.createElement("button");
-    button.textContent = job.state === "running" ? "Cancel" : "Resume";
+    row.textContent =
+      job.summary || `${job.module} ${job.kind} ${job.state}. ${job.error || ""}`;
     if (["running", "failed", "cancelled"].includes(job.state)) {
+      const button = document.createElement("button");
+      button.textContent = job.state === "running" ? "Cancel" : "Resume";
       button.addEventListener("click", () =>
         act(() =>
           command(job.state === "running" ? "cancel_import" : "resume_import", {
@@ -80,66 +126,28 @@ async function refresh() {
       );
       row.append(button);
     }
-    el("importJobs").append(row);
+    el("jobList").append(row);
+  }
+  for (const section of sections) {
+    const module = status.modules.find((m) => m.id === section.id);
+    const unavailable = module?.connection && !module.connection.available;
+    section.container.classList.toggle("disabled", !module?.enabled);
+    section.notice.classList.toggle("hidden", !unavailable && module?.enabled);
+    section.notice.textContent = !module?.enabled
+      ? `${module?.label || section.id} capture is turned off in Settings.`
+      : unavailable
+        ? module.connection.error
+        : "";
+    try {
+      section.instance?.refresh?.(status, module);
+    } catch (error) {
+      section.notice.textContent = error.message;
+      section.notice.classList.remove("hidden");
+    }
   }
 }
-async function act(work) {
-  try {
-    const result = await work();
-    feedback(
-      result?.jobId
-        ? "Import queued; progress remains available here."
-        : result?.queued
-          ? "Captured locally; waiting for indexing."
-          : "Saved.",
-    );
-    await refresh();
-  } catch (error) {
-    feedback(error.message, true);
-  }
-}
-const actions = {
-  btnIngestCurrent: "ingest_current_tab",
-  btnIngestAllTabs: "ingest_all_tabs",
-  btnSyncHistory: "sync_history",
-  btnSyncBookmarks: "sync_bookmarks",
-  btnRetryFailed: "retry_failed",
-  btnResetSyncState: "reset_sync_state",
-};
-for (const [id, action] of Object.entries(actions))
-  el(id).addEventListener("click", () => act(() => command(action)));
-el("btnStartFullImport").addEventListener("click", () =>
-  act(() =>
-    command("run_full_import", {
-      options: {
-        importTabs: el("chkImportTabs").checked,
-        importBookmarks: el("chkImportBookmarks").checked,
-        importHistory: el("chkImportHistory").checked,
-        historyRange: el("historyRangeSelect").value,
-        includeHistoryVisits: el("chkHistoryVisits").checked,
-      },
-    }),
-  ),
-);
-el("toggleAutoSync").addEventListener("change", () =>
-  act(() =>
-    chrome.storage.local.set({ autoSyncActive: el("toggleAutoSync").checked }),
-  ),
-);
-el("toggleSocialMedia").addEventListener("change", () =>
-  act(async () => {
-    const { excludeDomains = [] } =
-      await chrome.storage.local.get("excludeDomains");
-    const enabled = el("toggleSocialMedia").checked;
-    const domains = enabled
-      ? [...new Set([...excludeDomains, ...social])]
-      : excludeDomains.filter((d) => !social.includes(d));
-    await chrome.storage.local.set({
-      excludeDomains: domains,
-      excludeSocialMedia: enabled,
-    });
-    el("excludeDomainsText").value = domains.join("\n");
-  }),
+el("btnRetryFailed").addEventListener("click", () =>
+  act(() => command("retry_failed")),
 );
 el("btnSaveUrl").addEventListener("click", () =>
   act(async () => {
@@ -148,21 +156,6 @@ el("btnSaveUrl").addEventListener("click", () =>
     });
     await connection();
   }),
-);
-el("btnSaveGoal").addEventListener("click", () =>
-  act(() =>
-    chrome.storage.local.set({ currentGoal: el("goalInput").value.trim() }),
-  ),
-);
-el("btnSaveExclusions").addEventListener("click", () =>
-  act(() =>
-    chrome.storage.local.set({
-      excludeDomains: el("excludeDomainsText")
-        .value.split("\n")
-        .map((d) => d.trim().toLowerCase())
-        .filter(Boolean),
-    }),
-  ),
 );
 refresh().catch((error) => feedback(error.message, true));
 connection();

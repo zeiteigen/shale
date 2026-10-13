@@ -1,6 +1,8 @@
 # Shale Browser Ingestor
 
-Chrome/Chromium 106 or newer. The extension captures readable page content, navigation and attention observations, bookmarks, and history for the local Shale server.
+Chrome/Chromium 106 or newer. The extension is a shared core that hosts **modules** contributed by Shale extensions:
+- **Browser** (`extensions/browser/chrome`) captures readable page content, navigation and attention observations, bookmarks, and history.
+- **AI chats** (`extensions/ai-chats/chrome`) captures ChatGPT, Claude, and Gemini conversations from tabs where you are signed in; see [its README](../../extensions/ai-chats/README.md).
 
 ## Install or upgrade
 
@@ -10,7 +12,50 @@ Chrome/Chromium 106 or newer. The extension captures readable page content, navi
 4. Open the popup and verify **Connector ready**. The default endpoint is `http://127.0.0.1:7425/ingest`; previously saved endpoints remain unchanged.
 5. Choose the data to import. Import commands return immediately; reopening the popup shows persisted progress. Initial setup does not start a library import automatically.
 
-Upgrade the server before the Chrome extension. The connection test checks Shale identity, durable browser admission, protocol version, and capture policy. A generic HTTP success is insufficient.
+Upgrade the server before the Chrome extension. The connection test checks Shale identity, then each module's processor: durable admission, protocol version, and capture policy. A generic HTTP success is insufficient. A module whose Shale extension is not loaded is marked unavailable in its popup section; its captures stay queued until the server accepts them. Each module can be turned off under **Settings**.
+
+## Modules
+
+The core (`background.js`, `outbox.js`, `delivery.js`, `jobs.js`, `core/module-host.js`, `popup.*`) owns:
+- Chrome listeners;
+- the durable outbox;
+- delivery and receipts;
+- resumable jobs;
+- the popup shell.
+
+It contains nothing specific to one Shale extension. Each extension declares its module in its manifest:
+
+```json
+"chrome_module": {
+  "background": "chrome/background.ts",
+  "popup": "chrome/popup.ts",
+  "inject": { "reader": "chrome/inject/reader.ts" }
+}
+```
+
+**Background entry.** It default-exports `register(runtime)`, which returns:
+- `id`: the extension name, which is also the `/ingest` processor.
+- `protocol`: `{ batchType, version, validate }`. Records are validated when queued and sent as `{ type: batchType, protocolVersion: version, collectorId, batchId, records }` with `target_processor: id`.
+- `claims.hosts`: hosts the module owns. Other modules, such as browser capture, skip them while it is enabled.
+- `listeners`: `navigation`, `tabComplete`, `tabActivated`, `windowFocus`, `tabRemoved`, `idle`, `alarm` (each minute), `bookmark*`, `history*`.
+- `actions`: popup commands, sent as `<id>:<action>`.
+- `jobs`: `{ kind: { step(job), summary(job), stepsPerWake? } }` for resumable work.
+- `wake`, `status`, `defaults`.
+
+**Runtime.** The `runtime` is scoped to the module:
+- `enqueue(records)`, `hasRecord`, `deliver()`;
+- `storage.get/set` (prefixed with the module id);
+- `policy()`, from `/connectors/<id>/policy`;
+- `createJob(kind, fields)` and `resume()`;
+- `inject(tabId, name, { documentId, args })`;
+- `execInTab(tabId, func, args)`;
+- `claimedByOther(url)`.
+
+Delivery batches never mix processors. Receipts are polled at `/connectors/<id>/status`, and retries go to `/connectors/<id>/retry`.
+
+**Popup and inject entries.** A popup entry exports `render(container, popup)` and may return `{ refresh(status, module) }`. Inject entries default-export a function of one argument; the core registers it in the page and calls it.
+
+**Build.** `bun run browser:build` bundles every module into `modules/` and writes static registries, since MV3 service workers cannot import dynamically. The output is committed. Reload the unpacked extension after rebuilding.
 
 ## Capture and delivery
 
@@ -41,8 +86,8 @@ Public-page enrichment is a separate, explicit server job, disabled by default. 
 ## Developer checks
 
 ```bash
-bun run browser:build       # Generate shared protocol and extraction bundles
-bun run browser:check       # Reject stale generated files
+bun run browser:build       # Bundle extension modules into modules/
+bun run browser:check       # Reject stale generated modules
 bun run test:browser        # Server, extraction, outbox, retrieval regressions
 bun run test:browser:chrome # Actual unpacked extension with an isolated Chromium profile
 ```

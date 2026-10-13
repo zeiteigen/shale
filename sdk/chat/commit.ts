@@ -41,6 +41,23 @@ function participants(window: ChatWindow): PreparedChatWindow["participants"] {
   return [...byId.values()];
 }
 
+/**
+ * Drop every window, source, and checkpoint of a conversation and rescan it from the start.
+ * Used when history changes in a way window ids cannot follow, such as a removed or backfilled first message.
+ */
+export function resetConversationWindows(sdk: ShaleSDK, connector: ChatConnector, conversationId: string) {
+  const { store } = connector;
+  const windows = sdk.database.query<{ window_id: string; source_id: string | null }, [string, string]>(
+    `SELECT window_id,source_id FROM ${store.windows} WHERE extension_id=? AND conversation_id=?`).all(store.extensionId, conversationId);
+  for (const window of windows) {
+    if (window.source_id) sdk.database.query("DELETE FROM sources WHERE id=?").run(window.source_id);
+    sdk.checkpoint.delete(chatCheckpointId(window.window_id));
+  }
+  sdk.database.query(`DELETE FROM ${store.windows} WHERE extension_id=? AND conversation_id=?`).run(store.extensionId, conversationId);
+  sdk.database.query(`UPDATE ${store.conversations} SET dirty=1,scan_from=0 WHERE extension_id=? AND conversation_id=?`)
+    .run(store.extensionId, conversationId);
+}
+
 /** Summarise and checkpoint one window. Returns null when nothing in it is worth indexing. */
 export async function prepareWindow(sdk: ShaleSDK, connector: ChatConnector, window: ChatWindow,
   settings: ChatWindowSettings): Promise<{ id: string; data: PreparedChatWindow } | null> {

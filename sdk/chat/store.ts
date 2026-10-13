@@ -138,6 +138,13 @@ export class ChatStore {
     })();
   }
 
+  /** Delete messages of a conversation that are not in `keepIds`; returns how many were removed. */
+  retainMessages(conversationId: string, keepIds: string[]): number {
+    return this.db.query(`DELETE FROM ${this.messages} WHERE extension_id=? AND conversation_id=?
+      AND message_id NOT IN (SELECT value FROM json_each(?))`)
+      .run(this.extensionId, conversationId, JSON.stringify(keepIds)).changes;
+  }
+
   loadMessages(conversationId: string, ids: string[]): ChatWindowMessage[] {
     const rows = this.db.query<{ payload: string }, [string, string, string]>(
       `SELECT payload FROM ${this.messages} WHERE extension_id=? AND conversation_id=?

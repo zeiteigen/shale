@@ -28,10 +28,28 @@ globalThis.chrome = {
 };
 const { initializeSettings, settings } =
   await import("../../scripts/browser-chrome-extension/settings.js");
-const { enqueueRecords, outboxItems, updateItems, outboxSummary } =
+const { outboxItems, updateItems, outboxSummary } =
   await import("../../scripts/browser-chrome-extension/outbox.js");
 const { deliverOutbox } =
   await import("../../scripts/browser-chrome-extension/delivery.js");
+const { createHost } =
+  await import("../../scripts/browser-chrome-extension/core/module-host.js");
+// Load the browser module from source so its helpers share the bound runtime.
+const { default: registerBrowser } =
+  await import("../../extensions/browser/chrome/background.js");
+const host = createHost([
+  { id: "browser", register: registerBrowser, inject: ["extract"] },
+]);
+const browser = host.get("browser").runtime;
+const enqueueRecords = async (records, config) => {
+  const previous = local.serverUrl;
+  local.serverUrl = config.serverUrl;
+  try {
+    await browser.enqueue(records);
+  } finally {
+    local.serverUrl = previous;
+  }
+};
 await initializeSettings();
 const collector = local.collectorId;
 await initializeSettings();
@@ -94,11 +112,12 @@ assert.equal(
   (await outboxItems()).find((row) => row.id === "stable").state,
   "indexed",
 );
-assert.equal((await outboxSummary()).sentCount, 1);
+// One delivery pass sends every due batch: one per endpoint here.
+assert.equal((await outboxSummary()).sentCount, 2);
 await deliverOutbox();
 assert.equal((await outboxSummary()).sentCount, 2);
 const { historyStep } =
-  await import("../../scripts/browser-chrome-extension/history-sync.js");
+  await import("../../extensions/browser/chrome/history-sync.js");
 const job = {
   historyWindows: [{ start: 0, end: 2 }],
   counts: { history: 0 },
@@ -115,10 +134,10 @@ assert.equal(job.historyWindows.length, 2);
 await historyStep(job);
 assert.equal(job.incomplete, true);
 assert.match(job.warnings[0], /timestamp/);
-const { createImport, updateImport } =
-  await import("../../scripts/browser-chrome-extension/import-jobs.js");
-const { importJobs } =
-  await import("../../scripts/browser-chrome-extension/outbox.js");
+const { createImport } =
+  await import("../../extensions/browser/chrome/library-import.js");
+const { updateJob: updateImport, jobs: importJobs } =
+  await import("../../scripts/browser-chrome-extension/jobs.js");
 const created = await createImport({
   importTabs: false,
   importBookmarks: false,
@@ -134,9 +153,7 @@ chrome.history.search = async () => {
   await updateImport(created.jobId, "cancel");
   return [];
 };
-const { resumeImports } =
-  await import("../../scripts/browser-chrome-extension/import-jobs.js");
-await resumeImports();
+await host.resumeJobs();
 assert.equal((await importJobs())[0].state, "cancelled");
 console.log("Chrome outbox checks passed");
 const backfillJob = {
@@ -183,7 +200,7 @@ chrome.history.search = async () => {
 await assert.rejects(() => historyStep(windowJob), /unavailable/);
 assert.equal(windowJob.historyWindows.length, 1);
 const { fitCapture } =
-  await import("../../scripts/browser-chrome-extension/capture-budget.js");
+  await import("../../extensions/browser/chrome/capture-budget.js");
 const heavy = {
   ...record,
   textContent: "Meaningful database evidence. ".repeat(1000),

@@ -5,6 +5,11 @@
   "namespace": "browser",
   "subscribe_ingest": "subscribe.ts",
   "checkpoint_recover": "recover.ts",
+  "chrome_module": {
+    "background": "chrome/background.js",
+    "popup": "chrome/popup.js",
+    "inject": { "extract": "chrome/inject/extract.ts" }
+  },
   "crons": [
     {
       "name": "browser-session-aggregator",

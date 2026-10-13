@@ -1,6 +1,5 @@
-import { settings } from "./settings.js";
+import { settings, enqueueRecords, nextSequence } from "./runtime.js";
 import { allowedTab, captureTab } from "./capture.js";
-import { enqueueRecords, nextSequence } from "./outbox.js";
 // Small document/attention state survives worker restarts without persisting page text.
 let queue = Promise.resolve();
 export function serialize(work) {

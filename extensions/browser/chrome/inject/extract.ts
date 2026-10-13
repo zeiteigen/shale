@@ -1,8 +1,6 @@
-import { extractDocument } from "../lib/web-extraction";
+import { extractDocument } from "../../../../lib/web-extraction";
 /** Injection entrypoint returns data directly and never registers persistent listeners. */
-(
-  globalThis as typeof globalThis & { __shaleExtract: () => Promise<unknown> }
-).__shaleExtract = async () => {
+export default async function extract() {
   await new Promise<void>((resolve) => {
     let settled: ReturnType<typeof setTimeout>;
     const finish = () => {
@@ -83,4 +81,4 @@ import { extractDocument } from "../lib/web-extraction";
     canonicalUrl,
     ...retained,
   };
-};
+}

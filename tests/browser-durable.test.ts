@@ -33,6 +33,7 @@ describe("Browser durable processing", () => {
       const request = (payload: any) =>
         new Request("http://local/ingest", {
           method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             target_processor: "browser",
             content: JSON.stringify(payload),
