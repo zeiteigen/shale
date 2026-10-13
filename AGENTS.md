@@ -42,6 +42,7 @@ shale/
 │   ├── obsidian/            # Obsidian vault ingestion, frontmatter/wikilink parsing, note chunking
 │   ├── browser/             # Chrome browser tab sync, session clustering, history/bookmarks ingestion (Chrome module in chrome/)
 │   ├── ai-chats/            # ChatGPT, Claude, and Gemini conversations captured by its Chrome module
+│   ├── search-queries/      # Google, Bing, and DuckDuckGo searches, with opened results and AI Overviews, via its Chrome module
 │   ├── process-image/       # Multimodal visual extraction (layout, OCR, synthetic meaning chunks)
 │   ├── source-linker/       # Cross-source entity discovery and knowledge graph linker
 │   ├── discord/             # Discord ingestion via DiscordChatExporter JSON (import folder + optional sync)
@@ -112,7 +113,7 @@ The Chrome extension in `scripts/browser-chrome-extension` is a core runtime sha
 - **Background entry.** Default-export `register(runtime)` and return a definition:
   - `id` must equal the manifest `name`, which is also the delivery processor;
   - `protocol: { batchType, version, validate }`;
-  - optional `claims.hosts` (the browser module skips those hosts);
+  - optional `claims`: `hosts` and/or a `match(url)` predicate (the browser module skips claimed URLs);
   - `listeners` (`navigation`, `tabComplete`, `alarm`, …);
   - `actions`, called from the popup as `<id>:<action>`;
   - `jobs: { kind: { step, summary } }`;
@@ -255,6 +256,10 @@ bun run scripts/serve-visualizer.ts
   - **Gemini:** read from the open page.
   - **Snapshots:** the active branch only. An edit or regeneration prunes the abandoned branch.
   - **Indexing:** each provider (origin `chatgpt`, `claude`, or `gemini`) has its own `sdk/chat` store. The `ai-chats-index` cron cuts conversation windows into summarised `chat_session` sources.
+- **`extensions/search-queries`**: Turns searches on Google, Bing, and DuckDuckGo into sources, through its Chrome module, which claims only results pages.
+  - **Sources:** one per engine and normalised query (`web_search`, origin `search`). A repeated search updates it.
+  - **Snippets:** Google's AI Overview, then each result opened from the search (same tab or a new tab from the results page; not links followed further).
+  - **Indexing:** admission writes a raw log; the `search-queries-index` cron writes a search's source once it has been quiet for `settleMinutes`.
 - **`extensions/access-classifier`**: Assigns sensitivity tiers to sources, entities, and claims. Heuristics catch credentials, account numbers, PII, sensitive topics, and direct messages; an LLM pass refines them. Access profiles use the tiers.
 - **`extensions/db-backup`**: Hot backup utility. Uses SQLite backup APIs to create consistent database snapshots without stopping host operations.
 

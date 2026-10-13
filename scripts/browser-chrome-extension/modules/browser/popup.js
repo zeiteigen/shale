@@ -13,7 +13,6 @@ var social = [
 var TEMPLATE = `
   <section data-ref="onboarding" class="card onboarding-card hidden">
     <div class="onboarding-content"><div class="onboarding-header">
-      <span class="onboarding-icon">\uD83D\uDE80</span>
       <div><h3>Ready for your first sync</h3>
       <p>Choose exactly what Shale should import in the Browser library section below.</p></div>
     </div></div>
@@ -42,13 +41,13 @@ var TEMPLATE = `
       </div>
     </div>
     <label class="checkbox-row"><input type="checkbox" data-ref="historyVisits"><span>Backfill individual visits (up to 500 per URL)</span></label>
-    <button data-ref="startImport" class="btn btn-primary btn-full mt-2"><span class="btn-icon">\uD83D\uDCE5</span><span>Import selected data</span></button>
+    <button data-ref="startImport" class="btn btn-primary btn-full mt-2"><span>Import selected data</span></button>
     <div class="import-actions mt-1">
       <button data-ref="resetSync" class="btn-link" title="Reset state to test initial onboarding again">Show first-sync message again</button>
     </div>
   </section>
   <section class="card session-card">
-    <div class="card-header"><span class="card-title">Capture status</span><span class="badge">Live Tracking</span></div>
+    <div class="card-header"><span class="card-title">Capture status</span><span class="badge">Live tracking</span></div>
     <div class="session-info">
       <div class="info-row"><span class="label">Collector:</span><span data-ref="collector" class="val code">-</span></div>
       <div class="stats-row">
@@ -56,35 +55,39 @@ var TEMPLATE = `
         <div class="stat-box"><span data-ref="received" class="stat-number">0</span><span class="stat-label">Received by server</span></div>
       </div>
     </div>
-    <label for="browserGoal">Researching</label>
-    <input id="browserGoal" data-ref="goal" class="text-input" maxlength="300" placeholder="Optional goal for new activity">
-    <button data-ref="saveGoal" class="btn btn-sm">Save goal</button>
+    <div class="form-group mt-2">
+      <label for="browserGoal" class="field-label">Researching</label>
+      <div class="input-with-button">
+        <input id="browserGoal" data-ref="goal" class="text-input" maxlength="300" placeholder="Optional goal for new activity">
+        <button data-ref="saveGoal" class="btn btn-sm">Save goal</button>
+      </div>
+    </div>
   </section>
   <section class="card">
     <div class="card-header"><span class="card-title">Capture now</span></div>
     <div class="action-grid">
-      <button data-action="ingest_current_tab" class="btn btn-primary"><span class="btn-icon">⚡</span><span>Capture this page</span></button>
-      <button data-action="ingest_all_tabs" class="btn btn-secondary"><span class="btn-icon">\uD83D\uDCD1</span><span>Capture open tabs</span></button>
-      <button data-action="sync_history" class="btn btn-secondary"><span class="btn-icon">\uD83D\uDD52</span><span>Sync History (24h)</span></button>
-      <button data-action="sync_bookmarks" class="btn btn-secondary"><span class="btn-icon">⭐</span><span>Sync Bookmarks</span></button>
+      <button data-action="ingest_current_tab" class="btn btn-primary"><span>Capture this page</span></button>
+      <button data-action="ingest_all_tabs" class="btn btn-secondary"><span>Capture open tabs</span></button>
+      <button data-action="sync_history" class="btn btn-secondary"><span>Sync history (24h)</span></button>
+      <button data-action="sync_bookmarks" class="btn btn-secondary"><span>Sync bookmarks</span></button>
     </div>
   </section>
   <details class="card settings-card">
     <summary>Browser privacy</summary>
     <div class="setting-item toggle-row">
-      <label for="browserAutoSync" class="toggle-label"><span class="setting-name">Live Active Page Sync</span>
+      <label for="browserAutoSync" class="toggle-label"><span class="setting-name">Live active page sync</span>
         <span class="setting-desc">Capture navigation and attention; private pages are excluded</span></label>
       <input type="checkbox" id="browserAutoSync" data-ref="autoSync" class="toggle-input">
     </div>
     <div class="setting-item toggle-row">
-      <label for="browserSocial" class="toggle-label"><span class="setting-name">Exclude Social Media</span>
+      <label for="browserSocial" class="toggle-label"><span class="setting-name">Exclude social media</span>
         <span class="setting-desc">Filter X, Reddit, Instagram, etc.</span></label>
       <input type="checkbox" id="browserSocial" data-ref="social" class="toggle-input">
     </div>
     <div class="setting-item form-group">
-      <label for="browserExclusions" class="field-label">Custom Excluded Domains (one per line)</label>
+      <label for="browserExclusions" class="field-label">Custom excluded domains (one per line)</label>
       <textarea id="browserExclusions" data-ref="exclusions" class="textarea-input" rows="2" placeholder="mail.google.com&#10;reddit.com"></textarea>
-      <button data-ref="saveExclusions" class="btn btn-sm btn-full mt-1">Update Exclusions</button>
+      <button data-ref="saveExclusions" class="btn btn-sm btn-full mt-1">Update exclusions</button>
     </div>
   </details>`;
 function render(container, popup) {

@@ -1,0 +1,15 @@
+{
+  "name": "search-queries",
+  "namespace": "search-queries",
+  "version": "0.1.0",
+  "description": "Turns your Google, Bing, and DuckDuckGo searches into sources, with the results you opened and Google's AI Overview as snippets. Captured by the Shale Chrome extension.",
+  "subscribe_ingest": "subscribe.ts",
+  "chrome_module": {
+    "background": "chrome/background.ts",
+    "popup": "chrome/popup.ts",
+    "inject": { "serp": "chrome/inject/serp.ts" }
+  },
+  "crons": [
+    { "name": "search-queries-index", "schedule": "*/2 * * * *", "script": "index.ts", "run_on_startup": true }
+  ]
+}

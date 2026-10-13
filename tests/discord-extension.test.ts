@@ -7,6 +7,8 @@ import { run } from "../extensions/discord";
 import { run as sync } from "../extensions/discord/sync";
 import { run as recover } from "../extensions/discord/recover";
 import { exporterArgs, parseListing } from "../extensions/discord/dce";
+import { ProgressiveImport } from "../extensions/discord/progressive-import";
+import { discordConnector } from "../extensions/discord/connector";
 import { summarizeOutput } from "../extensions/discord/dce-runner";
 import { parseDiscordExport } from "../extensions/discord/parse-dce";
 import { auth } from "../extensions/discord/auth";
@@ -191,9 +193,10 @@ describe("discord extension", () => {
     expect(parseListing("0                   | Direct Messages\n1306680826402050048 | Shale Dev\n  * 42 | Thread / ideas\nExporting...\n"))
       .toEqual([{ id: "1306680826402050048", name: "Shale Dev" }, { id: "42", name: "Thread / ideas" }]);
     expect(exporterArgs("200", "/out", { includeThreads: "active", initialSyncDays: 1 }, null, T0)).toEqual(
-      ["export", "-c", "200", "-f", "Json", "-o", "/out/%c.json", "--include-threads", "Active", "--after", new Date(T0 - 86_400_000).toISOString()]);
+      ["export", "-c", "200", "-f", "Json", "-o", "/out/%c.json", "--include-threads", "Active", "--after", new Date(T0 - 86_400_000).toISOString(), "--parallel", "3"]);
     // Full history by default; a watermark always wins.
-    expect(exporterArgs("200", "/out", {}, null)).toEqual(["export", "-c", "200", "-f", "Json", "-o", "/out/%c.json", "--include-threads", "All"]);
+    expect(exporterArgs("200", "/out", {}, null)).toEqual(["export", "-c", "200", "-f", "Json", "-o", "/out/%c.json", "--include-threads", "All", "--parallel", "3"]);
+    expect(exporterArgs("200", "/out", { exportParallel: 1 }, null)).not.toContain("--parallel");
     expect(exporterArgs("200", "/out", {}, "2026-01-01T00:00:00.000Z")).toContain("2026-01-01T00:00:00.000Z");
   });
 
@@ -202,6 +205,46 @@ describe("discord extension", () => {
     const output = "Resolving channel(s)...\nERROR\nDiscordChatExporter.Core.Exceptions.DiscordChatExporterException: Request to 'channels/1423745568038977557' failed: forbidden.\n"
       + "   at DiscordChatExporter.Core.Discord.DiscordClient.GetJsonResponseAsync(String url, CancellationToken cancellationToken)\n".repeat(7);
     expect(summarizeOutput(output)).toBe("Request to 'channels/1423745568038977557' failed: forbidden.");
+  });
+
+  it("ingests finished thread files while a long export is still running", async () => {
+    const out = join(directory, "progressive");
+    mkdirSync(out);
+    const thread = (id: string) => JSON.stringify(dceExport([dceMessage(`${id}1`, 0, "a"), dceMessage(`${id}2`, 1, "b")],
+      { id, type: "GuildPublicThread", name: `thread ${id}`, category: "forum" }));
+    let indexed = 0;
+    const ingest = new ProgressiveImport(sdk, discordConnector(sdk), out, async () => { indexed++; }, 0, 5, 0);
+    writeFileSync(join(out, "11.json"), thread("11"));
+    writeFileSync(join(out, "12.json"), thread("12").slice(0, 40)); // still being written
+    const watching = ingest.watch();
+    await Bun.sleep(60);
+    expect(ingest.changed).toBe(2);
+    expect(ingest.files).toBe(1);
+    expect(indexed).toBeGreaterThan(0);
+    expect(count("SELECT 1 FROM discord_messages")).toBe(2);
+    writeFileSync(join(out, "12.json"), thread("12"));
+    ingest.stop();
+    await watching;
+    expect(await ingest.finish()).toMatchObject({ changed: 4 });
+    expect(count("SELECT 1 FROM discord_messages")).toBe(4);
+  });
+
+  it("indexes imported messages when the interval elapses without another file arriving", async () => {
+    const out = join(directory, "idle-export");
+    mkdirSync(out);
+    writeFileSync(join(out, "200.json"), JSON.stringify(dceExport([dceMessage("10", 0, "hello")])));
+    let indexed = 0;
+    const ingest = new ProgressiveImport(sdk, discordConnector(sdk), out, async () => { indexed++; }, 0, 5, 30);
+    const watching = ingest.watch();
+    try {
+      const deadline = Date.now() + 1000;
+      while (!indexed && Date.now() < deadline) await Bun.sleep(5);
+      expect(ingest.changed).toBe(1);
+      expect(indexed).toBe(1);
+    } finally {
+      ingest.stop();
+      await watching;
+    }
   });
 
   it("sweeps every server and DM the account can see, one channel at a time", async () => {

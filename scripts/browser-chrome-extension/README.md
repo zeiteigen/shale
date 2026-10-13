@@ -3,6 +3,7 @@
 Chrome/Chromium 106 or newer. The extension is a shared core that hosts **modules** contributed by Shale extensions:
 - **Browser** (`extensions/browser/chrome`) captures readable page content, navigation and attention observations, bookmarks, and history.
 - **AI chats** (`extensions/ai-chats/chrome`) captures ChatGPT, Claude, and Gemini conversations from tabs where you are signed in; see [its README](../../extensions/ai-chats/README.md).
+- **Search queries** (`extensions/search-queries/chrome`) captures Google, Bing, and DuckDuckGo searches, the results you open from them, and Google's AI Overview; see [its README](../../extensions/search-queries/README.md).
 
 ## Install or upgrade
 
@@ -36,7 +37,9 @@ It contains nothing specific to one Shale extension. Each extension declares its
 **Background entry.** It default-exports `register(runtime)`, which returns:
 - `id`: the extension name, which is also the `/ingest` processor.
 - `protocol`: `{ batchType, version, validate }`. Records are validated when queued and sent as `{ type: batchType, protocolVersion: version, collectorId, batchId, records }` with `target_processor: id`.
-- `claims.hosts`: hosts the module owns. Other modules, such as browser capture, skip them while it is enabled.
+- `claims`: what the module owns. Other modules, such as browser capture, skip it while the module is enabled.
+  - `hosts`: whole hosts, such as `chatgpt.com`.
+  - `match(url)`: a predicate for individual URLs, such as search results pages, which leaves the rest of the host to other modules.
 - `listeners`: `navigation`, `tabComplete`, `tabActivated`, `windowFocus`, `tabRemoved`, `idle`, `alarm` (each minute), `bookmark*`, `history*`.
 - `actions`: popup commands, sent as `<id>:<action>`.
 - `jobs`: `{ kind: { step(job), summary(job), stepsPerWake? } }` for resumable work.

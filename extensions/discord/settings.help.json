@@ -104,6 +104,15 @@
         "max": 1440
       }
     },
+    "exportParallel": {
+      "type": "number",
+      "description": "Threads exported at once within a channel (forums can have hundreds). The exporter still respects Discord's rate limits.",
+      "default": 3,
+      "range": {
+        "min": 1,
+        "max": 8
+      }
+    },
     "gapMinutes": {
       "type": "number",
       "description": "A silence longer than this starts a new conversation window (one searchable source per window).",

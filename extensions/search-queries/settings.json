@@ -1,0 +1,7 @@
+{
+  "engines": ["google", "bing", "duckduckgo"],
+  "captureAiOverview": true,
+  "settleMinutes": 5,
+  "maxQueriesPerRun": 200,
+  "namespace": "search-queries"
+}

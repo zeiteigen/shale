@@ -4,7 +4,7 @@ import type { ShaleSDK } from "@shale/sdk";
 import type { ChatConnector } from "@shale/sdk/chat/commit";
 import { resolveDataPath } from "@shale/sdk/chat/paths";
 import { DISCORD_DEFAULTS, type DiscordSettings } from "./settings.types";
-import { importExportFile, jsonFiles } from "./import-folder";
+import { ProgressiveImport } from "./progressive-import";
 import { discordToken } from "./auth";
 import { dceCommand } from "./dce-binary";
 import { Exporter, PartialExportError } from "./dce-runner";
@@ -50,6 +50,8 @@ export function exporterArgs(channelId: string, outDir: string, settings: Discor
   const args = ["export", "-c", channelId, "-f", "Json", "-o", join(outDir, "%c.json")];
   if (threads !== "none") args.push("--include-threads", threads === "active" ? "Active" : "All");
   if (after) args.push("--after", after);
+  const parallel = Math.max(1, Math.floor(settings.exportParallel ?? DISCORD_DEFAULTS.exportParallel));
+  if (parallel > 1) args.push("--parallel", String(parallel));
   if (settings.downloadMedia) args.push("--media", "--reuse-media", "--media-dir", join(resolveDataPath(settings.exportDir ?? DISCORD_DEFAULTS.exportDir), "media"));
   return args;
 }
@@ -89,18 +91,18 @@ export async function syncDiscord(sdk: ShaleSDK, connector: ChatConnector, setti
     try {
       await mkdir(outDir, { recursive: true });
       let partial: PartialExportError | undefined;
-      try {
-        await exporter.run(exporterArgs(channel.id, outDir, settings, sdk.state.getWatermark(stateKey)), timeout);
-      } catch (error) {
-        if (!(error instanceof PartialExportError)) throw error;
-        partial = error;
+      // Thread-heavy channels (forums) take a long time; ingest each finished file while the export continues.
+      const ingest = new ProgressiveImport(sdk, connector, outDir, afterChannel);
+      const exporting = exporter.run(exporterArgs(channel.id, outDir, settings, sdk.state.getWatermark(stateKey)), timeout)
+        .finally(() => ingest.stop());
+      // Even if indexing fails, let the exporter finish before cleaning up its output directory.
+      const [watching, exported] = await Promise.allSettled([ingest.watch(), exporting]);
+      if (watching.status === "rejected") throw watching.reason;
+      if (exported.status === "rejected") {
+        if (!(exported.reason instanceof PartialExportError)) throw exported.reason;
+        partial = exported.reason;
       }
-      let newest = 0, changed = 0;
-      for await (const path of jsonFiles(outDir)) {
-        const imported = await importExportFile(connector, path);
-        changed += imported.changed;
-        newest = Math.max(newest, imported.newest);
-      }
+      const { newest, changed } = await ingest.finish();
       // Advance only after every file committed; re-fetching one second keeps same-second messages.
       if (newest && !partial) sdk.state.setWatermark(new Date(newest - 1000).toISOString(), stateKey);
       sdk.state.delete(`forbidden:${channel.id}`);
@@ -111,7 +113,8 @@ export async function syncDiscord(sdk: ShaleSDK, connector: ChatConnector, setti
         sdk.logger.error(`Discord sync incomplete for ${channel.label}:`, partial.message);
       }
       if (changed) {
-        sdk.logger.log(`Discord sync [${index + 1}/${channels.length}] ${channel.label}: ${changed} new/edited message(s).`);
+        sdk.logger.log(`Discord sync [${index + 1}/${channels.length}] ${channel.label}: ${changed} new/edited message(s)`
+          + `${ingest.files > 1 ? ` in ${ingest.files} file(s) (channel + threads)` : ""}.`);
         await afterChannel?.();
       }
     } catch (error) {

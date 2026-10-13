@@ -1,0 +1,10 @@
+{
+  "extension": "search-queries",
+  "settings": {
+    "engines": { "type": "string[]", "description": "Search engines whose results pages the Chrome extension's search module captures and the server accepts: google, bing, duckduckgo. Searches on an engine not listed are skipped.", "default": ["google", "bing", "duckduckgo"], "examples": [["google"]] },
+    "captureAiOverview": { "type": "boolean", "description": "Save Google's AI Overview as snippets of the search's source.", "default": true, "possibleValues": [true, false] },
+    "settleMinutes": { "type": "number", "description": "A search is indexed only after this long without new activity, so results you open shortly after searching land in one update of its source.", "default": 5, "range": { "min": 0, "max": 1440 } },
+    "maxQueriesPerRun": { "type": "number", "description": "Most searches one run of the search-queries-index cron indexes; the next run continues with the rest.", "default": 200, "range": { "min": 1, "max": 10000 } },
+    "namespace": { "type": "string", "description": "Namespace for search sources and graph entities.", "default": "search-queries" }
+  }
+}

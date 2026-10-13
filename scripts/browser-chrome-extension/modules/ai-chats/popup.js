@@ -9,7 +9,7 @@ function render(container, popup) {
         <span class="badge badge-subtle">ChatGPT · Claude · Gemini</span>
       </div>
       <p class="card-description">Conversations are captured when you open them in a signed-in tab. Sync fetches every changed ChatGPT or Claude conversation; Gemini is captured as you view it.</p>
-      <button data-ref="capture" class="btn btn-primary btn-full"><span class="btn-icon">\uD83D\uDCAC</span><span>Capture this chat</span></button>
+      <button data-ref="capture" class="btn btn-primary btn-full"><span>Capture this chat</span></button>
       <div data-ref="providers"></div>
     </section>`;
   const ref = (name) => container.querySelector(`[data-ref="${name}"]`);

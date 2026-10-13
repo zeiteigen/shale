@@ -26,18 +26,20 @@ export function createHost(registry) {
       const config = await settings();
       return modules.filter((m) => moduleEnabled(config, m.id));
     },
-    /** The enabled module that claims a URL's host, if any. */
+    /** The enabled module that claims a URL, by its host or its own `claims.match(url)`, if any. */
     async claimant(url) {
-      let hostname;
+      let parsed;
       try {
-        hostname = new URL(url).hostname.toLowerCase();
+        parsed = new URL(url);
       } catch {
         return undefined;
       }
-      return (await host.enabled()).find((m) =>
-        (m.definition.claims?.hosts || []).some((h) =>
-          hostMatches(hostname, h.toLowerCase()),
-        ),
+      const hostname = parsed.hostname.toLowerCase();
+      return (await host.enabled()).find(
+        (m) =>
+          (m.definition.claims?.hosts || []).some((h) =>
+            hostMatches(hostname, h.toLowerCase()),
+          ) || !!m.definition.claims?.match?.(parsed),
       )?.id;
     },
     handlerFor(job) {

@@ -18,6 +18,7 @@ export interface DiscordSettings extends ChatWindowSettings {
   exportDir?: string;
   keepExports?: boolean;
   syncTimeoutMinutes?: number;
+  exportParallel?: number;
   namespace?: string;
 }
 
@@ -29,4 +30,5 @@ export const DISCORD_DEFAULTS = {
   includeThreads: "all" as DiscordThreadMode,
   initialSyncDays: 0,
   syncTimeoutMinutes: 120,
+  exportParallel: 3,
 };

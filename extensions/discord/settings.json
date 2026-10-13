@@ -13,6 +13,7 @@
   "exportDir": "./data/discord/exports",
   "keepExports": false,
   "syncTimeoutMinutes": 120,
+  "exportParallel": 3,
   "gapMinutes": 30,
   "maxWindowMessages": 120,
   "maxWindowChars": 11000,

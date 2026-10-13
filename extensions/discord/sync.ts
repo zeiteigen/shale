@@ -12,6 +12,7 @@ export async function run(sdkOverride?: ShaleSDK) {
     return null;
   }
   const connector = discordConnector(sdk, settings);
+  // Hourly and long-running: wait out an import that is indexing rather than skip the hour.
   return withChatLease(sdk, async () => {
     // Index as channels arrive so a long first sweep becomes searchable progressively.
     const indexed = { windows: 0, indexed: 0, errors: [] as string[] };
@@ -24,7 +25,7 @@ export async function run(sdkOverride?: ShaleSDK) {
     sdk.logger.log(`Discord sync: ${synced.channels} channel(s) checked, ${synced.skipped} skipped, ${synced.messages} new/edited messages, `
       + `indexed ${indexed.indexed} window(s), ${synced.errors.length + indexed.errors.length} error(s).`);
     return { synced, indexed };
-  });
+  }, { waitMs: 30 * 60_000 });
 }
 
 if (import.meta.main) {

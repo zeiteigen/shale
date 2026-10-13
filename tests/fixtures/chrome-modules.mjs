@@ -372,6 +372,7 @@ assert.deepEqual(
   [
     ["browser", true],
     ["ai-chats", false],
+    ["search-queries", true],
   ],
 );
 console.log("Chrome module checks passed");
