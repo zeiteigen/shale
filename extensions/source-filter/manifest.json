@@ -1,0 +1,14 @@
+{
+  "name": "source-filter",
+  "namespace": "source-filter",
+  "version": "1.0.0",
+  "description": "Sweeps retained automatic captures for clear noise with deterministic triage and LLM review of suspicious cases.",
+  "crons": [
+    {
+      "name": "source-filter-cron",
+      "schedule": "*/30 * * * *",
+      "script": "index.ts",
+      "run_on_startup": true
+    }
+  ]
+}

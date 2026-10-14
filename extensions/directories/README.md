@@ -5,7 +5,7 @@ Recursively index selected local folders into Shale, without requiring an Obsidi
 Choose folders in **Settings → directories** in the local web interface, or use the settings CLI:
 
 ```bash
-bun run settings set directories directories '["/home/munch/Documents", "/home/munch/Projects/notes"]'
+bun run settings set directories directories '["/home/user/Documents", "/home/user/Projects/notes"]'
 ```
 
 Start the host with `bun run start` and open `http://localhost:7425`. Run `directories-parser-cron` from **Overview → Background jobs**, or use the web command console:

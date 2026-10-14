@@ -139,7 +139,7 @@ export function nameKeys(label: string): string[] {
 }
 
 /**
- * `acronym:` key. Long names contribute their initials ("University of Waterloo High Performance Computing" → uwhpc);
+ * `acronym:` key. Long names contribute their initials ("Northbridge High Performance Computing" → nhpc);
  * short all-caps style names contribute themselves, so both sides of an expansion meet on one key.
  */
 export function acronymKeys(label: string): string[] {

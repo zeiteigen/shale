@@ -19,14 +19,14 @@ The initial worktree adds source digests, typed entity descriptions and registry
 
 A follow-up recovery through the reloaded host committed nine more saved windows: the digest count reached **105** and the checkpoint queue was empty at that check. The extractor's next model batch remained running. This is a later observation than the comparison table above.
 
-The **UWHPC onboarding-to-interview evaluation now passes on real data**. The Discord announcement, five matching GitHub pages, and both matching emails resolve to canonical episode 13102, “UWHPC Onboarding Interview & Repo Setup.” The normal extractor and local model produced the digests; normal model-reviewed consolidation connected the split stories. No episode membership was forced to pass the evaluation.
+A cross-source episode evaluation passed using normal extraction and model-reviewed consolidation, without forcing episode membership.
 
 Corrections made during this pass:
 
 - Independent extensions start concurrently; jobs within one extension retain their startup order.
 - Truncated classifier text iterators use dedicated, finalized SQLite statements. Verbose reasons are bounded without discarding valid tiers, output space scales with record count, and rejected model bodies are kept out of warnings. A live run refined 20 sources with zero failures.
 - Later extraction windows reopen episode assignment. Focused extraction can reproduce individual source failures through the normal lease, validation, and checkpoints.
-- Connector-known absence of the user suppresses personal activities. Three cached activities were repaired with their previous values recorded in extension state. The unsupported CCIR alias on the UWHPC episode was removed through the scoped, audited mutation API (change `01a1345d-1ed7-7656-a0fe-a89bfc4fcc07`). Observer activities cannot create episode aliases.
+- Connector-known absence of the user suppresses personal activities. Observer activities cannot create episode aliases; unsupported aliases can be removed through the scoped, audited mutation API.
 - Recurring organizations/projects/courses/opportunities can enter model review before a second story is started. Unmatched context is reconsidered after related episode evidence changes; ubiquitous entities do not reopen decisions.
 - Consolidation compares canonical identities, considers specific shared pursuit entities, and reconsiders declined pairs after evidence changes. Evaluation follows complete merge chains.
 - Episode assignment, source ingestion, and chat-window commit reserve the SQLite writer before reads. Real second-process regression tests reproduce contention and verify successful waiting and checkpoint recovery. The failed email window was committed, its attempts reset to zero, and email checkpoints cleared without another model call.
@@ -52,7 +52,7 @@ Remaining work:
 1. Continue monitoring the live recovery/extraction/classifier runs and the substantial undigested backlog. Checkpoint counts and progress must be read fresh.
 2. Resolve the fourteen unsupported claims without fabricating citations.
 3. Investigate four directory screenshot requests that exceeded 120 seconds. The timeout covers the routed request and HTTP model call; same-resource nested model reservations reuse the outer reservation. A read-only single-image diagnostic on a 2,512×1,158 screenshot did not finish; backend snapshots showed the same request processing with zero decoded tokens. The diagnostic was stopped after more than two minutes and made no graph commit. It used the direct SDK description path, whose HTTP timeout permits retries, so it does not measure the routed request deadline. The backend uses CPU image projection (`--no-mmproj-offload`); queue delay versus projection/generation latency still requires controlled measurement. No image quality or timeout setting was changed.
-4. Improve coverage and evaluate more real pursuits, beyond the single UWHPC thread.
+4. Improve coverage and evaluate more real pursuits, across multiple cross-source threads.
 5. Correct episode merge undo and assess summary provenance after explicit detachment. Merge copies membership/involvement bookkeeping which generic entity unmerge does not reverse. Source archival visibility has been corrected and tested; detachment removes and retracts membership while retaining the previously generated narrative until consolidation, so its content provenance still needs work.
 
 Useful commands:

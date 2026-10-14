@@ -61,7 +61,7 @@ export function digestContext(sdk: ShaleSDK, source: DigestSource, chunks: Extra
   const web = /^https?:\/\//.test(source.uri);
   const keys: IdentityKey[] = [...(web ? urlKeys(source.uri) : []), ...urls.slice(0, 20).flatMap(urlKeys),
     ...emails.slice(0, 10).flatMap(emailKeys),
-    // "UW HPC" in the text should find the registry's "UWHPC" even though full-text tokens differ.
+    // "NH PC" in the text should find the registry's "NHPC" even though full-text tokens differ.
     ...namePhrases(`${source.title}\n${text}`).flatMap(phrase => [...nameKeys(phrase).map(value => ({ kind: 'name', value })),
       ...acronymKeys(phrase).map(value => ({ kind: 'acronym', value }))])];
   const { people, venues } = connectorContext(sdk, source.source_id);

@@ -93,13 +93,13 @@ function digestInstructions(digest: DigestContext, first: boolean) {
 About this source:
 ${digest.header.map(line=>`  ${line}`).join('\n')}${digest.userAbsent ? '\nThe user did not take part: use observer involvement and null activity. This source may still provide context for an episode.' : ''}
 Entity types: ${ONTOLOGY}. Prefer the specific things a person deals with (organizations, projects, opportunities, artifacts, people, events) over generic concepts.
-For each entity also give: description (one line saying what it is, from this source), searchKeys (acronyms, expansions, or alternate spellings someone might use, e.g. "UWHPC" for "University of Waterloo High Performance Computing"), urls (links or email addresses copied from the source that identify it, e.g. its repository or website), and match.
+For each entity also give: description (one line saying what it is, from this source), searchKeys (acronyms, expansions, or alternate spellings someone might use, e.g. "NHPC" for "Northbridge High Performance Computing"), urls (links or email addresses copied from the source that identify it, e.g. its repository or website), and match.
 Known entities (id: name [type]). Set match to the id when an entity is the same real-world thing as a known entity, even if named differently; otherwise null. Do not match merely related things.
 ${registry}${first ? `
 Also return, for the whole source:
   summary: 2-4 sentences on what happened or what it says, naming the specific organizations, projects, and people.
   involvement: how the user took part: "author" (wrote or created it), "participant" (sent messages, applied, attended, was addressed), "observer" (read or visited it), or "none".
-  activity: if the user is pursuing something that spans time (applying or onboarding somewhere, a project, a course, a job search, planning an event, a purchase), {label: short name such as "UWHPC onboarding", kind: application|project|learning|event|purchase|social|admin|research|other, stage: where it stands in this source, episode: id of the ongoing episode below that this continues, or "new", or null, confidence: 0..1}; otherwise null.
+  activity: if the user is pursuing something that spans time (applying or onboarding somewhere, a project, a course, a job search, planning an event, a purchase), {label: short name such as "NHPC onboarding", kind: application|project|learning|event|purchase|social|admin|research|other, stage: where it stands in this source, episode: id of the ongoing episode below that this continues, or "new", or null, confidence: 0..1}; otherwise null.
 Ongoing episodes (id: title - latest step):
 ${episodes}` : ''}`;
 }

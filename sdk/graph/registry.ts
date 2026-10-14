@@ -166,7 +166,7 @@ function entry(db: Database, id: number, basis: string[]): RegistryEntry | null 
 
 /**
  * Shortlist registry entities for a model prompt: key matches first, then BM25 over registry text.
- * A single OR query lets FTS5's IDF favour rare terms such as "uwhpc" over common ones.
+ * A single OR query lets FTS5's IDF favour rare terms such as "nhpc" over common ones.
  */
 export function shortlist(db: Database, options: { keys?: IdentityKey[]; texts?: string[]; limit?: number;
   types?: string[]; excludeTypes?: string[]; exclude?: number[] }): RegistryEntry[] {

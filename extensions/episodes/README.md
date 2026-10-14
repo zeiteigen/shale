@@ -1,6 +1,6 @@
 # Episodes
 
-An episode is one of the user's pursuits that spans sources over time: applying to a club, building a project, a job search, planning a trip. For example, "Joining UWHPC" covers three sources:
+An episode is one of the user's pursuits that spans sources over time: applying to a club, building a project, a job search, planning a trip. For example, "Joining NHPC" covers three sources:
 
 - the onboarding thread on the club's Discord;
 - the fork of its onboarding repository on GitHub;
@@ -27,7 +27,7 @@ Candidate episodes are those involving any signal. Each candidate is scored as:
 
 `Σ idf(shared entity) × (0.4 + 0.6 × recency) + 2 if the digest named the episode`
 
-IDF is computed over digested sources, so the user, or a platform that appears everywhere, adds almost nothing. A rare name such as "UWHPC" adds a lot.
+IDF is computed over digested sources, so the user, or a platform that appears everywhere, adds almost nothing. A rare name such as "NHPC" adds a lot.
 
 **Decisions.**
 

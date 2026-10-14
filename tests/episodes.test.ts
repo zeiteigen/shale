@@ -30,7 +30,7 @@ function fixture() {
 
 it('weighs rare entities over common ones and ignores ubiquitous ones', () => {
   const { sdk, entity, digest } = fixture();
-  const common = entity('Discord'), rare = entity('UWHPC');
+  const common = entity('Discord'), rare = entity('NHPC');
   for (let index = 0; index < 30; index++) digest(`s${index}`, index * DAY, index < 2 ? [common, rare] : [common]);
   recordSignals(sdk);
   expect(idf(sdk, rare, 30)).toBeGreaterThan(2.5);
@@ -43,10 +43,10 @@ it('weighs rare entities over common ones and ignores ubiquitous ones', () => {
 
 it('starts episodes only for the user, attaches clear matches, and reviews the middle band', () => {
   const { sdk, entity, digest } = fixture();
-  const org = entity('UWHPC'), other = entity('Waterloo Rocketry');
+  const org = entity('NHPC'), other = entity('Northbridge Rocketry');
   for (let index = 0; index < 20; index++) digest(`filler${index}`, index * DAY, [entity(`Filler ${index}`)], 'none');
-  digest('start', 100 * DAY, [org], 'participant', { label: 'UWHPC onboarding', kind: 'application' });
-  digest('progress', 101 * DAY, [org], 'author', { label: 'UWHPC onboarding', kind: 'application', stage: 'submitted' });
+  digest('start', 100 * DAY, [org], 'participant', { label: 'NHPC onboarding', kind: 'application' });
+  digest('progress', 101 * DAY, [org], 'author', { label: 'NHPC onboarding', kind: 'application', stage: 'submitted' });
   digest('bystander', 102 * DAY, [org], 'none');
   digest('unrelated', 103 * DAY, [other], 'observer');
   digest('aside', 104 * DAY, [other], 'participant');
@@ -78,14 +78,14 @@ it('adds columns introduced after the story tables first shipped', () => {
 
 it('reviews a recurring organization before splitting its pursuit, while keeping generic platforms out of the lower band', () => {
   const { sdk, entity, digest } = fixture();
-  const organization = entity('UWHPC'), platform = entity('GitHub', 'Product');
+  const organization = entity('NHPC'), platform = entity('GitHub', 'Product');
   for (let index = 0; index < 40; index++)
     digest(`background-${index}`, DAY, index < 17 ? [organization, platform] : [entity(`Other ${index}`)], 'none');
-  digest('interview', 2 * DAY, [organization], 'participant', { label: 'UWHPC interview', kind: 'application' });
+  digest('interview', 2 * DAY, [organization], 'participant', { label: 'NHPC interview', kind: 'application' });
   digest('generic-visit', 2 * DAY, [platform], 'observer');
   recordSignals(sdk);
   const store = new EpisodeStore(sdk.database, sdk.graph);
-  const onboarding = store.create({ title: 'UWHPC onboarding', kind: 'application', at: DAY });
+  const onboarding = store.create({ title: 'NHPC onboarding', kind: 'application', at: DAY });
   const unrelated = store.create({ title: 'Repository maintenance', kind: 'project', at: DAY });
   store.involve(onboarding, organization, 1); store.involve(unrelated, platform, 1);
   const assigner = new Assigner(sdk, DEFAULTS);
@@ -103,7 +103,7 @@ it('re-attaches a detached source, finds episodes by text among other registry e
   const { sdk, entity, digest } = fixture();
   digest('a', DAY, []);
   const store = new EpisodeStore(sdk.database, sdk.graph);
-  const episode = store.create({ title: 'UWHPC onboarding', kind: 'application', at: DAY });
+  const episode = store.create({ title: 'NHPC onboarding', kind: 'application', at: DAY });
   const attach = () => store.attach(episode, 'a', { role: 'progress', step: 's', at: DAY, confidence: 1, status: 'accepted', basis: 't' });
   attach();
   store.detach(episode, 'a', 'test', 'wrong episode');
@@ -112,9 +112,9 @@ it('re-attaches a detached source, finds episodes by text among other registry e
   expect(store.isMember(episode, 'a')).toBe(true);
   expect(store.ofSource('a')).toEqual([episode]);
 
-  for (let index = 0; index < 30; index++) indexEntity(sdk.database, entity(`UWHPC member ${index}`, 'Person'));
+  for (let index = 0; index < 30; index++) indexEntity(sdk.database, entity(`NHPC member ${index}`, 'Person'));
   indexEntity(sdk.database, episode);
-  expect(shortlist(sdk.database, { texts: ['UWHPC'], types: ['Episode'], limit: 5 }).map(entry => entry.id)).toEqual([episode]);
+  expect(shortlist(sdk.database, { texts: ['NHPC'], types: ['Episode'], limit: 5 }).map(entry => entry.id)).toEqual([episode]);
 
   sdk.database.run("UPDATE graph_source_digests SET episode_state='review' WHERE source_id='a'");
   await assign(sdk, DEFAULTS);
@@ -123,10 +123,10 @@ it('re-attaches a detached source, finds episodes by text among other registry e
 
 it('reviews split pursuits across merged organization identities and reconsiders declines after new evidence', () => {
   const { sdk, entity, db } = fixture();
-  const org = entity('UWHPC'), alias = entity('UWaterloo High Performance Computing'), platform = entity('GitHub', 'Product');
+  const org = entity('NHPC'), alias = entity('Northbridge High Performance Computing'), platform = entity('GitHub', 'Product');
   const store = new EpisodeStore(db, sdk.graph);
-  const first = store.create({ title: 'UWHPC onboarding', kind: 'application', at: DAY });
-  const second = store.create({ title: 'UWHPC interview', kind: 'application', at: 2 * DAY });
+  const first = store.create({ title: 'NHPC onboarding', kind: 'application', at: DAY });
+  const second = store.create({ title: 'NHPC interview', kind: 'application', at: 2 * DAY });
   store.involve(first, alias, 1);
   sdk.graph.entities.merge(alias, org, 'Same club');
   store.involve(second, org, 1);
@@ -141,13 +141,13 @@ it('reviews split pursuits across merged organization identities and reconsiders
 
 it('reconsiders unmatched context when a later source establishes the pursuit', async () => {
   const { sdk, entity, digest } = fixture();
-  const org = entity('UWHPC');
+  const org = entity('NHPC');
   for (let index = 0; index < 20; index++) digest(`filler-${index}`, DAY, [entity(`Other ${index}`)], 'none');
-  digest('announcement', DAY, [org], 'observer', { label: 'CCIR Application Process', kind: 'application' });
+  digest('announcement', DAY, [org], 'observer', { label: 'Example Research Application Process', kind: 'application' });
   await assign(sdk, DEFAULTS);
   expect(sdk.database.query("SELECT episode_state FROM graph_source_digests WHERE source_id='announcement'").get())
     .toEqual({ episode_state: 'none' });
-  digest('application', 2 * DAY, [org], 'participant', { label: 'UWHPC onboarding', kind: 'application' });
+  digest('application', 2 * DAY, [org], 'participant', { label: 'NHPC onboarding', kind: 'application' });
   await assign(sdk, DEFAULTS);
   let reviewed = 0;
   sdk.queryLLM = (async () => { reviewed++; return JSON.stringify({ episode: 1, confidence: 0.9 }); }) as unknown as typeof sdk.queryLLM;
@@ -156,7 +156,7 @@ it('reconsiders unmatched context when a later source establishes the pursuit', 
   const store = new EpisodeStore(sdk.database, sdk.graph);
   expect(store.get(store.list()[0].id)!.members.map(member => [member.sourceId, member.role]))
     .toEqual([['announcement', 'context'], ['application', 'trigger']]);
-  expect(sdk.graph.entities.inspect(store.list()[0].id).aliases.map(alias => alias.alias)).not.toContain('CCIR Application Process');
+  expect(sdk.graph.entities.inspect(store.list()[0].id).aliases.map(alias => alias.alias)).not.toContain('Example Research Application Process');
   await assign(sdk, DEFAULTS);
   expect(reviewed).toBe(1);
 });

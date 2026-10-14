@@ -9,7 +9,7 @@ import { reconsiderContext } from './reconsider';
  * Assign digested sources to episodes, oldest first so stories grow in order.
  *
  * score = Σ idf(shared entity) · recency + link bonus + model pick bonus. IDF is over digested sources,
- * so the user, Discord, or GitHub weigh nothing while "UWHPC" weighs a lot. Clear scores attach directly,
+ * so the user, Discord, or GitHub weigh nothing while "NHPC" weighs a lot. Clear scores attach directly,
  * the middle band asks the model, and a new episode starts only when the user is pursuing something.
  */
 interface Digest {

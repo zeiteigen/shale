@@ -25,24 +25,24 @@ function fixture() {
 describe('identity resolver', () => {
   it('merges mentions that share a strong key for their family and links pages and communities across families', () => {
     const { db, sdk, resolver, connector, mention } = fixture();
-    const server = connector('discord', 'discord://guild/147', 'UWHPC', 'Server');
-    const page = connector('browser', 'https://github.com/zeiteigen/onboarding-template', 'zeiteigen/onboarding-template', 'WebPage');
+    const server = connector('discord', 'discord://guild/147', 'NHPC', 'Server');
+    const page = connector('browser', 'https://github.com/example-user/onboarding-template', 'example-user/onboarding-template', 'WebPage');
     expect(resolver.keyConnectorEntities().keyed).toBe(2);
 
-    const org = mention('web:1', 'UWHPC', 'Organization');
-    expect(resolver.resolveMention({ entityId: org, type: 'Organization', names: ['UWHPC'], urls: ['https://github.com/UWHPC'] }).outcome).toBe('new');
-    const fromEmail = mention('email:1', 'University of Waterloo High Performance Computing', 'Organization');
+    const org = mention('web:1', 'NHPC', 'Organization');
+    expect(resolver.resolveMention({ entityId: org, type: 'Organization', names: ['NHPC'], urls: ['https://github.com/NHPC'] }).outcome).toBe('new');
+    const fromEmail = mention('email:1', 'Northbridge High Performance Computing', 'Organization');
     // Same acronym, but only a weak key: queued for adjudication instead of merged.
     expect(resolver.resolveMention({ entityId: fromEmail, type: 'Organization',
-      names: ['University of Waterloo High Performance Computing', 'UW HPC Club'] }))
+      names: ['Northbridge High Performance Computing', 'NH PC Club'] }))
       .toMatchObject({ outcome: 'queued', canonicalId: fromEmail });
-    const fromRepo = mention('web:2', 'UWHPC org', 'Organization');
-    expect(resolver.resolveMention({ entityId: fromRepo, type: 'Organization', names: ['UWHPC org'],
-      urls: ['https://github.com/UWHPC/onboarding-template'] })).toMatchObject({ outcome: 'merged', canonicalId: org });
+    const fromRepo = mention('web:2', 'NHPC org', 'Organization');
+    expect(resolver.resolveMention({ entityId: fromRepo, type: 'Organization', names: ['NHPC org'],
+      urls: ['https://github.com/NHPC/onboarding-template'] })).toMatchObject({ outcome: 'merged', canonicalId: org });
 
-    const repo = mention('web:1', 'zeiteigen/onboarding-template', 'Artifact');
+    const repo = mention('web:1', 'example-user/onboarding-template', 'Artifact');
     resolver.resolveMention({ entityId: repo, type: 'Artifact', names: ['onboarding-template'],
-      urls: ['https://github.com/zeiteigen/onboarding-template'] });
+      urls: ['https://github.com/example-user/onboarding-template'] });
     const links = (predicate: string) => db.query<{ s: number; o: number; status: string }, [string]>(
       'SELECT subject_id AS s,object_id AS o,status FROM graph_claims WHERE predicate=?').all(predicate);
     expect(links('REFERS_TO')).toContainEqual({ s: page, o: repo, status: 'accepted' });
@@ -73,30 +73,30 @@ describe('identity resolver', () => {
 
   it('gathers the user accounts into the self identity', () => {
     const { db, resolver, connector } = fixture();
-    const discord = connector('discord', 'discord:user:42', 'zeit', 'Person');
-    const email = connector('email', 'email:user:me@example.test', 'Ali', 'Person');
-    const other = connector('email', 'email:user:other@example.test', 'Ali', 'Person');
+    const discord = connector('discord', 'discord:user:42', 'example-user', 'Person');
+    const email = connector('email', 'email:user:me@example.test', 'Alex', 'Person');
+    const other = connector('email', 'email:user:other@example.test', 'Alex', 'Person');
     resolver.keyConnectorEntities();
-    const self = resolver.ensureSelf({ names: ['Ali Shahzad'], emails: ['me@example.test'], discordIds: ['42'], handles: ['github:zeiteigen'] });
+    const self = resolver.ensureSelf({ names: ['Alex Morgan'], emails: ['me@example.test'], discordIds: ['42'], handles: ['github:example-user'] });
     expect(db.query('SELECT stable_id FROM entities WHERE id=?').get(self)).toEqual({ stable_id: SELF_STABLE_ID });
     expect(canonicalOf(db, discord)).toBe(self);
     expect(canonicalOf(db, email)).toBe(self);
     expect(canonicalOf(db, other)).toBe(other);
     // Idempotent.
-    expect(resolver.ensureSelf({ names: ['Ali Shahzad'], emails: ['me@example.test'] })).toBe(self);
+    expect(resolver.ensureSelf({ names: ['Alex Morgan'], emails: ['me@example.test'] })).toBe(self);
   });
 
   it('shortlists registry entries by key and by rare terms', () => {
     const { db, resolver, mention, sdk } = fixture();
-    const org = mention('a', 'UWHPC', 'Organization');
-    resolver.resolveMention({ entityId: org, type: 'Organization', names: ['UWHPC'] });
-    sdk.graph.claims.add({ subject: org, predicate: 'DESCRIPTION', value: 'Waterloo high performance computing student club', method: 'llm' });
-    const other = mention('b', 'Waterloo Rocketry', 'Organization');
-    resolver.resolveMention({ entityId: other, type: 'Organization', names: ['Waterloo Rocketry'] });
+    const org = mention('a', 'NHPC', 'Organization');
+    resolver.resolveMention({ entityId: org, type: 'Organization', names: ['NHPC'] });
+    sdk.graph.claims.add({ subject: org, predicate: 'DESCRIPTION', value: 'Northbridge high performance computing student club', method: 'llm' });
+    const other = mention('b', 'Northbridge Rocketry', 'Organization');
+    resolver.resolveMention({ entityId: other, type: 'Organization', names: ['Northbridge Rocketry'] });
     rebuildRegistry(db);
-    expect(shortlist(db, { texts: ['Interview invitation from the UWHPC team at Waterloo'] }).map(entry => entry.id)[0]).toBe(org);
-    expect(shortlist(db, { keys: [{ kind: 'name', value: 'uwhpc' }] })).toMatchObject([{ id: org, basis: ['name:uwhpc'] }]);
+    expect(shortlist(db, { texts: ['Interview invitation from the NHPC team at Northbridge'] }).map(entry => entry.id)[0]).toBe(org);
+    expect(shortlist(db, { keys: [{ kind: 'name', value: 'nhpc' }] })).toMatchObject([{ id: org, basis: ['name:nhpc'] }]);
     expect(shortlist(db, { texts: ['high performance computing'] })[0]).toMatchObject({ id: org,
-      description: 'Waterloo high performance computing student club' });
+      description: 'Northbridge high performance computing student club' });
   });
 });

@@ -336,7 +336,7 @@ describe("MCP Knowledge Graph HTTP Server", () => {
       arguments: {
         name: "Alice",
         type: "Person",
-        aliases: ["Ali", { name: "A.", scope: "team:atlas" }],
+        aliases: ["Alex", { name: "A.", scope: "team:atlas" }],
       },
     });
     const alice = JSON.parse((createAliceRes.content as any)[0].text);

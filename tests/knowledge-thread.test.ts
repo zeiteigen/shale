@@ -85,24 +85,24 @@ function digestResponse(prompt: string) {
     summary: 'Another member asks about memory access in the benchmark.', involvement: 'participant',
     activity: { label: 'Onboarding challenge', kind: 'application', episode: 'new', confidence: 0.6 } };
   if (title.startsWith('#onboarding-challenge')) return { ...base,
-    entities: [{ key: 'org', name: 'UWHPC', type: 'club', description: 'Waterloo student club for high performance computing',
-      urls: ['https://github.com/UWHPC/onboarding-template'], match: hpc },
-    { key: 'repo', name: 'UWHPC/onboarding-template', type: 'GitHub repository', urls: ['https://github.com/UWHPC/onboarding-template'] }],
-    summary: 'The user forked the UWHPC onboarding template and started the heat diffusion problem.', involvement: 'participant',
-    activity: { label: 'UWHPC onboarding challenge', kind: 'application', stage: 'started the onboarding problem', episode: episode ?? 'new', confidence: 0.8 } };
-  if (title.startsWith('zeiteigen/onboarding-template')) return { ...base,
-    entities: [{ key: 'org', name: 'UWHPC', type: 'Organization', urls: ['https://github.com/UWHPC/onboarding-template'], match: hpc },
-      { key: 'fork', name: 'zeiteigen/onboarding-template', type: 'Artifact', description: "The user's fork of the UWHPC onboarding repository",
-        urls: ['https://github.com/zeiteigen/onboarding-template'] }],
-    summary: "The user's fork of the UWHPC onboarding template for the 2D heat diffusion problem.", involvement: 'author',
-    activity: { label: 'UWHPC onboarding', kind: 'application', stage: 'working on the onboarding fork', episode: episode ?? 'new', confidence: 0.7 } };
+    entities: [{ key: 'org', name: 'NHPC', type: 'club', description: 'Northbridge student club for high performance computing',
+      urls: ['https://github.com/NHPC/onboarding-template'], match: hpc },
+    { key: 'repo', name: 'NHPC/onboarding-template', type: 'GitHub repository', urls: ['https://github.com/NHPC/onboarding-template'] }],
+    summary: 'The user forked the NHPC onboarding template and started the heat diffusion problem.', involvement: 'participant',
+    activity: { label: 'NHPC onboarding challenge', kind: 'application', stage: 'started the onboarding problem', episode: episode ?? 'new', confidence: 0.8 } };
+  if (title.startsWith('example-user/onboarding-template')) return { ...base,
+    entities: [{ key: 'org', name: 'NHPC', type: 'Organization', urls: ['https://github.com/NHPC/onboarding-template'], match: hpc },
+      { key: 'fork', name: 'example-user/onboarding-template', type: 'Artifact', description: "The user's fork of the NHPC onboarding repository",
+        urls: ['https://github.com/example-user/onboarding-template'] }],
+    summary: "The user's fork of the NHPC onboarding template for the 2D heat diffusion problem.", involvement: 'author',
+    activity: { label: 'NHPC onboarding', kind: 'application', stage: 'working on the onboarding fork', episode: episode ?? 'new', confidence: 0.7 } };
   if (title.startsWith('Interview invitation')) return {
-    entities: [{ key: 'club', name: 'University of Waterloo High Performance Computing club', type: 'Organization',
-      searchKeys: ['UWHPC', 'UW HPC'], urls: ['hpc@uwaterloo.ca'], match: hpc, description: 'Student HPC club at the University of Waterloo' }],
+    entities: [{ key: 'club', name: 'Northbridge High Performance Computing club', type: 'Organization',
+      searchKeys: ['NHPC', 'NH PC'], urls: ['hpc@northbridge.example.test'], match: hpc, description: 'Student HPC club at the Northbridge' }],
     claims: [{ subject: 'club', predicate: 'INVITES_TO_INTERVIEW', value: 'the user', evidence: [{ chunkIndex: 0, quote: "We'd like to invite you to an interview" }] }],
-    events: [], summary: 'The UW HPC club invited the user to interview after the onboarding challenge.', involvement: 'participant',
-    activity: { label: 'UWHPC interview', kind: 'application', stage: 'invited to interview', episode: episode ?? null, confidence: 0.8 } };
-  return { ...base, entities: [{ key: 'rocketry', name: 'Waterloo Rocketry', type: 'Organization' }],
+    events: [], summary: 'The NH PC club invited the user to interview after the onboarding challenge.', involvement: 'participant',
+    activity: { label: 'NHPC interview', kind: 'application', stage: 'invited to interview', episode: episode ?? null, confidence: 0.8 } };
+  return { ...base, entities: [{ key: 'rocketry', name: 'Northbridge Rocketry', type: 'Organization' }],
     summary: 'People discuss rocket engines.', involvement: 'none', activity: null };
 }
 
@@ -115,8 +115,8 @@ function model(prompt: unknown) {
       verdict: (pair.match(/HPC|High Performance/gi)?.length ?? 0) >= 2 ? 'same' : 'different', confidence: 0.9, reason: 'stub' })) });
   }
   if (text.startsWith('Decide whether a new source continues')) return JSON.stringify({ episode: /1\. [^\n]*HPC/.test(text) ? 1 : 0, confidence: 0.9 });
-  if (text.startsWith('Rewrite the record')) return JSON.stringify({ title: 'Joining UWHPC: onboarding to interview',
-    summary: 'The user worked through the UWHPC onboarding challenge and was invited to interview.', status: 'active',
+  if (text.startsWith('Rewrite the record')) return JSON.stringify({ title: 'Joining NHPC: onboarding to interview',
+    summary: 'The user worked through the NHPC onboarding challenge and was invited to interview.', status: 'active',
     steps: [{ source: 1, step: 'Started the onboarding challenge' }, { source: 3, step: 'Invited to interview' }] });
   if (text.startsWith('Are these two records the same pursuit')) return JSON.stringify({ same: false, confidence: 0.9 });
   throw new Error(`Unexpected prompt: ${text.slice(0, 80)}`);
@@ -126,24 +126,24 @@ it('joins a Discord thread, a GitHub fork, and an interview email into one organ
   const db = createTestDatabase(); databases.push(db);
   const extractor = sdkFor(db, 'knowledge-extractor', 'knowledge', { enabled: true, maxSourcesPerRun: 1, maxContentChars: 12000,
     namespace: 'knowledge', llmModel: 'test-model' });
-  const graphSdk = sdkFor(db, 'knowledge-graph', 'knowledge', { resolverEnabled: true, selfNames: ['Ali Shahzad'],
-    selfEmails: ['ali@example.test'], selfHandles: ['discord-user:900', 'github:zeiteigen'], maxAdjudicationsPerRun: 32 });
+  const graphSdk = sdkFor(db, 'knowledge-graph', 'knowledge', { resolverEnabled: true, selfNames: ['Alex Morgan'],
+    selfEmails: ['alex@example.test'], selfHandles: ['discord-user:900', 'github:example-user'], maxAdjudicationsPerRun: 32 });
   const episodes = sdkFor(db, 'episodes', 'episodes', { enabled: true, maxSourcesPerRun: 200, attachScore: 4, reviewScore: 0.5,
     recencyDays: 45, maxAdjudicationsPerRun: 12, dormantDays: 4500 });
   for (const sdk of [extractor, graphSdk, episodes]) sdk.queryLLM = (async (prompt: unknown) => model(prompt)) as unknown as typeof sdk.queryLLM;
 
-  chat(extractor, 'discord-window:onboarding', AUG20, ['147', 'UWHPC'], '#onboarding-challenge › Ali Shahzad - 1A SE',
-    [['discord:user:900', 'zeit'], ['discord:user:901', 'mentor']],
-    '— 2026-08-20 —\n[17:00] zeit: Hi! I forked the UWHPC onboarding template https://github.com/UWHPC/onboarding-template and started on the heat diffusion problem.\n[17:05] mentor: Great, post your benchmark score when ready.');
-  ingest(extractor, { id: 'web:fork', uri: 'https://github.com/zeiteigen/onboarding-template', title: 'zeiteigen/onboarding-template',
-    type: 'web_page', origin: 'browser', at: AUG21 }, "UWHPC Onboarding — 2D Heat Diffusion\nStarter repository for the UWHPC onboarding problem.\nMerge branch 'main' of https://github.com/UWHPC/onboarding-template",
+  chat(extractor, 'discord-window:onboarding', AUG20, ['147', 'NHPC'], '#onboarding-challenge › Alex Morgan',
+    [['discord:user:900', 'example-user'], ['discord:user:901', 'mentor']],
+    '— 2026-08-20 —\n[17:00] example-user: Hi! I forked the NHPC onboarding template https://github.com/NHPC/onboarding-template and started on the heat diffusion problem.\n[17:05] mentor: Great, post your benchmark score when ready.');
+  ingest(extractor, { id: 'web:fork', uri: 'https://github.com/example-user/onboarding-template', title: 'example-user/onboarding-template',
+    type: 'web_page', origin: 'browser', at: AUG21 }, "NHPC Onboarding — 2D Heat Diffusion\nStarter repository for the NHPC onboarding problem.\nMerge branch 'main' of https://github.com/NHPC/onboarding-template",
   (graph, page) => graph.link(page, 'BELONGS_TO_DOMAIN', graph.entity('github.com', 'github.com', 'Domain')), 'WebPage');
-  chat(extractor, 'email-window:interview', SEP25, ['', ''], 'Interview invitation - UW HPC Club', [['email:user:hpc@uwaterloo.ca', 'UW HPC Recruiting']],
-    "Subject: Interview invitation - UW HPC Club\nFrom: UW HPC Recruiting <hpc@uwaterloo.ca>\nTo: ali@example.test\n\nHi Ali, thanks for completing the onboarding challenge for the University of Waterloo High Performance Computing club. We'd like to invite you to an interview next week.", 'email');
-  chat(extractor, 'discord-window:rocketry', SEP1, ['555', 'Waterloo Rocketry'], '#engines', [['discord:user:777', 'rocketeer']],
-    '— 2026-09-01 —\n[10:00] rocketeer: The Waterloo Rocketry engine test is on Saturday.');
+  chat(extractor, 'email-window:interview', SEP25, ['', ''], 'Interview invitation - NH PC Club', [['email:user:hpc@northbridge.example.test', 'NH PC Recruiting']],
+    "Subject: Interview invitation - NH PC Club\nFrom: NH PC Recruiting <hpc@northbridge.example.test>\nTo: alex@example.test\n\nHi Alex, thanks for completing the onboarding challenge for the Northbridge High Performance Computing club. We'd like to invite you to an interview next week.", 'email');
+  chat(extractor, 'discord-window:rocketry', SEP1, ['555', 'Northbridge Rocketry'], '#engines', [['discord:user:777', 'rocketeer']],
+    '— 2026-09-01 —\n[10:00] rocketeer: The Northbridge Rocketry engine test is on Saturday.');
 
-  chat(extractor, 'discord-window:bystander', AUG20 - 86_400_000, ['147', 'UWHPC'], '#onboarding-challenge › Someone Else - 2A CS',
+  chat(extractor, 'discord-window:bystander', AUG20 - 86_400_000, ['147', 'NHPC'], '#onboarding-challenge › Someone Else',
     [['discord:user:555', 'someone']], '— 2026-08-19 —\n[10:00] someone: Is there a better memory access pattern for sparse grids?');
 
   await resolve(graphSdk);
@@ -161,25 +161,25 @@ it('joins a Discord thread, a GitHub fork, and an interview email into one organ
     WHERE se.entity_id=?`).all(org).map(row => row.origin).sort();
   expect(origins).toEqual(['browser', 'discord', 'email']);
 
-  const server = db.query<{ id: number }, []>("SELECT id FROM entities WHERE type='Server' AND display_name='UWHPC'").get()!.id;
+  const server = db.query<{ id: number }, []>("SELECT id FROM entities WHERE type='Server' AND display_name='NHPC'").get()!.id;
   expect(db.query("SELECT status FROM graph_claims WHERE predicate='COMMUNITY_OF' AND subject_id=? AND object_id=?").get(server, org))
     .toEqual({ status: 'accepted' });
   const self = db.query<{ id: number }, [string]>('SELECT id FROM entities WHERE stable_id=?').get(SELF_STABLE_ID)!.id;
   const discordUser = db.query<{ entity_id: number }, []>("SELECT entity_id FROM graph_aliases WHERE scope='connector-key' AND alias='discord:user:900'").get()!;
   expect(canonicalOf(db, discordUser.entity_id)).toBe(self);
-  const rocketry = db.query<{ id: number }, []>("SELECT id FROM entities WHERE display_name='Waterloo Rocketry' AND namespace='knowledge'").get()!.id;
+  const rocketry = db.query<{ id: number }, []>("SELECT id FROM entities WHERE display_name='Northbridge Rocketry' AND namespace='knowledge'").get()!.id;
   expect(canonicalOf(db, rocketry)).not.toBe(org);
 
   const store = new EpisodeStore(db, episodes.graph);
   const all = store.list();
   expect(all).toHaveLength(1);
   const episode = store.get(all[0]!.id)!;
-  expect(episode.title).toBe('Joining UWHPC: onboarding to interview');
+  expect(episode.title).toBe('Joining NHPC: onboarding to interview');
   expect(episode.members.map(member => [member.sourceId, member.role])).toEqual([
     ['discord-window:onboarding', 'trigger'], ['web:fork', 'progress'], ['email-window:interview', 'outcome']]);
   expect(episode.members[2]!.step).toBe('Invited to interview');
   expect(episode.involves.map(entity => entity.id)).toContain(org);
-  expect(store.list({ query: 'UWHPC interview' }).map(item => item.id)).toEqual([episode.id]);
+  expect(store.list({ query: 'NHPC interview' }).map(item => item.id)).toEqual([episode.id]);
   expect(store.list({ entityId: org }).map(item => item.id)).toEqual([episode.id]);
   expect(db.query("SELECT episode_state FROM graph_source_digests WHERE source_id='discord-window:rocketry'").get()).toEqual({ episode_state: 'none' });
   // The model said the user took part in someone else's thread; the connector's participant list overrules it.
@@ -216,7 +216,7 @@ it('joins a Discord thread, a GitHub fork, and an interview email into one organ
   const timeline = await call('entity_timeline', { entity: org });
   expect(timeline.sources.map((source: { id: string }) => source.id))
     .toEqual(['discord-window:onboarding', 'web:fork', 'email-window:interview']);
-  const split = await call('split_episode', { episode: episode.id, sourceIds: ['email-window:interview'], title: 'UWHPC interview', reason: 'test' });
+  const split = await call('split_episode', { episode: episode.id, sourceIds: ['email-window:interview'], title: 'NHPC interview', reason: 'test' });
   expect(store.get(split.episodeId)!.members.map(member => member.sourceId)).toEqual(['email-window:interview']);
   expect(store.get(episode.id)!.members).toHaveLength(2);
   await call('merge_episodes', { from: split.episodeId, into: episode.id, reason: 'test' });

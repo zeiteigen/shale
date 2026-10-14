@@ -40,12 +40,12 @@ Live MCP probes:
 | Call | Response characters | Result |
 | --- | ---: | --- |
 | `search_graph({query:"Shale",limit:3})` | 98,291 | First two hits have identical text from current/version sources; graph, evidence, and related passages dominate the response. |
-| `search_graph({query:"WaterlooWorks",limit:3})` | 833,781 | Top hits are a large unrelated browsing session and two copies of a logged-out page. Five neighborhoods, 165 evidence records, 93 related passages. |
+| `search_graph({query:"CareerPortal",limit:3})` | 833,781 | Top hits are a large unrelated browsing session and two copies of a logged-out page. Five neighborhoods, 165 evidence records, 93 related passages. |
 | `search_graph({query:"Shale",limit:3,maxSeeds:1,maxDepth:1,maxNeighbors:1})` | 17,129 | Tight graph limits still return full chunks and unrelated passage text. Expansion cannot be disabled through this tool. |
 
-For WaterlooWorks, the 93 related passages contain only 74 distinct `(revisionId,chunkIndex)` pairs. Their text totals 446,363 characters versus 136,796 after deduplication by passage identity. One 16,293-character Steam page passage is repeated for multiple claims. The requested result limit does not bound response size or relevance.
+For CareerPortal, the 93 related passages contain only 74 distinct `(revisionId,chunkIndex)` pairs. Their text totals 446,363 characters versus 136,796 after deduplication by passage identity. One 16,293-character Steam page passage is repeated for multiple claims. The requested result limit does not bound response size or relevance.
 
-The logged-out WaterlooWorks page has 42 characters of extracted body but creates a 405-character synthetic wrapper, two tiny body chunks, a 190-character link listing, and a 774-character metadata JSON chunk. It also has a separate version source with the same content. Its extraction metadata already identifies it as metadata quality, yet ordinary search promotes it.
+The logged-out CareerPortal page has 42 characters of extracted body but creates a 405-character synthetic wrapper, two tiny body chunks, a 190-character link listing, and a 774-character metadata JSON chunk. It also has a separate version source with the same content. Its extraction metadata already identifies it as metadata quality, yet ordinary search promotes it.
 
 ## Decisive code paths
 
@@ -185,7 +185,7 @@ Prefer files that do one or two things. Preserve dynamic settings reads, cross-e
 - **Bounded history:** current, retired, and cited text counts toward the per-source retained-text budget. Automatic expansion stops when pinned evidence fills it; summaries, manifests, staging, operational events, and work queues cannot accumulate raw contents outside the budget.
 - **Recovery:** interrupted ingestion/conversion resumes without lost receipts or duplicate graph commits. Expired staging requires reacquisition or a clear unavailable state. Watermarks advance only after atomic commit.
 - **Reaccess:** missing, changed, excluded, authenticated, and public-only sources produce accurate availability/provenance. A refresh cannot silently turn new text into a quotation from an old capture.
-- **Retrieval cost:** measured three-hit probes stay within 16,000 serialized characters by default, targeting at least 98% reduction for WaterlooWorks. No automatic event neighborhoods or repeated evidence text; follow-up reads remain bounded. Report tokenizer costs separately if measured.
+- **Retrieval cost:** measured three-hit probes stay within 16,000 serialized characters by default, targeting at least 98% reduction for CareerPortal. No automatic event neighborhoods or repeated evidence text; follow-up reads remain bounded. Report tokenizer costs separately if measured.
 - **Integration and storage:** test migration/editing/citation/recovery/selection boundaries, run typecheck and relevant browser build checks, then integration suites and live MCP smoke tests. Use an isolated `SHALE_DB_PATH` for tests. Compare actual compacted database size and retrieval relevance, not just deduplication percentages.
 - **Deferred scope:** this release exposes retained-memory and refresh contracts but does not implement the dreaming scheduler, usage analytics, or autonomous old-source revisit policy.
 

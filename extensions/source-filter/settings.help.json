@@ -1,0 +1,77 @@
+{
+  "extension": "source-filter",
+  "settings": {
+    "enabled": {
+      "type": "boolean",
+      "description": "Enable source filtering on the scheduled run and manual invocations.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "dryRun": {
+      "type": "boolean",
+      "description": "Save proposed decisions for review without removing sources or blocking reingestion.",
+      "default": false,
+      "possibleValues": [true, false]
+    },
+    "llmEnabled": {
+      "type": "boolean",
+      "description": "Use the LLM only for suspicious or ambiguous sources; clear noise is handled deterministically.",
+      "default": true,
+      "possibleValues": [true, false]
+    },
+    "maxSourcesPerRun": {
+      "type": "number",
+      "integer": true,
+      "description": "Maximum source candidates considered in one run.",
+      "default": 500,
+      "range": {"min": 1, "max": 5000}
+    },
+    "maxLLMCallsPerRun": {
+      "type": "number",
+      "integer": true,
+      "description": "Maximum LLM calls in one run. Set to zero to disable LLM review for that run.",
+      "default": 20,
+      "range": {"min": 0, "max": 200}
+    },
+    "maxContentChars": {
+      "type": "number",
+      "integer": true,
+      "description": "Maximum retained content characters shown to the LLM; a truncated review cannot remove a source.",
+      "default": 24000,
+      "range": {"min": 500, "max": 50000}
+    },
+    "runBudgetSeconds": {
+      "type": "number",
+      "integer": true,
+      "description": "Wall-clock budget for one run, in seconds.",
+      "default": 180,
+      "range": {"min": 1, "max": 3600}
+    },
+    "removeConfidence": {
+      "type": "number",
+      "description": "Minimum confidence required for an LLM-backed removal decision.",
+      "default": 0.9,
+      "range": {"min": 0.9, "max": 1}
+    },
+    "llmModel": {
+      "type": "string",
+      "description": "Optional chat model override for suspicious-source review.",
+      "default": null
+    },
+    "origins": {
+      "type": "string[]",
+      "description": "Source origins eligible for filtering.",
+      "default": ["browser", "email", "discord", "instagram", "chatgpt", "claude", "gemini", "search", "youtube"]
+    },
+    "protectedSourceIds": {
+      "type": "string[]",
+      "description": "Source IDs that are always protected from removal and reingestion blocking.",
+      "default": []
+    },
+    "protectedUriPatterns": {
+      "type": "string[]",
+      "description": "Anchored wildcard patterns matched against the full source URI or canonical browser URI.",
+      "default": []
+    }
+  }
+}

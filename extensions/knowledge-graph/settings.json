@@ -2,9 +2,7 @@
   "resolverEnabled": true,
   "selfNames": [],
   "selfEmails": [],
-  "selfHandles": [
-    "github:zeiteigen"
-  ],
+  "selfHandles": [],
   "maxAdjudicationsPerRun": 32,
   "llmModel": null
 }

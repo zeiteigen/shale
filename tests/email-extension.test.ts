@@ -22,7 +22,7 @@ let directory: string;
 let database: ReturnType<typeof createTestDatabase>;
 let sdk: ShaleSDK;
 let previousPassword: string | undefined;
-const account: EmailAccount = { host: "imap.example.test", port: 993, username: "zeiteigen@example.test", password: "test-secret" };
+const account: EmailAccount = { host: "imap.example.test", port: 993, username: "example-user@example.test", password: "test-secret" };
 
 function configure(settings: Record<string, unknown> = {}) {
   writeFileSync(join(directory, "settings.json"), JSON.stringify({ importDir: join(directory, "import"),
@@ -252,21 +252,21 @@ describe("email extension", () => {
 
   it("connects Gmail with a grouped app password and supplies the server without extra fields", async () => {
     fakeReader({ verify: [{ type: "verified" }, { type: "done" }] });
-    const status = await auth.connect(sdk, "gmail", { username: "  zeiteigen@gmail.com  ", password: "abcd efgh ijkl mnop" });
-    expect(status).toMatchObject({ connected: true, account: "zeiteigen@gmail.com (imap.gmail.com:993)" });
+    const status = await auth.connect(sdk, "gmail", { username: "  example-user@gmail.com  ", password: "abcd efgh ijkl mnop" });
+    expect(status).toMatchObject({ connected: true, account: "example-user@gmail.com (imap.gmail.com:993)" });
     expect(emailAccount(sdk)).toEqual({ host: "imap.gmail.com", port: 993,
-      username: "zeiteigen@gmail.com", password: "abcdefghijklmnop" });
-    expect(request().account).toEqual({ host: "imap.gmail.com", port: 993, username: "zeiteigen@gmail.com" });
+      username: "example-user@gmail.com", password: "abcdefghijklmnop" });
+    expect(request().account).toEqual({ host: "imap.gmail.com", port: 993, username: "example-user@gmail.com" });
     expect(JSON.stringify(status)).not.toContain("abcdefghijklmnop");
   });
 
   it("explains Gmail's app-password requirement before checking a normal password or 2FA code", async () => {
     for (const password of ["my-normal-google-password", "123456"]) {
-      await expect(auth.connect(sdk, "gmail", { username: "zeiteigen@gmail.com", password }))
+      await expect(auth.connect(sdk, "gmail", { username: "example-user@gmail.com", password }))
         .rejects.toThrow("https://myaccount.google.com/apppasswords");
     }
     expect(sdk.credentials.get("password")).toBeUndefined();
-    await expect(auth.connect(sdk, "gmail", { username: "zeiteigen", password: "abcdefghijklmnop" }))
+    await expect(auth.connect(sdk, "gmail", { username: "example-user", password: "abcdefghijklmnop" }))
       .rejects.toThrow("full Gmail");
   });
 
@@ -274,7 +274,7 @@ describe("email extension", () => {
     expect(validateAccount({ ...account, host: "IMAP.GMAIL.COM", password: " abcd efgh ijkl mnop " }).password)
       .toBe("abcdefghijklmnop");
     expect(validateAccount({ ...account, password: " abcd efgh ijkl mnop " }).password).toBe(" abcd efgh ijkl mnop ");
-    configure({ host: "imap.gmail.com", username: "zeiteigen@gmail.com" });
+    configure({ host: "imap.gmail.com", username: "example-user@gmail.com" });
     process.env.EMAIL_PASSWORD = "abcd efgh ijkl mnop";
     expect(emailAccount(sdk)!.password).toBe("abcdefghijklmnop");
   });

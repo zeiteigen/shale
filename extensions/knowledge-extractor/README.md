@@ -26,7 +26,7 @@ The prompt gives the model more than the text:
 - **Known entities:** a shortlist of up to 15 registry entities, found by identity keys and FTS over the source's rare terms.
 - **Ongoing episodes:** a shortlist of up to 5.
 
-The model links a mention to a known entity by id, so "University of Waterloo High Performance Computing club" in an email can match the "UWHPC" seen on Discord without embeddings. Entity types follow `lib/graph/ontology.ts`.
+The model links a mention to a known entity by id, so "Northbridge High Performance Computing club" in an email can match the "NHPC" seen on Discord without embeddings. Entity types follow `lib/graph/ontology.ts`.
 
 Every entity grounded in the text is passed to the identity resolver (`sdk/graph/identity.ts`):
 

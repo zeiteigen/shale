@@ -108,6 +108,8 @@ Claims and connections remain inspectable after revision or retraction. Evidence
 
 Chunk corrections produce new current source content while preserving historical revision content. Use the source ID plus chunk ID for chunk operations and inspect both versions before making a concurrent edit.
 
+SDK callers can pass an optional synchronous `beforeApply` callback as the second argument to `sdk.knowledge.apply(input, beforeApply)`. The callback runs after reserving the database writer and before mutations; throwing aborts the change without an audit entry. It is suitable for rechecking source protections or shared identities after model work. Do not perform asynchronous work in the callback. Successfully applied request IDs still replay their original receipts without re-running preconditions.
+
 Source content changes conservatively mark claims supported by that source stale, including claims whose cited chunk was not changed. Review those claims explicitly. Restoration does not automatically accept them. Preview validates and simulates graph changes without writing; applying a valid batch commits its operations atomically.
 
 ## Discover, inspect, and connect

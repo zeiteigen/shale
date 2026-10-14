@@ -57,23 +57,26 @@ export class KnowledgeEditor {
     return row ? {...row,operations:JSON.parse(row.operations),result:JSON.parse(row.result)} : null;
   }
 
-  apply(input:unknown) {return this.run(input,false);}
+  /** Optional synchronous preconditions run under the writer lock, before any mutation. */
+  apply(input:unknown,beforeApply?:()=>void) {return this.run(input,false,beforeApply);}
   preview(input:unknown) {return this.run(input,true);}
 
-  private async run(input:unknown,preview:boolean):Promise<unknown> {
+  private async run(input:unknown,preview:boolean,beforeApply?:()=>void):Promise<unknown> {
     const parsed=changeInput.parse(input),operations=parsed.operations as unknown as Operation[];
     if(JSON.stringify(parsed).length>5_000_000) throw new Error('Change batch exceeds the 5 MB payload limit');
     const signature=fingerprint(parsed);
     if(!preview) {const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return this.redact(previous);}
-    return this.execute(parsed,operations,preview);
+    return this.execute(parsed,operations,preview,beforeApply);
   }
 
   private execute(parsed:ReturnType<typeof changeInput.parse>,operations:Operation[],
-    preview:boolean):unknown {
+    preview:boolean,beforeApply?:()=>void):unknown {
     const signature=fingerprint(parsed);
     try {
-      return this.db.transaction(()=>{
+      const transaction=this.db.transaction(()=>{
         if(!preview) {const previous=replay(this.db,parsed.requestId,signature);if(previous!==undefined) return this.redact(previous);}
+        const checked:unknown=beforeApply?.();
+        if(checked instanceof Promise) throw new Error('Audited write preconditions must be synchronous');
         const changeId=randomUUIDv7(),refs:Record<string,number>={};
         const details=[];
         // A TEMP journal records exactly the records changed, including trigger invalidation.
@@ -102,7 +105,8 @@ export class KnowledgeEditor {
         this.db.run('DELETE FROM knowledge_edit_journal');
         this.db.run('UPDATE knowledge_edit_session SET active=0 WHERE id=1');
         return receipt;
-      })();
+      });
+      return beforeApply ? transaction.immediate() : transaction();
     } catch(error) {if(error instanceof PreviewRollback) return error.result;throw error;}
   }
 

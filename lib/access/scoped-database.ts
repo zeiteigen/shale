@@ -83,6 +83,7 @@ export class ScopedDatabase {
   private seenVersion = -1;
   private seenSignature = "";
   private classificationPending = false;
+  private seenSchemaVersion = -1;
 
   constructor(readonly profileName: string, private writer: Database, path: string) {
     if (!path || path === ":memory:") throw new Error("Restricted access profiles require a file-backed database");
@@ -93,15 +94,27 @@ export class ScopedDatabase {
   /** Install the shadow views. Call after any SDK built on this connection has run its schema setup. */
   seal() {
     if (this.sealed) return;
+    // Classify and record the snapshot once; the subsequent SDK refresh can reuse it.
+    this.refresh();
+    this.shadowNewObjects();
+    this.sealed = true;
+    this.db.run("PRAGMA query_only = ON");
+  }
+
+  /** Extensions may create private tables after a consumer has connected. */
+  private shadowNewObjects() {
+    const schemaVersion = this.db.query<{ schema_version: number }, []>("PRAGMA main.schema_version").get()!.schema_version;
+    if (schemaVersion === this.seenSchemaVersion) return;
     const filters = shadowFilters(this.profileName);
     const objects = this.db.query<{ name: string; type: string; sql: string | null }, []>(
       "SELECT name,type,sql FROM main.sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'").all();
     const storage = virtualTableStorage(this.db);
-    // Classify and record the snapshot once; the subsequent SDK refresh can reuse it.
-    this.refresh();
-    this.db.transaction(() => {
+    const existing = new Set(this.db.query<{ name: string }, []>(
+      "SELECT name FROM sqlite_temp_master WHERE type IN ('table','view')").all().map(row => row.name));
+    if (this.sealed) this.db.run("PRAGMA query_only = OFF");
+    try { this.db.transaction(() => {
       for (const object of objects) {
-        if (PASSTHROUGH_TABLES.has(object.name) || storage.has(object.name)) continue;
+        if (existing.has(object.name) || PASSTHROUGH_TABLES.has(object.name) || storage.has(object.name)) continue;
         const filter = filters[object.name];
         const quoted = `"${object.name.replace(/"/g, '""')}"`;
         let select = "*";
@@ -120,12 +133,13 @@ export class ScopedDatabase {
         this.db.run(`CREATE TEMP VIEW ${quoted} AS SELECT ${select} FROM main.${quoted} WHERE ${filter ?? "0"}`);
       }
     })();
-    this.sealed = true;
-    this.db.run("PRAGMA query_only = ON");
+      this.seenSchemaVersion = schemaVersion;
+    } finally { if (this.sealed) this.db.run("PRAGMA query_only = ON"); }
   }
 
   /** Re-derive visibility when data, labels, or the policy changed since the last call. */
   refresh(): ResolvedProfile {
+    if (this.sealed) this.shadowNewObjects();
     const policy = readAccessPolicy();
     const profile = resolveProfile(this.profileName, policy);
     const version = this.dataVersion();
