@@ -114,7 +114,11 @@ function model(prompt: unknown) {
     return JSON.stringify({ decisions: pairs.map((pair, index) => ({ pair: index + 1,
       verdict: (pair.match(/HPC|High Performance/gi)?.length ?? 0) >= 2 ? 'same' : 'different', confidence: 0.9, reason: 'stub' })) });
   }
-  if (text.startsWith('Decide whether a new source continues')) return JSON.stringify({ episode: /1\. [^\n]*HPC/.test(text) ? 1 : 0, confidence: 0.9 });
+  if (text.startsWith('Decide whether each new source continues')) {
+    const sources = text.split(/\nSource \d+ /).slice(1);
+    return JSON.stringify({ decisions: sources.map((source, index) => ({ source: index + 1,
+      episode: /1\. [^\n]*HPC/.test(source) ? 1 : 0, confidence: 0.9 })) });
+  }
   if (text.startsWith('Rewrite the record')) return JSON.stringify({ title: 'Joining NHPC: onboarding to interview',
     summary: 'The user worked through the NHPC onboarding challenge and was invited to interview.', status: 'active',
     steps: [{ source: 1, step: 'Started the onboarding challenge' }, { source: 3, step: 'Invited to interview' }] });

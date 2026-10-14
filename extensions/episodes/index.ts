@@ -23,7 +23,8 @@ export async function run(sdkOverride?: ShaleSDK) {
   const heartbeat = setInterval(() => { try { lease.renew(); } catch { /* lost lease ends the run on release */ } }, 30_000);
   try {
     const result = await assign(sdk, settings, model);
-    if (result.processed) sdk.logger.log(`Episodes: ${result.processed} source(s) assigned, ${result.reviewed} reviewed by the model.`);
+    if (result.processed || result.merged || result.pruned) sdk.logger.log(`Episodes: ${result.processed} source(s) assigned, `
+      + `${result.reviewed} reviewed by the model, ${result.merged} same-titled episode(s) folded, ${result.pruned} unsupported member(s) detached.`);
     return result;
   } finally {
     clearInterval(heartbeat);

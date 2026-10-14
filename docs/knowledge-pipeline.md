@@ -26,7 +26,7 @@ The extractor reads retained passages in bounded windows using `source-window.ts
 
 ## 4. Resolve identities across connectors
 
-[`IdentityResolver`](../sdk/graph/identity.ts) uses type families, explicit external IDs, normalized identity keys and registry candidates. Strong compatible keys can merge automatically. Names/acronyms alone or weak/corroborating keys are queued for adjudication. A visited page can refer to an organization or artifact without sharing its identity. Community/server affiliation is distinct from merging the server into the organization.
+[`IdentityResolver`](../sdk/graph/identity.ts) uses type families, explicit external IDs, normalized identity keys and registry candidates. Strong compatible keys can merge automatically, as can an exact full name of the same non-person type when nothing recorded tells the two apart. Partial names/acronyms or weak/corroborating keys are queued for adjudication. A visited page can refer to an organization or artifact without sharing its identity. Community/server affiliation is distinct from merging the server into the organization.
 
 The [`identity-resolver`](../extensions/knowledge-graph/resolve.ts) cron builds registry rows in small batches, keys connector entities, combines configured/connected user accounts into the `self` Person, queues duplicate candidates, and asks the model about bounded groups. Decisions and identity merges are durable. Merges preserve old IDs and audit records; ordinary discovery follows the canonical identity.
 

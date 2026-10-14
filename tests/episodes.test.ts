@@ -3,11 +3,12 @@ import type { Database } from 'bun:sqlite';
 import { createExtensionSDK } from '../sdk';
 import { createTestDatabase } from './fixtures/database';
 import { ensureStorySchema } from '../lib/graph/story-schema';
-import { Assigner, DEFAULTS, assign, idf, pendingDigests, recordSignals } from '../extensions/episodes/assign';
+import { Assigner, DEFAULTS, assign, episodeByLabel, idf, pendingDigests, recordSignals } from '../extensions/episodes/assign';
 import { indexEntity, shortlist } from '../sdk/graph/registry';
 import { EpisodeStore } from '../sdk/graph/episodes';
-import { consolidate, mergeCandidates } from '../extensions/episodes/consolidate';
+import { consolidate, mergeCandidates, mergeSameTitled } from '../extensions/episodes/consolidate';
 import { reconsiderContext } from '../extensions/episodes/reconsider';
+import { auditEpisode, refreshInvolvement } from '../extensions/episodes/involvement';
 
 const databases: Database[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
@@ -150,7 +151,7 @@ it('reconsiders unmatched context when a later source establishes the pursuit', 
   digest('application', 2 * DAY, [org], 'participant', { label: 'NHPC onboarding', kind: 'application' });
   await assign(sdk, DEFAULTS);
   let reviewed = 0;
-  sdk.queryLLM = (async () => { reviewed++; return JSON.stringify({ episode: 1, confidence: 0.9 }); }) as unknown as typeof sdk.queryLLM;
+  sdk.queryLLM = (async () => { reviewed++; return JSON.stringify({ decisions: [{ source: 1, episode: 1, confidence: 0.9 }] }); }) as unknown as typeof sdk.queryLLM;
   await assign(sdk, DEFAULTS);
   expect(reviewed).toBe(1);
   const store = new EpisodeStore(sdk.database, sdk.graph);
@@ -208,3 +209,159 @@ it('retains narrative provenance until replacement and rejects a rewrite after m
   expect((await consolidate(sdk, DEFAULTS)).rewritten).toBe(0);
   expect(store.get(episode)!.summary).toBe('a happened.');
 });
+
+it('joins notes to the episode their activity label names, even before their entities are resolved', async () => {
+  const { sdk, entity, digest } = fixture();
+  for (let index = 0; index < 20; index++) digest(`filler${index}`, index * DAY, [entity(`Filler ${index}`)], 'none');
+  const label = { label: 'Global Politics Revision', kind: 'learning' };
+  // Every note minted its own course entity; the identity resolver has not merged them yet.
+  for (let index = 0; index < 4; index++) digest(`note${index}`, 30 * DAY + index, [entity(`Global Politics ${index}`, 'Course')], 'author', label);
+  digest('much-later', 200 * DAY, [entity('Global Politics late', 'Course')], 'author', label);
+  let calls = 0;
+  sdk.queryLLM = (async () => { calls++; return '{"decisions":[]}'; }) as unknown as typeof sdk.queryLLM;
+  await assign(sdk, DEFAULTS);
+  expect(calls).toBe(0);
+  const store = new EpisodeStore(sdk.database, sdk.graph);
+  const episodes = store.list().map(item => store.get(item.id)!);
+  expect(episodes.map(episode => episode.members.length).sort()).toEqual([1, 4]);
+  // A label match only reaches back recencyDays.
+  expect(episodeByLabel(sdk, 'global politics revision', 31 * DAY, 45)).toBe(episodes.find(episode => episode.members.length === 4)!.id);
+});
+
+it('starts one episode when parallel reviews both report a new pursuit with the same label', async () => {
+  const { sdk, entity, digest } = fixture();
+  const club = entity('Chess Club');
+  for (let index = 0; index < 20; index++) digest(`filler${index}`, index * DAY, [entity(`Filler ${index}`)], 'none');
+  digest('seed', 29 * DAY, [club], 'author', { label: 'Chess Club events', kind: 'other' });
+  await assign(sdk, DEFAULTS);
+  for (const id of ['a', 'b']) digest(id, 30 * DAY, [club], 'participant', { label: 'Chess tournament prep', kind: 'learning' });
+  let calls = 0;
+  sdk.queryLLM = (async (prompt: string) => {
+    calls++;
+    expect(prompt).toContain('Source 2');
+    return JSON.stringify({ decisions: [{ source: 1, episode: 0, newEpisode: true, confidence: 0.9 },
+      { source: 2, episode: 0, newEpisode: true, confidence: 0.9 }] });
+  }) as unknown as typeof sdk.queryLLM;
+  expect((await assign(sdk, { ...DEFAULTS, attachScore: 100, reviewScore: 0.1 })).reviewed).toBe(2);
+  expect(calls).toBe(1);
+  const store = new EpisodeStore(sdk.database, sdk.graph);
+  const prep = store.list().filter(item => item.title === 'Chess tournament prep');
+  expect(prep).toHaveLength(1);
+  expect(store.get(prep[0]!.id)!.members.map(member => member.sourceId).sort()).toEqual(['a', 'b']);
+});
+
+it('leaves sources the batched review did not answer for the next run', async () => {
+  const { sdk, entity, digest } = fixture();
+  const club = entity('Chess Club');
+  for (let index = 0; index < 20; index++) digest(`filler${index}`, index * DAY, [entity(`Filler ${index}`)], 'none');
+  digest('seed', 29 * DAY, [club], 'author', { label: 'Chess Club events', kind: 'other' });
+  await assign(sdk, DEFAULTS);
+  for (const id of ['a', 'b', 'c']) digest(id, 30 * DAY, [club], 'observer');
+  sdk.queryLLM = (async () => JSON.stringify({ decisions: [{ source: 2, episode: 1, confidence: 0.9 }, { source: 3, episode: 0, confidence: 0.9 }] })) as unknown as typeof sdk.queryLLM;
+  await assign(sdk, { ...DEFAULTS, attachScore: 100, reviewScore: 0.1 });
+  const state = (id: string) => sdk.database.query<{ episode_state: string }, [string]>(
+    'SELECT episode_state FROM graph_source_digests WHERE source_id=?').get(id)!.episode_state;
+  expect(['a', 'b', 'c'].map(state)).toEqual(['pending', 'assigned', 'none']);
+});
+
+it('folds identically titled open episodes within the recency window without the model', async () => {
+  const { sdk, db, digest } = fixture();
+  const store = new EpisodeStore(db, sdk.graph);
+  let sources = 0;
+  const make = (title: string, at: number, kind = 'learning') => {
+    const id = store.create({ title, kind, at }), source = `note${++sources}`;
+    digest(source, at, []);
+    store.attach(id, source, { role: 'trigger', step: 'note', at, confidence: 1, status: 'accepted', basis: 'test' });
+    return id;
+  };
+  const first = make('Global Politics Revision', DAY), second = make('global politics revision', 2 * DAY);
+  const third = make('Global Politics Revision', 3 * DAY), distant = make('Global Politics Revision', 300 * DAY);
+  const otherKind = make('Global Politics Revision', 2 * DAY, 'project');
+  const closed = make('Global Politics Revision', 2 * DAY);
+  db.query("UPDATE graph_episodes SET status='closed' WHERE entity_id=?").run(closed);
+  // A merge the user undid stays undone.
+  const undone = make('Global Politics Revision', 4 * DAY);
+  sdk.graph.entities.unmerge(store.merge(undone, first, 'test'));
+  expect(mergeSameTitled(sdk, store, 45)).toBe(3);
+  const open = store.list().filter(item => item.status !== 'closed').map(item => item.id).sort((a, b) => a - b);
+  expect(open).toEqual([first, distant, undone].sort((a, b) => a - b));
+  // The model's kind label varies between notes of one story, so it does not keep them apart.
+  expect(store.get(first)!.members).toHaveLength(4);
+  expect([second, third, otherKind, closed].map(id => store.get(id)?.id)).toEqual([first, first, first, closed]);
+  let calls = 0;
+  sdk.queryLLM = (async () => { calls++; return '{}'; }) as unknown as typeof sdk.queryLLM;
+  // Single-member episodes are rewritten from their digest; the merged one still asks the model.
+  const result = await consolidate(sdk, DEFAULTS);
+  expect(calls).toBe(1);
+  expect(result.rewritten).toBe(3);
+  expect(store.get(distant)!.summary).toBe('note4 happened.');
+});
+
+it('lets ordinary members use an episode\'s hooks without adding their own entities or labels', async () => {
+  const { sdk, entity, digest } = fixture();
+  const club = entity('Chess Club'), google = entity('Google');
+  for (let index = 0; index < 20; index++) digest(`filler${index}`, index * DAY, [entity(`Filler ${index}`)], 'none');
+  digest('seed', 30 * DAY, [club], 'author', { label: 'Chess Club events', kind: 'other' });
+  digest('joint', 31 * DAY, [club, google], 'participant', { label: 'Account setup', kind: 'admin' });
+  digest('alert', 32 * DAY, [google], 'participant');
+  const settings = { ...DEFAULTS, attachScore: 2, reviewScore: 1 };
+  await assign(sdk, settings);
+  const store = new EpisodeStore(sdk.database, sdk.graph);
+  const [episode] = store.list();
+  expect(store.get(episode!.id)!.members.map(member => member.sourceId)).toEqual(['seed', 'joint']);
+  expect(store.involved(episode!.id).map(item => item.id)).toEqual([club]);
+  expect(sdk.database.query("SELECT episode_state FROM graph_source_digests WHERE source_id='alert'").get()).toEqual({ episode_state: 'none' });
+  // The joining source's own label is not a name of the episode, so later notes with that label start their own.
+  expect(episodeByLabel(sdk, 'Account setup', 33 * DAY, 45)).toBeNull();
+});
+
+it('repairs a drifted episode: retracts unsupported hooks and aliases and detaches what they let in', async () => {
+  const { sdk, db, entity, digest } = fixture();
+  const club = entity('Chess Club'), google = entity('Google'), venue = entity('Town Hall');
+  for (let index = 0; index < 20; index++) digest(`filler${index}`, index * DAY, [entity(`Filler ${index}`)], 'none');
+  digest('seed', 30 * DAY, [club], 'author', { label: 'Chess Club events', kind: 'other' });
+  await assign(sdk, DEFAULTS);
+  const store = new EpisodeStore(db, sdk.graph);
+  const episode = store.list()[0]!.id;
+  // What the old assigner left behind: a hook from a weak member, the alert it let in, and that member's label.
+  for (const [id, entities, involvement] of [['alert', [google], 'participant'], ['page', [google], 'observer']] as const) {
+    digest(id, 31 * DAY, [...entities], involvement);
+    db.query("UPDATE graph_source_digests SET episode_state='assigned',signals_at=1 WHERE source_id=?").run(id);
+    db.query('INSERT INTO graph_digest_signals(source_id,entity_id) VALUES(?,?)').run(id, google);
+  }
+  store.involve(episode, google, 3);
+  store.attach(episode, 'alert', { role: 'progress', step: 'alert', at: 31 * DAY, confidence: 1, status: 'accepted', basis: 'score 9.00: google' });
+  store.attach(episode, 'page', { role: 'context', step: 'page', at: 31 * DAY, confidence: 0.95, status: 'accepted', basis: 'model review 0.95' });
+  sdk.graph.entities.addAlias(episode, 'Winter co-op search', 'search');
+  sdk.graph.claims.add({ id: 'manual-venue', namespace: 'episodes', subject: episode, predicate: 'INVOLVES', object: venue,
+    status: 'accepted', method: 'manual' });
+
+  expect(auditEpisode(sdk, new Assigner(sdk, DEFAULTS), episode)).toEqual({ changed: true, pruned: 1 });
+  expect(store.involved(episode).map(item => item.id).sort()).toEqual([club, venue].sort());
+  expect(store.get(episode)!.members.map(member => member.sourceId)).toEqual(['seed', 'page']);
+  expect(db.query("SELECT episode_state FROM graph_source_digests WHERE source_id='alert'").get()).toEqual({ episode_state: 'pending' });
+  expect(sdk.graph.entities.inspect(episode).aliases.map(alias => alias.alias)).not.toContain('Winter co-op search');
+  // A second audit finds nothing left to do, and the detached alert does not come back.
+  expect(auditEpisode(sdk, new Assigner(sdk, DEFAULTS), episode)).toEqual({ changed: false, pruned: 0 });
+  await assign(sdk, DEFAULTS);
+  expect(store.isMember(episode, 'alert')).toBe(false);
+});
+
+it('keeps hooks carried by enough defining sources, and anything the title names', async () => {
+  const { sdk, entity, digest } = fixture();
+  const shared = entity('Onboarding repo', 'Project'), atlas = entity('Atlas', 'Project');
+  const listed = [entity('Old game', 'Project'), entity('Toy language', 'Project')];
+  for (let index = 0; index < 20; index++) digest(`filler${index}`, index * DAY, [entity(`Filler ${index}`)], 'none');
+  const label = { label: 'Atlas onboarding', kind: 'application' };
+  // The trigger is a repository list page: it names every repository, not just the one this pursuit is about.
+  digest('repositories', 30 * DAY, [shared, atlas, ...listed], 'author', label);
+  for (let index = 0; index < 7; index++) digest(`step${index}`, 31 * DAY + index, [shared], 'author', label);
+  await assign(sdk, DEFAULTS);
+  const store = new EpisodeStore(sdk.database, sdk.graph);
+  const [episode] = store.list();
+  expect(store.get(episode!.id)!.members).toHaveLength(8);
+  expect(store.involved(episode!.id).map(item => item.id).sort()).toEqual([shared, atlas].sort());
+  // Derivation is idempotent.
+  expect(refreshInvolvement(sdk, store, episode!.id)).toBe(false);
+});
+

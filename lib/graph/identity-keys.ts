@@ -123,13 +123,25 @@ export function words(label: string): string[] {
 
 const compact = (parts: string[]) => parts.join("").replace(/&/g, "");
 
-export function nameKeys(label: string): string[] {
-  const all = label
+const nameWords = (label: string) =>
+  label
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
+
+/**
+ * Every word of a label, folded and joined: "Global Politics", "global-politics", and "GLOBAL POLITICS"
+ * meet, but "Cloudflare Community" and "Cloudflare" do not. Used where an exact name is evidence enough.
+ */
+export function fullNameKey(label: string): string | null {
+  const key = nameWords(label).join("");
+  return key.length >= 2 ? key : null;
+}
+
+export function nameKeys(label: string): string[] {
+  const all = nameWords(label);
   if (!all.length) return [];
   const keys = new Set([all.join("")]);
   const distinctive = all.filter((word) => !GENERIC.has(word));

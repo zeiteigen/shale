@@ -2,7 +2,7 @@
 
 For the surrounding system, read [the data model](data-model.md), [knowledge pipeline](knowledge-pipeline.md), and [access control](access-control.md).
 
-The MCP editing surface adds 32 tools to the existing graph tools. Mutations share validation with `sdk.knowledge`, record an actor and a meaningful reason, and preserve provenance. Read tools return IDs and versions needed for precise edits. Candidate tools suggest leads for review; they never create connections or merge entities themselves. Background identity resolution does merge automatically, but only on strong evidence (a shared account, repository, or URL key, or a model registry match corroborated by a name key, or a model adjudication at 0.85 confidence or more); every such merge is recorded in `graph_identity_changes` with its reason and can be undone with `unmerge_entities`. People are never merged on a shared name alone.
+The MCP editing surface adds 32 tools to the existing graph tools. Mutations share validation with `sdk.knowledge`, record an actor and a meaningful reason, and preserve provenance. Read tools return IDs and versions needed for precise edits. Candidate tools suggest leads for review; they never create connections or merge entities themselves. Background identity resolution does merge automatically, but only on strong evidence (a shared account, repository, or URL key, an exact full name shared by one thing of the same non-person type, a model registry match corroborated by a name key, or a model adjudication at 0.85 confidence or more); every such merge is recorded in `graph_identity_changes` with its reason and can be undone with `unmerge_entities`. People are never merged on a shared name alone.
 
 ## Editing tools
 

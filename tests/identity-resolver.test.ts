@@ -4,6 +4,7 @@ import { createExtensionSDK } from '../sdk';
 import { createTestDatabase } from './fixtures/database';
 import { IdentityResolver, SELF_STABLE_ID } from '../sdk/graph/identity';
 import { canonicalOf, rebuildRegistry, shortlist } from '../sdk/graph/registry';
+import { adjudicate, settleExact } from '../extensions/knowledge-graph/resolve';
 
 const databases: Database[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
@@ -98,5 +99,49 @@ describe('identity resolver', () => {
     expect(shortlist(db, { keys: [{ kind: 'name', value: 'nhpc' }] })).toMatchObject([{ id: org, basis: ['name:nhpc'] }]);
     expect(shortlist(db, { texts: ['high performance computing'] })[0]).toMatchObject({ id: org,
       description: 'Northbridge high performance computing student club' });
+  });
+
+  it('merges exact names of one thing without the model, but not people, partial names, or separated identities', async () => {
+    const { db, sdk, resolver, mention } = fixture();
+    const course = mention('a', 'IB DP Global Politics', 'Course');
+    resolver.resolveMention({ entityId: course, type: 'Course', names: ['IB DP Global Politics', 'Global Politics'] });
+    sdk.graph.entities.addAlias(course, 'Global Politics', 'search');
+    const later = mention('b', 'Global Politics', 'Course');
+    expect(resolver.resolveMention({ entityId: later, type: 'Course', names: ['global-politics'] }))
+      .toMatchObject({ outcome: 'merged', canonicalId: course });
+    expect(db.query<{ reason: string }, []>('SELECT reason FROM graph_identity_changes').get()!.reason).toStartWith('Exact name match');
+    // A concept of the same name is a different kind of thing.
+    const concept = mention('c', 'Global Politics', 'Concept');
+    expect(resolver.resolveMention({ entityId: concept, type: 'Concept', names: ['Global Politics'] }).outcome).toBe('new');
+
+    const company = mention('a', 'Cloudflare', 'Organization');
+    resolver.resolveMention({ entityId: company, type: 'Organization', names: ['Cloudflare'] });
+    const forum = mention('b', 'Cloudflare Community', 'Organization');
+    expect(resolver.resolveMention({ entityId: forum, type: 'Organization', names: ['Cloudflare Community'] }).outcome).toBe('queued');
+
+    // Two things the model told apart make their shared name ambiguous.
+    const first = mention('a', 'Atlas', 'Project'), second = mention('b', 'Atlas', 'Project');
+    resolver.resolveMention({ entityId: first, type: 'Project', names: ['Atlas'] });
+    resolver.resolveMention({ entityId: second, type: 'Project', names: ['Atlas'] });
+    expect(canonicalOf(db, second)).toBe(first);
+    sdk.graph.entities.unmerge(sdk.graph.entities.inspect(second).merges[0]!.id);
+    const third = mention('c', 'Atlas', 'Project');
+    expect(resolver.resolveMention({ entityId: third, type: 'Project', names: ['Atlas'] }).outcome).toBe('queued');
+
+    // Queued exact-name pairs are settled without a model request; people still go to the model.
+    const alice = mention('a', 'Alice Chen', 'Person'), alice2 = mention('b', 'Alice Chen', 'Person');
+    resolver.resolveMention({ entityId: alice, type: 'Person', names: ['Alice Chen'] });
+    expect(resolver.resolveMention({ entityId: alice2, type: 'Person', names: ['Alice Chen'] }).outcome).toBe('queued');
+    // A pair queued before this rule existed (names keyed, no decision yet).
+    const place = mention('a', 'Lahore', 'Place'), place2 = mention('b', 'Lahore', 'Place');
+    for (const id of [place, place2]) sdk.graph.entities.addAlias(id, 'lahore', 'key:name');
+    db.query("INSERT INTO graph_resolution_queue(mention_id,candidate_id,basis,created_at) VALUES(?,?,'duplicate-sweep',1)").run(place2, place);
+    expect(settleExact(resolver)).toBe(1);
+    expect(canonicalOf(db, place2)).toBe(place);
+    const prompts: string[] = [];
+    sdk.queryLLM = (async (prompt: string) => { prompts.push(prompt); return '{"decisions":[]}'; }) as typeof sdk.queryLLM;
+    await adjudicate(sdk, resolver, 32);
+    expect(prompts.join('\n')).toContain('Alice Chen');
+    expect(prompts.join('\n')).not.toContain('Lahore');
   });
 });

@@ -39,6 +39,13 @@ export function parseVerdicts(raw: string, count: number): Verdict[] {
   });
 }
 
+/** Settle queued pairs that name each other exactly, so only real ambiguity reaches the model. */
+export function settleExact(resolver: IdentityResolver, limit = 2000): number {
+  let settled = 0;
+  for (const pair of resolver.pending(limit)) if (resolver.autoDecide(pair.mention_id, pair.candidate_id)) settled++;
+  return settled;
+}
+
 /** Ask the model about queued pairs, eight per request, and apply each verdict as it arrives. */
 export async function adjudicate(sdk: ShaleSDK, resolver: IdentityResolver, limit: number, model?: string) {
   const pending = resolver.pending(limit);
@@ -97,9 +104,10 @@ export async function run(sdkOverride?: ShaleSDK) {
     }
     resolver.ensureSelf(selfConfig(sdk));
     const queued = resolver.sweepDuplicates();
+    const exact = settleExact(resolver);
     const decided = await adjudicate(sdk, resolver, settings.maxAdjudicationsPerRun ?? 32, settings.llmModel || undefined);
-    sdk.logger.log(`Identity resolution: ${keyed} connector entities keyed, ${merged} merged, ${queued} duplicate pairs queued, ${decided} adjudicated.`);
-    return { keyed, merged, queued, decided };
+    sdk.logger.log(`Identity resolution: ${keyed} connector entities keyed, ${merged} merged, ${queued} duplicate pairs queued, ${exact} settled by exact name, ${decided} adjudicated.`);
+    return { keyed, merged, queued, exact, decided };
   } finally {
     clearInterval(heartbeat);
     lease.release();

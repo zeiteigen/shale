@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import type { GraphIngestor } from '../graph';
 import { ensureStorySchema } from '../../lib/graph/story-schema';
-import { AFFILIATION_KEY_KINDS, identityKeys, type IdentityKey } from '../../lib/graph/identity-keys';
+import { AFFILIATION_KEY_KINDS, fullNameKey, identityKeys, type IdentityKey } from '../../lib/graph/identity-keys';
 import { sameFamily, typeFamily } from '../../lib/graph/ontology';
 import { canonicalOf, connectorKeys, describe, entitiesWithKeys, indexEntity, keysOf, writeKeys } from './registry';
 
@@ -10,9 +10,10 @@ import { canonicalOf, connectorKeys, describe, entitiesWithKeys, indexEntity, ke
  * Cross-source identity. Every decision is recorded: merges in graph_identity_changes (reversible with
  * unmerge), links as claims with method `resolver`, uncertain pairs in graph_resolution_queue.
  *
- * Policy: a strong identity key for the entity's family (an account, a repository, a URL), or the model's
- * registry match corroborated by a name key, merges automatically. Name or acronym collisions alone, and
- * model matches without key support, wait for model adjudication; people are never merged by name alone.
+ * Policy: a strong identity key for the entity's family (an account, a repository, a URL), the exact name of
+ * one existing thing of the same type (see EXACT_NAME_TYPES), or the model's registry match corroborated by a
+ * name key, merges automatically. Partial name or acronym collisions, and model matches without key support,
+ * wait for model adjudication; people are never merged by name alone.
  */
 export const SELF_STABLE_ID = 'self';
 export type MentionDecision = { canonicalId: number; outcome: 'merged' | 'queued' | 'new' | 'existing'; basis: string[] };
@@ -35,6 +36,12 @@ export function identityBearing(family: string, key: IdentityKey): boolean {
 }
 
 const WEAK = new Set(['name', 'acronym']);
+/**
+ * Types whose exact name identifies them within one person's knowledge base. Model verdicts on exact-name pairs
+ * of these types were "same" 678 times out of 683. People, events (recurring meetings), and pages are excluded.
+ */
+export const EXACT_NAME_TYPES = new Set(['Organization', 'Concept', 'Course', 'Opportunity', 'Product', 'Project', 'Artifact', 'Place']);
+const GROUP = 'WITH RECURSIVE m(id) AS (SELECT ?1 UNION SELECT e.id FROM entities e JOIN m ON e.canonical_id=m.id) SELECT id FROM m';
 const id = (...parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 32);
 
 export class IdentityResolver {
@@ -54,6 +61,61 @@ export class IdentityResolver {
     this.graph.entities.merge(loser, winner, reason);
     indexEntity(this.db, loser);
     indexEntity(this.db, winner);
+    return true;
+  }
+
+  /** Every name an identity group goes by: display names and plain, search, and source aliases (not derived keys). */
+  private names(entityId: number): string[] {
+    const ids = this.group(entityId), list = ids.map(() => '?').join(',');
+    return this.db.query<{ name: string }, number[]>(`SELECT coalesce(display_name,name) AS name FROM entities WHERE id IN (${list})
+      UNION SELECT alias FROM graph_aliases WHERE entity_id IN (${list}) AND (scope IN ('','search') OR scope GLOB 'source:*')`)
+      .all(...ids, ...ids).map(row => row.name);
+  }
+
+  private group(entityId: number): number[] {
+    return this.db.query<{ id: number }, [number]>(GROUP).all(canonicalOf(this.db, entityId)).map(row => row.id);
+  }
+
+  /** Whether any two of these identity groups were judged distinct: a "different" verdict or an undone merge. */
+  private separated(entities: number[]): boolean {
+    const root = new Map<number, number>();
+    for (const entity of entities) for (const id of this.group(entity)) root.set(id, canonicalOf(this.db, entity));
+    const ids = [...root.keys()], list = ids.map(() => '?').join(',');
+    const pairs = this.db.query<{ a: number; b: number }, number[]>(`SELECT mention_id AS a,candidate_id AS b FROM graph_resolution_queue
+        WHERE state='different' AND coalesce(reason,'') NOT IN ('superseded by merge','already the same entity','different kinds of thing')
+        AND mention_id IN (${list}) AND candidate_id IN (${list})
+      UNION ALL SELECT entity_id,canonical_id FROM graph_identity_changes WHERE undone_at IS NOT NULL
+        AND entity_id IN (${list}) AND canonical_id IN (${list})`).all(...ids, ...ids, ...ids, ...ids);
+    return pairs.some(pair => root.get(pair.a) !== root.get(pair.b));
+  }
+
+  /**
+   * Existing identities a mention names exactly, oldest first: same type, an identical full name (every word,
+   * folded), and nothing recorded that tells any of them apart. Several exact matches of one type are presumed
+   * to be duplicates of each other; an empty list means the model must decide.
+   */
+  private exactMatches(mention: number, type: string, names: string[]): number[] {
+    if (!EXACT_NAME_TYPES.has(type)) return [];
+    const keys = new Set(names.map(fullNameKey).filter((key): key is string => key !== null));
+    if (!keys.size) return [];
+    const self = canonicalOf(this.db, mention);
+    const named = (id: number) => this.names(id).some(name => keys.has(fullNameKey(name) ?? ''));
+    const matches = [...entitiesWithKeys(this.db, [...keys].map(value => ({ kind: 'name', value })), self).keys()]
+      .filter(id => this.type(id) === type && named(id)).sort((a, b) => a - b);
+    return matches.length && !this.separated([self, ...matches]) ? matches : [];
+  }
+
+  /** The identity a mention names exactly, if the name alone settles it. */
+  exactNameMatch(mention: number, type: string, names: string[]): number | null {
+    return this.exactMatches(mention, type, names)[0] ?? null;
+  }
+
+  /** Settle a queued pair without the model when the mention names the candidate exactly. */
+  autoDecide(mention: number, candidate: number): boolean {
+    const self = canonicalOf(this.db, mention), other = canonicalOf(this.db, candidate);
+    if (self === other || this.type(self) !== this.type(other)) return false;
+    if (!this.exactMatches(self, this.type(self), this.names(self)).includes(other)) return false;
+    this.decide(mention, candidate, 'same', 1, `same ${this.type(self)} name`, 'Exact name match');
     return true;
   }
 
@@ -111,10 +173,15 @@ export class IdentityResolver {
       const match = input.match ? canonicalOf(this.db, input.match) : null;
       const usableMatch = match !== null && match !== mention && sameFamily(this.type(match), input.type) ? match : null;
       let decision: MentionDecision = { canonicalId: mention, outcome: 'new', basis: [] };
+      let exact: number | null = null;
       if (strong) {
         const basis = strong[1].filter(key => identityBearing(family, key)).map(key => `${key.kind}:${key.value}`);
         if (this.merge(mention, strong[0], `Shared identity key ${basis.join(', ')}`))
           decision = { canonicalId: canonicalOf(this.db, mention), outcome: 'merged', basis };
+      } else if ((exact = this.exactNameMatch(mention, input.type, input.names)) !== null) {
+        const key = input.names.map(fullNameKey).find(value => value && this.names(exact!).some(name => fullNameKey(name) === value));
+        if (this.merge(mention, exact, `Exact name match (${input.type}: ${key ?? input.names[0]})`))
+          decision = { canonicalId: canonicalOf(this.db, mention), outcome: 'merged', basis: [`exact-name:${key}`] };
       } else if (usableMatch !== null && hits.some(([other]) => other === usableMatch) && family !== 'Person') {
         const basis = ['model-match', ...hits.find(([other]) => other === usableMatch)![1].map(key => `${key.kind}:${key.value}`)];
         if (this.merge(mention, usableMatch, `Model registry match corroborated by ${basis.slice(1).join(', ')}`))
@@ -216,13 +283,14 @@ export class IdentityResolver {
       seenIn: sources.map(source => `${source.origin}: ${source.title} (${new Date(source.at).toISOString().slice(0, 10)})`) };
   }
 
-  /** Apply a model verdict on one queued pair. */
-  decide(mention: number, candidate: number, verdict: 'same' | 'different' | 'unsure', confidence: number, reason: string) {
+  /** Apply a verdict (the model's, unless `by` names the rule) on one queued pair. */
+  decide(mention: number, candidate: number, verdict: 'same' | 'different' | 'unsure', confidence: number, reason: string,
+    by = 'Model adjudication') {
     this.db.transaction(() => {
       this.db.query(`UPDATE graph_resolution_queue SET state=?,confidence=?,decided_at=?,reason=? WHERE mention_id=? AND candidate_id=?`)
         .run(verdict, confidence, Date.now(), reason.slice(0, 500), mention, candidate);
       if (verdict !== 'same') return;
-      if (confidence >= 0.85) this.merge(mention, candidate, `Model adjudication (${confidence.toFixed(2)}): ${reason}`.slice(0, 500));
+      if (confidence >= 0.85) this.merge(mention, candidate, `${by} (${confidence.toFixed(2)}): ${reason}`.slice(0, 500));
       else if (confidence >= 0.6) this.link(canonicalOf(this.db, mention), 'COREFERS_TO', canonicalOf(this.db, candidate), confidence,
         'proposed', 'adjudication');
       // Other queued candidates of a merged mention are now moot.

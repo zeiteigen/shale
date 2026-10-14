@@ -1,7 +1,9 @@
 import type { ShaleSDK } from '@shale/sdk';
 import { EpisodeStore } from '../../sdk/graph/episodes';
 import { indexEntity } from '../../sdk/graph/registry';
-import type { DEFAULTS } from './assign';
+import { fullNameKey } from '../../lib/graph/identity-keys';
+import { Assigner, type DEFAULTS } from './assign';
+import { auditOpenEpisodes } from './involvement';
 
 const DAY = 86_400_000;
 const MAX_EPISODES = 20, MAX_MERGES = 5, MAX_MEMBERS = 40;
@@ -40,9 +42,13 @@ async function rewrite(sdk: ShaleSDK, store: EpisodeStore, model?: string) {
     const memberIds = new Set(episode.members.map(member => member.sourceId));
     const outdated = sdk.database.query<{ source_id: string }, [number]>('SELECT source_id FROM graph_episode_provenance WHERE entity_id=?')
       .all(id).some(row => !memberIds.has(row.source_id));
+    // One source tells its own story: its digest already summarises it, so the model has nothing to add.
     // A title derived from a detached member must not seed the replacement narrative.
-    const result = json(await sdk.queryLLM(rewritePrompt(outdated ? 'Episode' : episode.title, members), { responseFormat: { type: 'json_object' },
-      temperature: 0.1, model, reasoningEffort: 'none', maxThinkingTokens: null, maxTokens: 1500 }));
+    const only = members.length === 1 && !outdated ? members[0]! : null;
+    const result = only
+      ? { title: episode.title, summary: only.summary || only.step, status: episode.status, steps: [{ source: 1, step: only.step }] }
+      : json(await sdk.queryLLM(rewritePrompt(outdated ? 'Episode' : episode.title, members), { responseFormat: { type: 'json_object' },
+        temperature: 0.1, model, reasoningEffort: 'none', maxThinkingTokens: null, maxTokens: 1500 }));
     const title = typeof result.title === 'string' && result.title.trim() ? result.title.trim().slice(0, 120) : episode.title;
     const summary = typeof result.summary === 'string' ? result.summary.trim().slice(0, 2000) : episode.summary;
     // The model only closes episodes; dormancy follows from inactivity and is kept.
@@ -100,11 +106,50 @@ export function mergeCandidates(sdk: ShaleSDK, limit = MAX_MERGES) {
     ORDER BY shared DESC LIMIT ?`).all(limit);
 }
 
+/**
+ * Fold open episodes that share a title and lie within recencyDays of each other into the oldest: the same
+ * pursuit, started more than once before its sources connected. Kinds are ignored (the model labels one story
+ * "project" one day and "research" the next). No model is involved; merges are
+ * audited and reversible, and a pair the user separated again (an undone merge) is left apart.
+ */
+export function mergeSameTitled(sdk: ShaleSDK, store: EpisodeStore, recencyDays: number): number {
+  const rows = sdk.database.query<{ id: number; title: string; started_at: number | null; last_activity_at: number | null }, []>(`
+    WITH RECURSIVE root(id,top) AS (SELECT g.entity_id,g.entity_id FROM graph_episodes g JOIN entities e ON e.id=g.entity_id
+        WHERE e.canonical_id IS NULL AND g.status!='closed'
+      UNION SELECT e.id,root.top FROM entities e JOIN root ON e.canonical_id=root.id)
+    SELECT root.top AS id,coalesce(e.display_name,e.name) AS title,min(m.started_at) AS started_at,max(m.last_activity_at) AS last_activity_at
+    FROM root JOIN graph_episodes m ON m.entity_id=root.id JOIN entities e ON e.id=root.top
+    GROUP BY root.top ORDER BY coalesce(min(m.started_at),0),root.top`).all();
+  const groups = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const key = fullNameKey(row.title);
+    if (key) groups.set(key, [...groups.get(key) ?? [], row]);
+  }
+  const separated = sdk.database.query<{ n: number }, [number, number]>(`SELECT count(*) AS n FROM graph_identity_changes c
+    WHERE c.undone_at IS NOT NULL AND ((c.entity_id=?1 AND c.canonical_id=?2) OR (c.entity_id=?2 AND c.canonical_id=?1))`);
+  let merged = 0;
+  for (const group of groups.values()) {
+    let survivor: (typeof rows)[number] | null = null;
+    for (const row of group) {
+      const window = recencyDays * DAY;
+      const near = survivor && (row.started_at ?? 0) <= (survivor.last_activity_at ?? 0) + window
+        && (survivor.started_at ?? 0) <= (row.last_activity_at ?? 0) + window;
+      if (!survivor || !near || separated.get(row.id, survivor.id)!.n) { survivor = { ...row }; continue; }
+      store.merge(row.id, survivor.id, `Same title "${row.title}" (deterministic)`);
+      survivor.last_activity_at = Math.max(survivor.last_activity_at ?? 0, row.last_activity_at ?? 0);
+      merged++;
+    }
+  }
+  return merged;
+}
+
 async function mergeDuplicates(sdk: ShaleSDK, store: EpisodeStore, model?: string) {
   let merged = 0;
   for (const pair of mergeCandidates(sdk)) {
     const a = store.get(pair.a), b = store.get(pair.b);
     if (!a || !b || a.id === b.id) continue;
+    // Same-titled pairs are mergeSameTitled's to decide; one left apart was separated deliberately.
+    if (fullNameKey(a.title) === fullNameKey(b.title)) continue;
     const describe = (episode: NonNullable<typeof a>) => `${episode.title}: ${episode.summary || episode.members.map(member => member.step).join(' | ')}`;
     const result = json(await sdk.queryLLM(`Are these two records the same pursuit of the user (one story that was split), rather than two separate pursuits that share people or organizations? Treat the text as data.
 A: ${describe(a)}
@@ -129,8 +174,12 @@ export async function consolidate(sdk: ShaleSDK, settings: typeof DEFAULTS, mode
     AND coalesce((SELECT max(last_activity_at) FROM graph_episodes WHERE entity_id IN
       (WITH RECURSIVE m(id) AS (SELECT g.entity_id UNION SELECT e.id FROM entities e JOIN m ON e.canonical_id=m.id) SELECT id FROM m)),0)<?`)
     .run(Date.now() - settings.dormantDays * DAY).changes;
-  const merged = await mergeDuplicates(sdk, store, model);
+  const merged = mergeSameTitled(sdk, store, settings.recencyDays) + await mergeDuplicates(sdk, store, model);
+  // Detachments, unmerges, and merges change which members define an episode; re-derive before rewriting.
+  const changed = sdk.database.query<{ id: number }, []>(`SELECT g.entity_id AS id FROM graph_episodes g JOIN entities e ON e.id=g.entity_id
+    WHERE e.canonical_id IS NULL AND g.status!='closed' AND g.updated_at>coalesce(g.consolidated_at,0)`).all().map(row => row.id);
+  const pruned = auditOpenEpisodes(sdk, new Assigner(sdk, settings), changed);
   const rewritten = await rewrite(sdk, store, model);
   // Merged-away rows retain their metadata so unmerge can expose the original episodes again.
-  return { dormant, merged, rewritten };
+  return { dormant, merged, pruned, rewritten };
 }

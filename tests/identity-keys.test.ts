@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { acronymKeys, emailKeys, identityKeys, nameKeys, namePhrases, textReferences, urlKey, urlKeys } from '../lib/graph/identity-keys';
+import { acronymKeys, emailKeys, fullNameKey, identityKeys, nameKeys, namePhrases, textReferences, urlKey, urlKeys } from '../lib/graph/identity-keys';
 import { canonicalType, sameFamily, typeFamily } from '../lib/graph/ontology';
 
 const weak = (label: string) => new Set([...nameKeys(label), ...acronymKeys(label)]);
@@ -12,6 +12,13 @@ describe('identity keys', () => {
     expect(weak('Northbridge Rocketry').has('nhpc')).toBe(false);
     // A lone lower-case word is not treated as an abbreviation.
     expect(acronymKeys('app')).toEqual([]);
+  });
+
+  it('keys exact names without dropping distinguishing words', () => {
+    for (const label of ['Global Politics', 'global-politics', 'GLOBAL  POLITICS', 'Glóbal Politics'])
+      expect(fullNameKey(label)).toBe('globalpolitics');
+    expect(fullNameKey('Cloudflare Community')).not.toBe(fullNameKey('Cloudflare'));
+    expect(fullNameKey('-')).toBeNull();
   });
 
   it('derives account and repository handles from URLs', () => {

@@ -25,7 +25,8 @@ it('waits for another local writer before atomically committing episode assignme
   const pending = { digest: pendingDigests(sdk, 1)[0], activity: null, signals: new Map([[org, 1]]), candidates: [] };
   const writer = await holdDatabaseWriter(path);
   try {
-    new Assigner(sdk, DEFAULTS).attach(episode, pending, 'accepted', 1, 'Observed application');
+    // The trigger defines the episode, so its entities become the episode's hooks in the same transaction.
+    new Assigner(sdk, DEFAULTS).attach(episode, pending, 'accepted', 1, 'Observed application', true);
     expect(await writer.exited).toBe(0);
     expect(store.isMember(episode, 'application')).toBe(true);
     expect(store.involved(episode).map(entity => entity.id)).toEqual([org]);
