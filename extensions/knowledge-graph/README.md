@@ -64,7 +64,7 @@ It runs four stages:
    - **Learning.** The words between the two names, and one word either side, are generalised into token patterns. Addresses, links, and numbers are masked.
    - **Selection.** A pattern is kept when at least `patternMinSupport` distinct pairs support it and its precision on held-out folds is at least `patternMinPrecision`. Folds are split by source, and each pattern is tested on the full passages with gazetteer mentions.
    - **Storage.** Learned patterns are stored in `extension_state` (`relation-patterns-v1`) and relearned at most daily.
-   - **Applying.** Each run applies them to up to `patternSourcesPerRun` newly digested sources. Each claim quotes the exact span covering both mentions.
+   - **Applying.** Each run applies them to up to `patternSourcesPerRun` newly digested sources. Each claim quotes the exact span covering both mentions and has a revision-specific identity, so refreshed evidence can produce a new proposal without changing existing reviews. Claims and the composite `(digested_at, source_id)` cursor commit together per source; tied timestamps remain resumable across batches. Legacy timestamp cursors replay their boundary to recover skipped ties.
 
 ```bash
 bun run settings set knowledge-graph reasoningMode active

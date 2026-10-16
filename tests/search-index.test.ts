@@ -120,6 +120,25 @@ describe("search index access control", () => {
     expect(searchFields(read.database, '"nightjar"')).toEqual([]);
   });
 
+  it("hides an old private revision's search document until the visible memory is reindexed", () => {
+    ingest("note", "obsidian", "file:///vault/note.md", "Garden note", "Private password: hunter2. Ocelot sanctuary plan.");
+    classifyPending(db, { budgetMs: 5_000 });
+    const old = db.query<{ id: number }, []>("SELECT id FROM graph_source_revisions WHERE source_id='note'").get()!.id;
+    indexSources(db);
+    expect(ids(searchFields(db, '"ocelot"'))).toEqual(["note"]);
+    ingest("note", "obsidian", "file:///vault/note.md", "Garden note", "Planted basil and mint today.", "v2");
+    const access = createScopedSDK("cloud", sdk);
+    expect(access.scoped!.isVisible("sources", "note")).toBe(true);
+    expect(access.scoped!.isVisible("revisions", old)).toBe(false);
+    expect(access.read.database.query("SELECT * FROM search_docs").all()).toEqual([]);
+    expect(searchFields(access.read.database, '"ocelot"')).toEqual([]);
+    expect(trigramCandidates(access.read.database, "ocelot")).toEqual([]);
+    indexSources(db);
+    access.refresh();
+    expect(ids(searchFields(access.read.database, '"basil"'))).toEqual(["note"]);
+    expect(searchFields(access.read.database, '"ocelot"')).toEqual([]);
+  });
+
   it("hides a stale document whose indexed entity became invisible", () => {
     ingest("note", "obsidian", "file:///vault/note.md", "Garden note", "Planted basil and mint today.");
     const heron = entity("Heron Initiative", "Project", "note");

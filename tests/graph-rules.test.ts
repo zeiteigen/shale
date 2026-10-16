@@ -53,11 +53,11 @@ describe('rule evaluator', () => {
   });
 
   it('closes PART_OF transitively over things, semi-naively, with validity intersection and bounds', () => {
-    const { db, entity, claim } = fixture();
+    const { db, sdk, entity, claim } = fixture();
     const [a, b, c, d] = ['Unit A', 'Course B', 'Program C', 'School D'].map((name, index) => entity(name, ['Concept', 'Course', 'Opportunity', 'Organization'][index]!));
-    claim(a!, 'PART_OF', b!, { validFrom: 0, validTo: 1000 });
-    claim(b!, 'part_of', c!, { validFrom: 500 });
-    claim(c!, 'PART_OF', d!);
+    const ab = claim(a!, 'PART_OF', b!, { validFrom: 0, validTo: 1000 });
+    const bc = claim(b!, 'part_of', c!, { validFrom: 500 });
+    const cd = claim(c!, 'PART_OF', d!);
     const result = evaluateRules(db, DEFAULT_RULES);
     const derived = result.derivations.map(item => [item.subject, item.object]);
     expect(derived).toContainEqual([a, c]);
@@ -65,6 +65,11 @@ describe('rule evaluator', () => {
     expect(derived).toContainEqual([a, d]);
     expect(result.derivations.find(item => item.subject === a && item.object === c)).toMatchObject({ validFrom: 500, validTo: 1000 });
     expect(evaluateRules(db, DEFAULT_RULES, { maxDerivations: 1 })).toMatchObject({ truncated: true });
+    const longest = result.derivations.find(item => item.subject === a && item.object === d)!;
+    expect(longest.dependsOn.sort()).toEqual([ab, bc, cd].sort());
+    expect(commitDerivations(db, sdk.graph, result.derivations).created).toBe(3);
+    sdk.graph.lifecycle.review(bc, 'retracted', 'test', 'withdrawn middle premise');
+    for (const derivation of result.derivations) expect(sdk.graph.claims.get(derivationId(derivation)).status).toBe('stale');
     // Connector containers are not things: a message in a conversation in a server is not closed over.
     const message = entity('msg', 'Conversation'), server = entity('Guild', 'Server');
     claim(message, 'PART_OF', a!);

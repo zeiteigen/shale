@@ -19,7 +19,7 @@ import { typeMention } from './mention-typing';
  */
 
 export type Term = number | string;
-export interface Fact { s: Term; o: Term; claimId?: string; status?: string; validFrom?: number; validTo?: number }
+export interface Fact { s: Term; o: Term; claimId?: string; dependsOn?: string[]; status?: string; validFrom?: number; validTo?: number }
 
 export interface Atom {
   predicate: string;
@@ -228,8 +228,8 @@ export function evaluateRules(db: Database, rules: Rule[], options: EvaluateOpti
     const from = Math.max(...used.map(fact => fact.validFrom ?? -Infinity)), to = Math.min(...used.map(fact => fact.validTo ?? Infinity));
     if (from >= to) return;
     if (derivations.length >= maxDerivations) { truncated = true; return; }
-    const dependsOn = [...new Set(used.flatMap(fact => fact.claimId ? [fact.claimId] : []))];
-    const fact: Fact = { s, o, status: 'proposed', validFrom: Number.isFinite(from) ? from : undefined, validTo: Number.isFinite(to) ? to : undefined };
+    const dependsOn = [...new Set(used.flatMap(fact => [...(fact.claimId ? [fact.claimId] : []), ...(fact.dependsOn ?? [])]))];
+    const fact: Fact = { s, o, dependsOn, status: 'proposed', validFrom: Number.isFinite(from) ? from : undefined, validTo: Number.isFinite(to) ? to : undefined };
     fresh.add(rule.head.predicate, fact);
     const qualifiers: Record<string, string | number> = { rule: rule.id, ...extra };
     for (const [name, value] of binding) if (typeof value === 'string') qualifiers[name.slice(1)] = value;

@@ -102,9 +102,12 @@ export async function reasonPatterns(sdk: ShaleSDK, mode: ShadowMode, settings: 
   const { learned, relearned } = refreshPatterns(db, { minPrecision: settings.patternMinPrecision ?? 0.9, minSupport: settings.patternMinSupport ?? 3,
     extensionId: sdk.extensionId });
   const patterns = learned.patterns;
-  const cursor = Number(sdk.state.get(PATTERN_CURSOR) ?? 0) || 0;
-  const sources = db.query<{ source_id: string; revision_id: number; digested_at: number }, [number, number]>(`SELECT source_id,revision_id,digested_at
-    FROM graph_source_digests WHERE digested_at>? ORDER BY digested_at,source_id LIMIT ?`).all(cursor, settings.patternSourcesPerRun ?? 50);
+  const saved = sdk.state.getJson<number | { digestedAt: number; sourceId: string }>(PATTERN_CURSOR);
+  // Replay a legacy timestamp's boundary: its remaining tied rows may never have been processed.
+  const cursor = typeof saved === 'number' ? { digestedAt: saved, sourceId: '' } : saved ?? { digestedAt: 0, sourceId: '' };
+  const sources = db.query<{ source_id: string; revision_id: number; digested_at: number }, [number, string, number]>(`SELECT source_id,revision_id,digested_at
+    FROM graph_source_digests WHERE (digested_at,source_id)>(?,?) ORDER BY digested_at,source_id LIMIT ?`)
+    .all(cursor.digestedAt, cursor.sourceId, settings.patternSourcesPerRun ?? 50);
   let candidates = 0, written = 0, agreed = 0;
   for (const source of sources) {
     const found = patterns.length ? patternCandidates(db, source.source_id, source.revision_id, patterns) : [];
@@ -116,7 +119,7 @@ export async function reasonPatterns(sdk: ShaleSDK, mode: ShadowMode, settings: 
         const llm = model.get(`${Math.min(candidate.subject, candidate.object)}:${Math.max(candidate.subject, candidate.object)}`) ?? [];
         if (llm.includes(`${candidate.subject}>${candidate.predicate}>${candidate.object}`)) agreed++;
         if (mode === 'active') {
-          const id = `pattern:${sha([source.source_id, candidate.subject, candidate.predicate, candidate.object])}`;
+          const id = `pattern:${sha([source.source_id, source.revision_id, candidate.subject, candidate.predicate, candidate.object])}`;
           if (db.query('SELECT 1 FROM graph_claims WHERE id=?').get(id)) continue;
           sdk.graph.claims.add({ id, subject: candidate.subject, predicate: candidate.predicate, object: candidate.object, status: 'proposed',
             method: 'pattern', confidence: candidate.confidence, qualifiers: { patternId: candidate.patternId, sourceId: source.source_id },
@@ -132,9 +135,10 @@ export async function reasonPatterns(sdk: ShaleSDK, mode: ShadowMode, settings: 
       // Per source, so recall against the model can be measured too.
       if (mode !== 'active') recordShadow(db, { kind: 'relation', subject: `pattern-source:${source.source_id}`, method: 'pattern',
         verdict: found.map(candidate => `${candidate.subject}>${candidate.predicate}>${candidate.object}`), llm: modelTriples });
+      // Claims and progress commit together, so interrupted sources are retried in full.
+      sdk.state.setJson(PATTERN_CURSOR, { digestedAt: source.digested_at, sourceId: source.source_id });
     })();
     candidates += found.length;
-    sdk.state.set(PATTERN_CURSOR, String(source.digested_at));
     await new Promise(resolve => setTimeout(resolve, 5));
   }
   return { patterns: patterns.length, relearned, sources: sources.length, candidates, written, agreed };

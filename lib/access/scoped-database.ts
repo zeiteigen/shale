@@ -51,8 +51,10 @@ export function shadowFilters(profileName: string): Record<string, string> {
     graph_claims: `id IN ${v("claims")}`,
     graph_source_digests: `source_id IN ${v("sources")}`,
     // The fielded search index: a document is searchable only while its source and every entity whose names it
-    // indexes are visible (the indexer keeps those at or below the source's tier; this covers stale documents).
-    search_docs: `source_id IN ${v("sources")} AND NOT EXISTS(SELECT 1 FROM main.search_doc_entities x
+    // indexes are visible, and its indexed memory version is still current.
+    search_docs: `source_id IN ${v("sources")}
+      AND memory_version=coalesce((SELECT m.version FROM main.source_memories m WHERE m.source_id=search_docs.source_id),0)
+      AND NOT EXISTS(SELECT 1 FROM main.search_doc_entities x
       WHERE x.doc_id=search_docs.id AND x.entity_id NOT IN ${v("entities")})`,
     graph_digest_signals: `source_id IN ${v("sources")} AND entity_id IN ${v("entities")}`,
     // An episode is labelled as sensitive as its most sensitive member (lib/access/classify.ts).
