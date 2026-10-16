@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite';
 import { ensureStorySchema } from '../../lib/graph/story-schema';
 import { AFFILIATION_KEY_KINDS, emailKeys, identityKeys, keyScope, urlKeys, type IdentityKey } from '../../lib/graph/identity-keys';
 import { REGISTRY_FAMILIES, typeFamily } from '../../lib/graph/ontology';
+import { MIN_DICTIONARY_DOCUMENTS, termStatistics } from '../../lib/text/terms';
 
 /**
  * The registry is the set of canonical entities a model may link a mention to: people, organizations,
@@ -141,14 +142,21 @@ const QUERY_STOPWORDS = new Set(['the', 'and', 'for', 'with', 'from', 'that', 't
   'when', 'which', 'who', 'how', 'also', 'more', 'some', 'any', 'one', 'its', 'they', 'them', 'been', 'would', 'could',
   'http', 'https', 'www', 'com']);
 
-/** Distinct query terms from free text, preferring capitalised and unusual tokens. */
-export function queryTerms(texts: string[], limit = 48): string[] {
+/**
+ * Distinct query terms from free text. With corpus statistics (lib/text/terms.ts) terms are ranked by IDF, so rare
+ * words ("nhpc", "frankenstein") lead and capitalised filler ("Hello", "Team") does not; capitalisation is only a
+ * tie-breaker. Without statistics (fresh or scoped database) the capitalisation heuristic decides.
+ */
+export function queryTerms(texts: string[], limit = 48, db?: Database): string[] {
+  let stats: ReturnType<typeof termStatistics> | null = null;
+  try { if (db) { const loaded = termStatistics(db); if (loaded.documents >= MIN_DICTIONARY_DOCUMENTS) stats = loaded; } } catch { stats = null; }
   const scored = new Map<string, number>();
   for (const text of texts) for (const match of text.matchAll(/[\p{L}\p{N}][\p{L}\p{N}_-]{1,40}/gu)) {
     const token = match[0];
     const lower = token.toLowerCase();
     if (lower.length < 3 || QUERY_STOPWORDS.has(lower) || /^\d+$/.test(lower)) continue;
-    const weight = (/\p{Lu}{2}/u.test(token) ? 3 : /^\p{Lu}/u.test(token) ? 2 : 1) + (/\d/.test(token) ? 0.5 : 0);
+    const shape = (/\p{Lu}{2}/u.test(token) ? 3 : /^\p{Lu}/u.test(token) ? 2 : 1) + (/\d/.test(token) ? 0.5 : 0);
+    const weight = stats ? Math.log(1 + (stats.documents - stats.df(lower) + 0.5) / (stats.df(lower) + 0.5)) + shape * 0.1 : shape;
     scored.set(lower, Math.max(scored.get(lower) ?? 0, weight) + 0.01);
   }
   return [...scored.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([term]) => term);
@@ -180,7 +188,7 @@ export function shortlist(db: Database, options: { keys?: IdentityKey[]; texts?:
     const found = entry(db, id, matched.map(key => `${key.kind}:${key.value}`));
     if (found && allow(found.type) && isRegistryType(found.type)) result.set(id, found);
   }
-  const terms = queryTerms(options.texts ?? []);
+  const terms = queryTerms(options.texts ?? [], 48, db);
   if (terms.length && result.size < limit) {
     // Type filters belong in SQL: otherwise frequent types fill the candidate window and rarer ones never surface.
     const types = options.types ?? [], skippedTypes = options.excludeTypes ?? [];

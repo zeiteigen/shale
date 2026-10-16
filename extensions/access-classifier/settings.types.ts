@@ -9,4 +9,6 @@ export interface AccessClassifierSettings {
   maxContentChars: number;
   /** Optional chat model override. */
   llmModel: string | null;
+  /** Distilled local model: off, shadow (record beside the LLM), or active (skip the LLM for settled sources). */
+  distilledMode: "off" | "shadow" | "active";
 }

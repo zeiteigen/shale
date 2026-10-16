@@ -6,5 +6,13 @@
   "recencyDays": 45,
   "maxAdjudicationsPerRun": 12,
   "dormantDays": 45,
+  "clusteringMode": "shadow",
+  "narrativeMode": "shadow",
+  "llmNarrativePolish": false,
+  "clusterResolution": 1.5,
+  "clusterTauDays": 60,
+  "clusterHysteresis": 1,
+  "clusterMergeAffinity": 2.5,
+  "maxClusterChangesPerRun": 40,
   "llmModel": null
 }

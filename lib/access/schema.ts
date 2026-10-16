@@ -2,7 +2,9 @@ import type { Database } from "bun:sqlite";
 import { TIERS, type Tier } from "./policy";
 
 export type LabelKind = "source" | "entity" | "claim";
-export type LabelOrigin = "manual" | "heuristic" | "llm";
+/** `distilled`: a local model trained on LLM labels stood in for the LLM; never below the heuristic tier. */
+export type LabelOrigin = "manual" | "heuristic" | "llm" | "distilled";
+const ORIGINS_SQL = "'manual','heuristic','llm','distilled'";
 
 export interface AccessLabel {
   kind: LabelKind;
@@ -19,14 +21,26 @@ export interface AccessLabel {
  * cannot be lowered by the LLM; only a manual label overrides them. `content_hash` ties automatic
  * labels to the content they judged, so changed records are classified again.
  */
-export function ensureAccessSchema(db: Database) {
-  db.run(`CREATE TABLE IF NOT EXISTS graph_access_labels (
+const labelTable = (name: string) => `CREATE TABLE IF NOT EXISTS ${name} (
     kind TEXT NOT NULL CHECK(kind IN ('source','entity','claim')), record_id TEXT NOT NULL,
-    origin TEXT NOT NULL CHECK(origin IN ('manual','heuristic','llm')),
+    origin TEXT NOT NULL CHECK(origin IN (${ORIGINS_SQL})),
     tier INTEGER NOT NULL CHECK(tier BETWEEN 0 AND ${TIERS.length - 1}), hard INTEGER NOT NULL DEFAULT 0,
     reason TEXT NOT NULL DEFAULT '', content_hash TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL,
     PRIMARY KEY(kind,record_id,origin)
-  ) STRICT`);
+  ) STRICT`;
+
+export function ensureAccessSchema(db: Database) {
+  db.run(labelTable("graph_access_labels"));
+  // Older databases constrain origin to three values; SQLite cannot alter a CHECK, so rebuild the table once.
+  const sql = db.query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE type='table' AND name='graph_access_labels'").get()?.sql ?? "";
+  if (!sql.includes("'distilled'")) db.transaction(() => {
+    db.run("DROP TABLE IF EXISTS graph_access_labels_rebuild");
+    db.run(labelTable("graph_access_labels_rebuild"));
+    db.run(`INSERT INTO graph_access_labels_rebuild(kind,record_id,origin,tier,hard,reason,content_hash,updated_at)
+      SELECT kind,record_id,origin,tier,hard,reason,content_hash,updated_at FROM graph_access_labels`);
+    db.run("DROP TABLE graph_access_labels");
+    db.run("ALTER TABLE graph_access_labels_rebuild RENAME TO graph_access_labels");
+  })();
   db.run(`CREATE TABLE IF NOT EXISTS graph_access_revision_labels (
     revision_id INTEGER PRIMARY KEY REFERENCES graph_source_revisions(id) ON DELETE CASCADE,
     tier INTEGER NOT NULL CHECK(tier BETWEEN 0 AND ${TIERS.length - 1}), hard INTEGER NOT NULL,

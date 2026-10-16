@@ -1,6 +1,8 @@
 import type { ShaleSDK } from "@shale/sdk";
+import { registerSearchIndexing } from "./search-index";
 
 export function registerMessages(sdk: ShaleSDK) {
+  registerSearchIndexing(sdk);
   sdk.messages.handle('graph:ingest-claims',req=>({claims:sdk.graph.ingestClaims(req.claims)}));
   sdk.messages.handle('graph:query',req=>sdk.graph.query.traverse(req));
   sdk.messages.handle('graph:claims',req=>({claims:sdk.graph.claims.list(req)}));

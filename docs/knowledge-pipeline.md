@@ -46,7 +46,7 @@ The rewrite replaces the canonical narrative's inputs. Original merged-away narr
 
 ## 6. Retrieve and correct
 
-`search_graph` searches retained source memory, returning one preview per source with immutable summary/snippet version IDs. It expands up to three hits by default into graph neighborhoods using accepted links and confident proposed links, and returns relevant episodes. Set `maxSeeds:0` to disable neighborhood expansion. `list_episodes`, `get_episode`, and `entity_timeline` provide story/entity entry points without requiring a passage match.
+`search_graph` searches retained source memory, returning one preview per source with immutable summary/snippet version IDs. With `searchRanker: "engine"` it uses the fielded index and ranking engine (`sdk/retrieval/`): query operators, entity and acronym linking, typo correction, feature ranking, near-duplicate collapsing, and diversity; the entities a query names also seed the graph neighbourhoods. It expands up to three hits by default into graph neighborhoods using accepted links and confident proposed links, and returns relevant episodes. Set `maxSeeds:0` to disable neighborhood expansion. `list_episodes`, `get_episode`, and `entity_timeline` provide story/entity entry points without requiring a passage match.
 
 Reads use the consumer's scoped SDK. Profiles filter sources, retained revisions, entities, claims, evidence and narratives. Agents can review claims, fix identities, edit retained memory, refresh originals, or correct episodes through audited tools. Proposed/model-generated context should retain its uncertainty when an agent uses it in an answer.
 

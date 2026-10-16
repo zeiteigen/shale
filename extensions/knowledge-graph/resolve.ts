@@ -2,7 +2,9 @@ import { getSDK, type ShaleSDK } from '@shale/sdk';
 import { acquireTaskLease } from '../../lib/task-lease';
 import { credentialStore } from '../../lib/credentials';
 import { IdentityResolver } from '../../sdk/graph/identity';
-import { rebuildRegistryBatch } from '../../sdk/graph/registry';
+import { canonicalOf, rebuildRegistryBatch } from '../../sdk/graph/registry';
+import { bandVerdict, DEFAULT_BANDS, explain, linkageContext, pairFeatures, refreshModel, score, type LinkageModel } from '../../lib/graph/linkage';
+import { recordShadow, recordShadowLLM, shadowMode } from '../../lib/graph/shadow';
 import type { KnowledgeGraphSettings } from './settings.types';
 
 const REGISTRY_BUILT = 'registry-built-v1';
@@ -46,6 +48,45 @@ export function settleExact(resolver: IdentityResolver, limit = 2000): number {
   return settled;
 }
 
+const subject = (pair: { mention_id: number; candidate_id: number }) => `${pair.mention_id}:${pair.candidate_id}`;
+
+/**
+ * Score queued pairs with the record-linkage model before the model sees them. Every scored pair is recorded
+ * as a shadow decision (kind `identity`, method `linkage`), so its agreement with the model's later verdict
+ * can be measured. In active mode, confident scores settle the pair: `same` above the band (people need a
+ * stricter score and relational evidence), `different` below it or when the groups are cannot-linked.
+ */
+export async function settleByLinkage(sdk: ShaleSDK, resolver: IdentityResolver, model: LinkageModel,
+  settings: Partial<KnowledgeGraphSettings> = {}, limit = 1000) {
+  const mode = shadowMode(settings.linkageMode);
+  if (mode === 'off') return { scored: 0, settled: 0 };
+  const db = sdk.database, context = linkageContext(db);
+  const bands = { same: settings.linkageSameThreshold ?? DEFAULT_BANDS.same,
+    different: settings.linkageDifferentThreshold ?? DEFAULT_BANDS.different,
+    personSame: settings.linkagePersonSameThreshold ?? DEFAULT_BANDS.personSame };
+  let scored = 0, settled = 0;
+  for (const pair of resolver.pending(limit)) {
+    // An earlier merge in this pass may have settled the pair or joined its sides; the model pass handles that.
+    if (!db.query("SELECT 1 FROM graph_resolution_queue WHERE mention_id=? AND candidate_id=? AND state='pending'").get(pair.mention_id, pair.candidate_id)
+      || canonicalOf(db, pair.mention_id) === canonicalOf(db, pair.candidate_id)) continue;
+    const conflict = resolver.cannotLink(pair.mention_id, pair.candidate_id);
+    const features = pairFeatures(db, pair.mention_id, pair.candidate_id, context);
+    const p = score(model, features);
+    const verdict = conflict ? 'different' : bandVerdict(p, features, bands);
+    const basis = explain(model, features);
+    recordShadow(db, { kind: 'identity', subject: subject(pair), method: 'linkage',
+      verdict: { p: Math.round(p * 1e4) / 1e4, verdict: verdict ?? 'defer', basis, ...(conflict ? { conflict } : {}) } });
+    scored++;
+    if (mode === 'active' && verdict) {
+      resolver.decide(pair.mention_id, pair.candidate_id, verdict, conflict ? 1 : verdict === 'same' ? p : 1 - p,
+        conflict ? `cannot-link: ${conflict}` : `linkage p=${p.toFixed(3)} (${basis})`, 'Record linkage');
+      settled++;
+    }
+    if (scored % 50 === 0) await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  return { scored, settled };
+}
+
 /** Ask the model about queued pairs, eight per request, and apply each verdict as it arrives. */
 export async function adjudicate(sdk: ShaleSDK, resolver: IdentityResolver, limit: number, model?: string) {
   const pending = resolver.pending(limit);
@@ -67,6 +108,8 @@ export async function adjudicate(sdk: ShaleSDK, resolver: IdentityResolver, limi
     for (const verdict of parseVerdicts(raw, open.length)) {
       const pair = open[verdict.pair - 1]!;
       resolver.decide(pair.mention_id, pair.candidate_id, verdict.verdict, verdict.confidence, verdict.reason);
+      // The teacher's answer beside the linkage score recorded for this pair, if any.
+      recordShadowLLM(sdk.database, 'identity', subject(pair), { verdict: verdict.verdict, confidence: verdict.confidence });
       decided++;
     }
   });
@@ -103,11 +146,18 @@ export async function run(sdkOverride?: ShaleSDK) {
       if (result.keyed < 200) break;
     }
     resolver.ensureSelf(selfConfig(sdk));
-    const queued = resolver.sweepDuplicates();
+    const queued = resolver.sweepDuplicates() + resolver.sweepNearDuplicates(settings.maxNearDuplicatesPerRun ?? 100);
     const exact = settleExact(resolver);
+    let linkage = { scored: 0, settled: 0 }, refit = false;
+    if (shadowMode(settings.linkageMode) !== 'off') {
+      // Refit from the model's verdicts when enough new ones have arrived (at most daily); the shipped weights otherwise.
+      const current = refreshModel(sdk.database, { minNewLabels: settings.linkageRefitMinLabels ?? 50 });
+      refit = current.refit;
+      linkage = await settleByLinkage(sdk, resolver, current.model, settings);
+    }
     const decided = await adjudicate(sdk, resolver, settings.maxAdjudicationsPerRun ?? 32, settings.llmModel || undefined);
-    sdk.logger.log(`Identity resolution: ${keyed} connector entities keyed, ${merged} merged, ${queued} duplicate pairs queued, ${exact} settled by exact name, ${decided} adjudicated.`);
-    return { keyed, merged, queued, exact, decided };
+    sdk.logger.log(`Identity resolution: ${keyed} connector entities keyed, ${merged} merged, ${queued} duplicate pairs queued, ${exact} settled by exact name, ${linkage.settled} settled by record linkage (${linkage.scored} scored${refit ? ', model refit' : ''}), ${decided} adjudicated.`);
+    return { keyed, merged, queued, exact, linkage: linkage.settled, decided };
   } finally {
     clearInterval(heartbeat);
     lease.release();

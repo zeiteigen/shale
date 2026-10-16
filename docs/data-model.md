@@ -53,6 +53,8 @@ Membership is a `PART_OF_EPISODE` claim from the source's record entity to an ep
 
 Episode merge groups identities rather than copying memberships, involvement or metadata. Readers combine dates and relationships across the group. Undo separates those groups; generated narratives are refreshed by consolidation. Detachment retracts membership but retains earlier narrative provenance until a complete replacement title/summary has been committed. Restricted profiles need every active member and retained narrative input visible, including across merge chains. This prevents stale generated text from exposing removed private inputs.
 
+Membership can also come from global clustering (`lib/graph/cluster.ts`, basis `cluster …`); see the [episodes README](../extensions/episodes/README.md#global-clustering-clusteringmode-narrativemode-default-shadow).
+
 Consolidation rewrites canonical open episodes with remaining members. It replaces that row's provenance, preserving merged-away narratives and their inputs for undo. This can conservatively keep a merged group restricted until its original narratives are separately corrected; see [access-control limits](access-control.md#how-it-is-enforced).
 
 ## Operational and audit state

@@ -13,4 +13,9 @@ How the verdicts are applied:
 - Tiers the user sets on the Access page or in a reader pane override both classifiers.
 - A source whose model response fails three times keeps its heuristic tier until its content changes.
 
-Settings are read on every run: `enabled`, `llmEnabled`, `maxSourcesPerRun`, `maxContentChars`, and `llmModel`.
+**Distilled model** (`distilled.ts`). A softmax model over words, record type, predicate, origins, URI host, and the heuristic tier is trained from the stored LLM labels. It is kept in extension state and refit when labels grow by a tenth. For each kind, a tail bound ε is calibrated on held-out sources, so items it settles rarely have an LLM tier above the recorded one. `distilledMode`:
+- `shadow` (default): verdicts are recorded in `graph_shadow_decisions` (kind `access`) beside the LLM's.
+- `active`: a source skips the LLM only when the model settles the source and every listed entity and claim. To settle, it must predict at least the heuristic tier with P(LLM more sensitive) ≤ ε. Labels are written with origin `distilled` at max(heuristic, prediction). They count as classified and rank below LLM labels and above heuristics. They are never written over an LLM label.
+- `off`: no distilled model.
+
+Settings are read on every run: `enabled`, `llmEnabled`, `maxSourcesPerRun`, `maxContentChars`, `llmModel`, and `distilledMode`.

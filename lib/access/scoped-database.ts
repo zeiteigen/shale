@@ -8,8 +8,10 @@ const PREFIX = "access";
 
 /** Tables without user content, readable unfiltered. FTS5 MATCH cannot run through a view; every
  *  `chunks_fts` query joins `chunks`, and every `entity_registry_fts` query joins `entities` (or a table
- *  keyed by entity), whose shadow views drop hidden rows. */
-export const PASSTHROUGH_TABLES = new Set(["graph_relations", "graph_migrations", "chunks_fts", "entity_registry_fts"]);
+ *  keyed by entity), whose shadow views drop hidden rows. Every `source_search_fts` and `source_search_trigram`
+ *  query (sdk/retrieval/indexer.ts) joins `search_docs` on rowid and then `sources`. */
+export const PASSTHROUGH_TABLES = new Set(["graph_relations", "graph_migrations", "chunks_fts", "entity_registry_fts",
+  "source_search_fts", "source_search_trigram"]);
 
 /** Virtual-table storage (e.g. `chunks_fts_data`) has reserved names that cannot be shadowed. */
 export function virtualTableStorage(db: Database): Set<string> {
@@ -48,6 +50,10 @@ export function shadowFilters(profileName: string): Record<string, string> {
     graph_participants: `event_id IN ${v("entities")} AND entity_id IN ${v("entities")} AND claim_id IN ${v("claims")}`,
     graph_claims: `id IN ${v("claims")}`,
     graph_source_digests: `source_id IN ${v("sources")}`,
+    // The fielded search index: a document is searchable only while its source and every entity whose names it
+    // indexes are visible (the indexer keeps those at or below the source's tier; this covers stale documents).
+    search_docs: `source_id IN ${v("sources")} AND NOT EXISTS(SELECT 1 FROM main.search_doc_entities x
+      WHERE x.doc_id=search_docs.id AND x.entity_id NOT IN ${v("entities")})`,
     graph_digest_signals: `source_id IN ${v("sources")} AND entity_id IN ${v("entities")}`,
     // An episode is labelled as sensitive as its most sensitive member (lib/access/classify.ts).
     graph_episodes: `entity_id IN ${v("entities")}`,

@@ -90,6 +90,8 @@ export interface ChatWindowSettings {
   /** Maximum windows indexed per run. */
   maxWindowsPerRun?: number;
   summarize?: boolean;
+  /** "llm" (default) asks the model and records the extractive summary beside it; "extractive" never calls the model. */
+  summaryMode?: "llm" | "extractive";
   llmModel?: string;
   excludeBots?: boolean;
 }

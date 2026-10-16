@@ -1,10 +1,27 @@
 {
   "name": "knowledge-graph",
   "version": "1.1.0",
-  "description": "Typed graph storage, retrieval, evidence inspection, and correction message handlers, plus cross-source identity resolution.",
+  "description": "Typed graph storage, retrieval, evidence inspection, and correction message handlers, plus cross-source identity resolution and a graph reasoner (association edges, rules, learned surface patterns).",
   "namespace": "knowledge",
   "subscribe_messages": "index.ts",
   "crons": [
-    { "name": "identity-resolver", "schedule": "*/15 * * * *", "script": "resolve.ts", "run_on_startup": true }
+    {
+      "name": "identity-resolver",
+      "schedule": "*/15 * * * *",
+      "script": "resolve.ts",
+      "run_on_startup": true
+    },
+    {
+      "name": "graph-reasoner",
+      "schedule": "17 * * * *",
+      "script": "reason.ts",
+      "run_on_startup": false
+    },
+    {
+      "name": "search-indexer",
+      "schedule": "*/5 * * * *",
+      "script": "search-index.ts",
+      "run_on_startup": true
+    }
   ]
 }

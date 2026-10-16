@@ -5,6 +5,20 @@ import type { ClaimStatus } from "../../sdk/graph/types";
 import { resolveEntityId, formatToolResponse, formatToolError } from "../types";
 import { registerMemoryTools } from "./memory";
 import { EpisodeStore } from "../../sdk/graph/episodes";
+import { SettingsManager } from "../../sdk/settings";
+import { join } from "node:path";
+import type { GraphTraversal } from "../../sdk/graph/types";
+
+/**
+ * Ranking settings of the knowledge-graph extension (searchRanker, searchWeights), read fresh on every call. They
+ * are read here, at the tool layer, so the memory store does not depend on an extension's configuration.
+ */
+export function searchSettings(): { ranker: "bm25" | "engine"; weights: Record<string, unknown> | null } {
+  const settings = new SettingsManager(join(import.meta.dir, "../../extensions/knowledge-graph")).getAll() as Record<string, unknown>;
+  const weights = settings.searchWeights;
+  return { ranker: settings.searchRanker === "engine" ? "engine" : "bm25",
+    weights: weights && typeof weights === "object" && !Array.isArray(weights) ? weights as Record<string, unknown> : null };
+}
 
 const ClaimStatusEnum = z.enum([
   "proposed",
@@ -26,7 +40,7 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
 
   mcp.tool(
     "search_graph",
-    "Search retained source memories with BM25. Returns up to five distinct sources by default, with one summary or snippet preview and stable memory citation IDs per source, expanded into graph neighborhoods (accepted links plus confident proposed ones; check each claim's status). Use list_episodes/get_episode for cross-source stories. Original full source content may have been discarded.",
+    "Search retained source memories. Returns up to five distinct sources by default, with one summary or snippet preview and stable memory citation IDs per source, expanded into graph neighborhoods (accepted links plus confident proposed ones; check each claim's status). The ranking engine (setting searchRanker, or ranker:'engine') understands quoted phrases, from:/origin:/type:/source:/before:/after: operators, typos, acronyms, and deadline wording; it collapses near-duplicates into one hit with `similar` source ids and seeds graph expansion with the entities the query names. Use list_episodes/get_episode for cross-source stories. Original full source content may have been discarded.",
     {
       query: z.string().describe("Search query text or keywords"),
       mode: z
@@ -55,18 +69,42 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
         .default(20)
         .describe("Maximum neighbor entities to include per seed"),
       minScore: z.number().min(0).default(0.01).describe("Minimum chunk search score threshold"),
+      ranker: z.enum(["bm25", "engine"]).optional().describe("Source ranking: plain BM25 or the ranking engine (default: the knowledge-graph searchRanker setting)"),
+      explain: z.boolean().optional().describe("Engine only: include each hit's per-feature score contributions"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async (args) => {
       try {
-        const grouped = sdk.memory.search({query:args.query,limit:args.limit,offset:args.offset,origin:args.origin,type:args.type,sourceId:args.sourceId});
-        const neighborhoods=[];
+        const settings=searchSettings();
+        const grouped = sdk.memory.search({query:args.query,limit:args.limit,offset:args.offset,origin:args.origin,type:args.type,sourceId:args.sourceId,
+          ranker:args.ranker ?? settings.ranker,weights:settings.weights,explain:args.explain});
+        const neighborhoods:GraphTraversal[]=[];
         const evidence=new Map<string, unknown>();
         const passages=new Map<string, unknown>();
         let remainingNodes=args.maxNeighbors;
         let remainingClaims=100;
         let graphTruncated=false;
-        if(args.maxSeeds>0) for(const hit of grouped.hits.slice(0,args.maxSeeds)) {
+        // The engine links the entities the query names: they seed the neighbourhoods before any hit-derived guess.
+        let seeds=args.maxSeeds;
+        for(const entity of grouped.entities.slice(0,seeds)) {
+          if(remainingNodes<=0 || remainingClaims<=0) { graphTruncated=true; break; }
+          const traversal=graph.query.traverse({statuses:['accepted','proposed'],minConfidence:0.6,start:entity.id,maxDepth:args.maxDepth,
+            maxNodes:remainingNodes,maxClaims:remainingClaims,direction:'both'});
+          neighborhoods.push(traversal);
+          remainingNodes=Math.max(0,remainingNodes-traversal.entities.length);
+          remainingClaims=Math.max(0,remainingClaims-traversal.claims.length);
+          for(const claim of traversal.claims) for(const item of graph.evidence.list(claim.id)) {
+            if(item.withdrawnAt!==undefined || evidence.size>=100) continue;
+            evidence.set(item.id,item);
+            if(item.chunkIndex===undefined) continue;
+            const row=sdk.database.query<{text_content:string},[number,number]>('SELECT text_content FROM graph_revision_chunks WHERE revision_id=? AND chunk_index=?')
+              .get(item.revisionId,item.chunkIndex);
+            if(row) passages.set(`${item.revisionId}:${item.chunkIndex}`,{claimId:item.claimId,revisionId:item.revisionId,chunkIndex:item.chunkIndex,text:row.text_content.slice(0,600)});
+          }
+          graphTruncated ||= traversal.truncated;
+          seeds--;
+        }
+        if(seeds>0) for(const hit of grouped.hits.slice(0,seeds)) {
           if(remainingNodes<=0 || remainingClaims<=0) { graphTruncated=true; break; }
           const result=await sdk.search.graph({query:args.query,mode:args.mode,limit:100,maxSeeds:1,minScore:args.minScore,
             filterSourceId:hit.sourceId,maxRetrieved:100,graph:{maxDepth:args.maxDepth,maxNodes:remainingNodes,maxClaims:remainingClaims}});
@@ -77,7 +115,7 @@ export function registerSearchTools(mcp: McpServer, sdk: ShaleSDK) {
           for(const item of result.relatedPassages) passages.set(`${item.revisionId}:${item.chunkIndex}`,item);
           graphTruncated ||= result.truncated;
         }
-        if(grouped.hits.length>args.maxSeeds && args.maxSeeds>0) graphTruncated=true;
+        if(grouped.hits.length>seeds && args.maxSeeds>0) graphTruncated=true;
         // Which of the user's episodes each hit belongs to: the story around the passage.
         const store=new EpisodeStore(sdk.database,sdk.graph);
         const episodes=new Map<number,{id:number;title:string;status:string;summary:string;sourceIds:string[]}>();

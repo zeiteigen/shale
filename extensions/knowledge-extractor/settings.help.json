@@ -5,6 +5,14 @@
     "maxSourcesPerRun":{"type":"number","description":"Maximum source revisions analyzed per run (runs every ten minutes).","default":12,"range":{"min":1,"max":50}},
     "maxContentChars":{"type":"number","description":"Maximum verbatim characters supplied per source window; later cron runs continue the revision.","default":12000,"range":{"min":100,"max":50000}},
     "namespace":{"type":"string","description":"Namespace for extracted knowledge.","default":"knowledge"},
-    "llmModel":{"type":"string","description":"Optional chat model override.","default":null}
+    "llmModel":{"type":"string","description":"Optional chat model override.","default":null},
+    "deterministicMode":{"type":"string","description":"Deterministic extraction tier (gazetteer links, typed mentions, dated claims, structural involvement): off; shadow records its verdict beside the model's in graph_shadow_decisions; active merges it into each extraction and gives the model the linked entities.","default":"shadow","possibleValues":["off","shadow","active"]},
+    "predicateSchema":{"type":"string","description":"Closed relation schema for model claims: active maps predicates onto it and asks the model to use it (the original wording stays in qualifiers.rawPredicate); shadow records the mapping in qualifiers.canonicalPredicate only; off keeps free-form predicates.","default":"active","possibleValues":["off","shadow","active"]},
+    "skipLlmWhenCovered":{"type":"boolean","description":"In active deterministic mode, skip the model for windows whose every name is linked or typed; the digest then gets an extractive summary.","default":false,"possibleValues":[true,false]},
+    "templateMode":{"type":"string","description":"Email template tier: bulk mail is clustered by sender and subject skeleton, a wrapper is induced per template, and the model labels each template's slots once. off; shadow records the template digest beside the model's in graph_shadow_decisions (kind template) and still calls the model; active digests matching mail from its template without a model call (boilerplate templates get an empty extraction and the subject as summary).","default":"shadow","possibleValues":["off","shadow","active"]},
+    "templateMinMembers":{"type":"number","description":"Messages a sender/subject cluster needs before a template is induced from it.","default":5,"range":{"min":2,"max":100}},
+    "templateMinAlignment":{"type":"number","description":"Minimum wrapper alignment score (matched constant text over constant plus unexplained text) for a message to count as following a template; below it the template has drifted and the model reads the message.","default":0.8,"range":{"min":0.5,"max":1}},
+    "maxTemplateLabelsPerRun":{"type":"number","description":"Templates labelled by the model per run (one call each, outside transactions).","default":2,"range":{"min":0,"max":20}},
+    "maxTemplateInductionsPerRun":{"type":"number","description":"Template clusters (re)induced per run; the rest wait for the next run.","default":40,"range":{"min":1,"max":500}}
   }
 }

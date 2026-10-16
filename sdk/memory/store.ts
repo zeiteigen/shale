@@ -6,7 +6,7 @@ import type { PreparedSourceMemory, PreparedSnippet, SourceMemoryRecord } from '
 import { recordMemory, memoryHash } from './records';
 import { compactMemoryHistory } from './retention';
 import { projectMemory } from './projection';
-import { searchMemory } from './search';
+import { searchMemory, type MemorySearchOptions } from './search';
 
 export interface MemoryEdit {
   sourceId:string; expectedVersion:number; actor:string; reason:string; requestId?:string;
@@ -19,7 +19,7 @@ export interface MemoryEdit {
 export class SourceMemoryStore {
   constructor(private db:Database) {}
 
-  search(options: { query:string; limit?:number; offset?:number; origin?:string; type?:string; sourceId?:string }) {
+  search(options: MemorySearchOptions) {
     return searchMemory(this.db, options);
   }
 

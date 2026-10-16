@@ -61,7 +61,42 @@ the prefix can connect the source to an episode even after an earlier assignment
 
 Every LLM assertion starts proposed and can be reviewed in the visualizer. Exact-quote validation confirms that evidence exists, not that the assertion is semantically correct. Model-supplied review status, namespaces, and dependencies are discarded. Source changes during processing keep evidence on the original revision and mark affected claims stale.
 
-Computed timestamp fields additionally require the exact ISO date/time in a cited quote, at matching precision. Year-only or textual dates remain text; they do not become an invented precise event timestamp.
+Computed timestamp fields additionally require a date/time stated in a cited quote, at matching precision: an ISO form, or an expression the temporal tagger (`lib/graph/temporal.ts`) normalises to exactly that value, such as "Oct 15, 11:59 PM EST" or "tomorrow" relative to the source's creation time. Year-only and month-only dates remain text; they do not become an invented precise event timestamp.
+
+## Deterministic tier
+
+`deterministic.ts` reads what it can from a window without a model, with its own graph `method`:
+
+- **`gazetteer`:** registry entities found by an Aho–Corasick automaton over registry names, aliases, and acronym keys (`lib/graph/gazetteer.ts`). Ambiguous surfaces are settled by graph-neighbour overlap with other linked entities, or dropped. The matched words become evidence.
+- **`pattern`:** new mentions typed by their form (`lib/graph/mention-typing.ts`): "… University" is an Organization, "CS 136" a Course, "… Fellowship" an Opportunity. Unknown heads stay untyped for the model.
+- **`temporal`:** `HAS_DEADLINE` and `SCHEDULED_FOR` claims with ISO values, quoting the sentence.
+- **Connector involvement:** from recorded participants. The user present makes a participant (author when theirs is the first message). Other people only makes an observer, except in email, whose participants are only the senders.
+
+`deterministicMode` (default `shadow`) controls it:
+
+- **`shadow`:** records the verdict in `graph_shadow_decisions` (kind `extraction`, method `deterministic-extraction`). The commit attaches the model's entities, involvement, and dates beside it.
+- **`active`:** also gives the gazetteer's entities to the model, merges deterministic entities and claims into the extraction, and lets structural involvement override the model's.
+- **`skipLlmWhenCovered`** (default false, active mode only): skips the model for windows whose every name is linked or typed. The digest then gets an extractive summary (method `extractive`).
+
+`predicateSchema` (default `active`) maps model predicates onto the closed, typed schema in `lib/graph/predicates.ts` (about 50 predicates with domain and range) and lists it in the prompt. Unmapped wording becomes `RELATED_TO` with `qualifiers.label`. The model's original predicate is always kept in `qualifiers.rawPredicate`, so the mapping is lossless and can be replayed. `shadow` records only `qualifiers.canonicalPredicate`.
+
+To measure the tier against stored digests, without writing anything, run `bun extensions/knowledge-extractor/eval-deterministic.ts data/production.db [sample]`.
+
+## Email templates
+
+Bulk mail follows templates. `templates.ts` reads it with wrappers instead of a model call per message (`lib/graph/templates.ts`):
+
+1. **Clustering.** Raw messages from the email connector's store are grouped by sender address and subject skeleton. The skeleton masks numbers, dates, handles, quoted strings, and runs of capitalised words, and similar skeletons of one sender merge. A sender's leftover messages (promotions with ever-new subjects) form one residual cluster.
+2. **Induction.** A cluster with at least `templateMinMembers` messages is aligned line by line (center-star LCS), then token by token within variable lines. The result is a wrapper: constant lines plus numbered slots. A wrapper is kept when at least that many members align at `templateMinAlignment`. Templates are re-induced only after their cluster grows by half; at most `maxTemplateInductionsPerRun` per run.
+3. **Labelling.** One model call per template (`maxTemplateLabelsPerRun` per run, outside transactions) types each slot as an entity type or a literal (date, deadline, amount, url, text, ignore). It also gives the template's claims in the closed predicate schema, a verdict (`informative` or `boilerplate`), involvement, a summary sentence with slot placeholders, and an optional activity. Answers are validated strictly against the wrapper and the schemas.
+4. **Extraction.** When every message in an email source aligns with a labelled template, the digest is built from slot values. Entities, claims, and the summary carry method `template`, with the exact slot text as evidence. Dates go through the temporal tagger. Boilerplate templates yield an empty extraction whose summary is the subject. A score below the threshold means the template drifted, and the model reads the message. Informative matches whose unread variable text (bodies typed `text` or `ignore`) is large also go to the model.
+
+`templateMode` (default `shadow`):
+
+- **`shadow`:** records the template digest in `graph_shadow_decisions` (kind `template`). The model still runs, and the commit attaches its entities, predicates, involvement, and summary beside it.
+- **`active`:** commits the template digest and skips the model. With `deterministicMode: active`, gazetteer links are merged in.
+
+The registry lives in `graph_email_templates` and `graph_email_template_members`. These are operational tables, hidden from scoped profiles. `templateVerdict(db, sourceId)` and `boilerplateSources(db)` expose template verdicts, for example to source-filter. To measure coverage and agreement on an in-memory copy of a database, run `bun extensions/knowledge-extractor/eval-templates.ts data/production.db [--no-llm] [--label-cache file]`.
 
 Each model response has an 8,192-token output limit, with concise claim limits and reasoning disabled. Truncated output is rejected before checkpointing. Native chat batches have one total request deadline that also bounds SDK retries, preventing a timeout from repeatedly submitting the same expensive generation.
 

@@ -33,3 +33,23 @@ it('evaluates a cross-source story after multiple episode merges', () => {
     expect(report.threads[0].episodes.map((episode: { id: number }) => episode.id)).toEqual([episodes[2]]);
   } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
 });
+
+it('reports metrics with a note when no golden threads are configured', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'shale-graph-eval-'));
+  const path = join(directory, 'graph.db'), threads = join(directory, 'threads.json');
+  createTestDatabase(path).close();
+  try {
+    for (const content of [null, '', '  \n', '{"threads":[]}']) {
+      if (content === null) rmSync(threads, { force: true }); else writeFileSync(threads, content);
+      const json = Bun.spawnSync([process.execPath, join(import.meta.dir, '../scripts/graph-eval.ts'), path, '--threads', threads, '--json']);
+      expect(json.exitCode).toBe(0);
+      const report = JSON.parse(json.stdout.toString());
+      expect(report.threads).toEqual([]);
+      expect(report.note).toContain('no golden threads configured');
+      expect(report.metrics.sources).toBe(0);
+    }
+    const text = Bun.spawnSync([process.execPath, join(import.meta.dir, '../scripts/graph-eval.ts'), path, '--threads', threads]);
+    expect(text.exitCode).toBe(0);
+    expect(text.stdout.toString()).toContain('Note: no golden threads configured');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

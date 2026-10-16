@@ -4,6 +4,9 @@ import { indexEntity } from '../../sdk/graph/registry';
 import { fullNameKey } from '../../lib/graph/identity-keys';
 import { Assigner, type DEFAULTS } from './assign';
 import { auditOpenEpisodes } from './involvement';
+import { recordShadow, recordShadowLLM, shadowMode } from '../../lib/graph/shadow';
+import { computeClustering, episodeNarrative, reconcile, sameCluster } from './clustering';
+import type { Clustering } from '../../lib/graph/cluster';
 
 const DAY = 86_400_000;
 const MAX_EPISODES = 20, MAX_MERGES = 5, MAX_MEMBERS = 40;
@@ -29,8 +32,14 @@ Return ONLY JSON:
  "steps": [{"source": number, "step": "what happened at that point, under 15 words"}]}`;
 }
 
-/** Regenerate titles, summaries, and step labels of changed episodes from their members. */
-async function rewrite(sdk: ShaleSDK, store: EpisodeStore, model?: string) {
+/**
+ * Regenerate titles, summaries, and step labels of changed episodes from their members. narrativeMode decides
+ * who writes them: the model (off), the model with the deterministic narrative recorded beside it (shadow), or
+ * the deterministic narrative (active; the model only polishes when llmNarrativePolish is set). An active
+ * deterministic rewrite keeps the current title unless it came from members that have since left.
+ */
+async function rewrite(sdk: ShaleSDK, store: EpisodeStore, settings: Pick<typeof DEFAULTS, 'narrativeMode' | 'llmNarrativePolish'>, model?: string) {
+  const mode = shadowMode(settings.narrativeMode);
   const episodes = sdk.database.query<{ id: number }, [number]>(`SELECT g.entity_id AS id FROM graph_episodes g JOIN entities e ON e.id=g.entity_id
     WHERE e.canonical_id IS NULL AND g.status!='closed' AND g.updated_at>coalesce(g.consolidated_at,0)
     ORDER BY g.updated_at LIMIT ?`).all(MAX_EPISODES);
@@ -45,10 +54,22 @@ async function rewrite(sdk: ShaleSDK, store: EpisodeStore, model?: string) {
     // One source tells its own story: its digest already summarises it, so the model has nothing to add.
     // A title derived from a detached member must not seed the replacement narrative.
     const only = members.length === 1 && !outdated ? members[0]! : null;
-    const result = only
+    const narrative = mode === 'off' || only ? null : episodeNarrative(sdk, id, members, episode.kind, episode.startedAt);
+    const subject = `episode:${id}`;
+    if (narrative) recordShadow(sdk.database, { kind: 'summary', subject, method: 'narrative',
+      verdict: { title: narrative.title, kind: narrative.kind, stage: narrative.stage, status: narrative.status, summary: narrative.summary } });
+    const deterministic = narrative && { title: outdated ? narrative.title : episode.title, summary: narrative.summary, status: narrative.status,
+      steps: members.map((member, index) => ({ source: index + 1, step: narrative.steps[member.sourceId] ?? member.step })) };
+    const askModel = !only && (mode !== 'active' || settings.llmNarrativePolish);
+    let result: Record<string, unknown> = only
       ? { title: episode.title, summary: only.summary || only.step, status: episode.status, steps: [{ source: 1, step: only.step }] }
-      : json(await sdk.queryLLM(rewritePrompt(outdated ? 'Episode' : episode.title, members), { responseFormat: { type: 'json_object' },
-        temperature: 0.1, model, reasoningEffort: 'none', maxThinkingTokens: null, maxTokens: 1500 }));
+      : askModel ? json(await sdk.queryLLM(rewritePrompt(outdated ? 'Episode' : episode.title, members), { responseFormat: { type: 'json_object' },
+        temperature: 0.1, model, reasoningEffort: 'none', maxThinkingTokens: null, maxTokens: 1500 })) : deterministic!;
+    if (narrative && askModel) {
+      recordShadowLLM(sdk.database, 'summary', subject, { title: result.title, status: result.status, summary: result.summary });
+      // Active polish that came back unusable falls back to the deterministic narrative.
+      if (mode === 'active' && (typeof result.title !== 'string' || typeof result.summary !== 'string')) result = deterministic!;
+    }
     const title = typeof result.title === 'string' && result.title.trim() ? result.title.trim().slice(0, 120) : episode.title;
     const summary = typeof result.summary === 'string' ? result.summary.trim().slice(0, 2000) : episode.summary;
     // The model only closes episodes; dormancy follows from inactivity and is kept.
@@ -143,8 +164,14 @@ export function mergeSameTitled(sdk: ShaleSDK, store: EpisodeStore, recencyDays:
   return merged;
 }
 
-async function mergeDuplicates(sdk: ShaleSDK, store: EpisodeStore, model?: string) {
+async function mergeDuplicates(sdk: ShaleSDK, store: EpisodeStore, settings: typeof DEFAULTS, model?: string) {
   let merged = 0;
+  // Shadow: the clustering's view of each pair is recorded beside the model's verdict.
+  let clustering: Clustering | null | undefined;
+  const clustered = () => {
+    if (clustering === undefined) try { clustering = shadowMode(settings.clusteringMode) === 'shadow' ? computeClustering(sdk, settings) : null; } catch { clustering = null; }
+    return clustering;
+  };
   for (const pair of mergeCandidates(sdk)) {
     const a = store.get(pair.a), b = store.get(pair.b);
     if (!a || !b || a.id === b.id) continue;
@@ -157,6 +184,9 @@ B: ${describe(b)}
 Return ONLY JSON {"same": true|false, "confidence": 0.0-1.0}`, { responseFormat: { type: 'json_object' }, temperature: 0, model,
       reasoningEffort: 'none', maxThinkingTokens: null, maxTokens: 100 }));
     const confidence = typeof result.confidence === 'number' ? result.confidence : 0;
+    const view = clustered();
+    if (view) recordShadow(sdk.database, { kind: 'episode', subject: `merge:${a.id}:${b.id}`, method: 'cluster',
+      verdict: { same: sameCluster(view, a.id, b.id) }, llm: { same: result.same === true, confidence } });
     if (result.same === true && confidence >= 0.8) {
       // The older episode survives.
       const [from, into] = (a.startedAt ?? 0) <= (b.startedAt ?? 0) ? [b.id, a.id] : [a.id, b.id];
@@ -174,12 +204,15 @@ export async function consolidate(sdk: ShaleSDK, settings: typeof DEFAULTS, mode
     AND coalesce((SELECT max(last_activity_at) FROM graph_episodes WHERE entity_id IN
       (WITH RECURSIVE m(id) AS (SELECT g.entity_id UNION SELECT e.id FROM entities e JOIN m ON e.canonical_id=m.id) SELECT id FROM m)),0)<?`)
     .run(Date.now() - settings.dormantDays * DAY).changes;
-  const merged = mergeSameTitled(sdk, store, settings.recencyDays) + await mergeDuplicates(sdk, store, model);
+  // Active clustering replaces the model's duplicate check with one global reconciliation (merges and moves).
+  const clusterActive = shadowMode(settings.clusteringMode) === 'active';
+  const reconciled = clusterActive ? reconcile(sdk, new Assigner(sdk, settings), settings) : null;
+  const merged = mergeSameTitled(sdk, store, settings.recencyDays) + (reconciled ? reconciled.merged : await mergeDuplicates(sdk, store, settings, model));
   // Detachments, unmerges, and merges change which members define an episode; re-derive before rewriting.
   const changed = sdk.database.query<{ id: number }, []>(`SELECT g.entity_id AS id FROM graph_episodes g JOIN entities e ON e.id=g.entity_id
     WHERE e.canonical_id IS NULL AND g.status!='closed' AND g.updated_at>coalesce(g.consolidated_at,0)`).all().map(row => row.id);
   const pruned = auditOpenEpisodes(sdk, new Assigner(sdk, settings), changed);
-  const rewritten = await rewrite(sdk, store, model);
+  const rewritten = await rewrite(sdk, store, settings, model);
   // Merged-away rows retain their metadata so unmerge can expose the original episodes again.
   return { dormant, merged, pruned, rewritten };
 }

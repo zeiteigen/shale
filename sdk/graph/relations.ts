@@ -6,6 +6,9 @@ import { hydrateClaim } from './claims';
 
 const BUILTINS: RelationDefinition[] = [
   ...['RELATES_TO','SIMILAR_TO','LINKED_TO','IN_SAME_VAULT','CONTRADICTS'].map(name => ({name,symmetric:true})),
+  // Written by the graph reasoner: co-occurrence statistics (lib/graph/association.ts) and rule conclusions (lib/graph/rules.ts).
+  {name:'ASSOCIATED_WITH',symmetric:true,description:'statistically associated: the two keep appearing in the same sources'},
+  {name:'INTERACTED_WITH',symmetric:true,description:'dealt with directly (applied to, wrote to, bought from)'},
   {name:'REFERENCES',inverse:'REFERENCED_BY'}, {name:'EXPANDS_UPON',inverse:'EXPANDED_BY'},
   {name:'SUPPORTS',inverse:'SUPPORTED_BY'}, {name:'PART_OF',inverse:'HAS_PART',transitive:true},
   {name:'DEPENDS_ON',inverse:'DEPENDENCY_OF'}, {name:'MENTIONS_ENTITY',inverse:'MENTIONED_BY'},

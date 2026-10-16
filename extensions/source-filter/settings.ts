@@ -11,6 +11,8 @@ const schema = z.object({
   maxContentChars: z.number().int().min(500).max(50000),
   runBudgetSeconds: z.number().int().min(1).max(3600),
   removeConfidence: z.number().min(.9).max(1),
+  nearDuplicateMinCopies: z.number().int().min(0).max(1000),
+  nearDuplicateDistance: z.number().int().min(0).max(3),
   llmModel: z.string().trim().min(1).nullable(),
   origins: strings, protectedSourceIds: strings, protectedUriPatterns: strings,
 });
@@ -23,5 +25,7 @@ export function readSettings(sdk: ShaleSDK): SourceFilterSettings {
 export function policyKey(settings: SourceFilterSettings, sdk: ShaleSDK): string {
   return createHash('sha256').update(JSON.stringify(['source-filter-v1', settings.removeConfidence,
     settings.maxContentChars, settings.llmModel ?? sdk.llm.options().model,
+    // Absent from older keys so existing decisions stay valid until near-duplicate settings change.
+    ...(settings.nearDuplicateMinCopies === 3 && settings.nearDuplicateDistance === 3 ? [] : [[settings.nearDuplicateMinCopies, settings.nearDuplicateDistance]]),
     [...settings.origins].sort(), [...settings.protectedSourceIds].sort(), [...settings.protectedUriPatterns].sort()])).digest('hex');
 }

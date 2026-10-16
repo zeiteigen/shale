@@ -27,7 +27,8 @@ export function expandGraphResults(db: Database, graph: GraphIngestor, results: 
   let remainingClaims=options.graph?.maxClaims ?? 100;
   const neighborhoods = selected.map(start=>{
     if(remainingNodes===0 || remainingClaims===0) return {entities:[],claims:[],paths:[],truncated:true} as GraphTraversal;
-    // Model-inferred links are retrieval signals too; weak ones stay out, and each claim carries its status.
+    // Model-inferred links are retrieval signals too; weak ones stay out, and each claim carries its status. Association
+    // edges (ASSOCIATED_WITH, method `association`) carry their normalised G² as confidence, so the same floor applies.
     const traversal=graph.query.traverse({statuses:['accepted','proposed'],minConfidence:0.6,...options.graph,start,
       maxNodes:remainingNodes,maxClaims:remainingClaims,direction:options.graph?.direction ?? 'both'});
     remainingNodes=Math.max(0,remainingNodes-traversal.entities.length);

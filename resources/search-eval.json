@@ -1,0 +1,1540 @@
+{
+  "description": "Hand-judged queries for scripts/search-eval.ts, pooled from BM25 top-15, title globs, and entity-linked sources over the production database and judged by reading titles and summaries. Grades: 3 = exactly what the query wants, 2 = relevant, 1 = marginal; unlisted sources count as 0. At most ~15 judgments per query.",
+  "queries": [
+    {
+      "query": "CCIR interview",
+      "kind": "probe",
+      "note": "CCIR 2025 admissions interview scheduling emails; later CCIR marketing is marginal",
+      "judgments": [
+        {
+          "sourceId": "email-window:9274ab76097b70fd260f9afc68a4620283e4ea99eaf40e2b6363f9bc2581973d",
+          "rel": 3,
+          "title": "CCIR Academy - Your Upcoming Interview · 2025-06-13"
+        },
+        {
+          "sourceId": "email-window:2877b4c758c20ef116691307b15f3fd5a79bf18f9850c4f11b26f7180a780b78",
+          "rel": 3,
+          "title": "CCIR - Invite to Interview (Ali Muhammad) · 2025-06-20"
+        },
+        {
+          "sourceId": "email-window:a100929f4a2dc6bef13e56043313ac3e6154cd3efc066b629b0b6cf3fcbe9bf1",
+          "rel": 3,
+          "title": "CCIR - Invite to Interview (Ali Muhammad) · 2025-06-13"
+        },
+        {
+          "sourceId": "email-window:a2409287ec5234809c7bf5ec9a0cac0328d4b8de4eb85ea77690abcae00bc421",
+          "rel": 3,
+          "title": "CCIR - Invite to Interview (Ali Muhammad) · 2025-06-12"
+        },
+        {
+          "sourceId": "email-window:02d02206dcc602242a8ee28e90944aa295063434fdfea6f23566a9c6731a9b7b",
+          "rel": 3,
+          "title": "CCIR - Invite to Interview (Ali Muhammad) · 2025-06-25"
+        },
+        {
+          "sourceId": "email-window:467d8262b618c1d40e4fa50eb457e9d6e1d52868690bb222c115b8032700e73a",
+          "rel": 3,
+          "title": "CCIR - Invite to Interview (Ali Muhammad) · 2025-06-30"
+        },
+        {
+          "sourceId": "email-window:ece7db3d4314d407ef3426a7816c3ea9f1624f7c09ce1f901d3348664a5fdcfc",
+          "rel": 3,
+          "title": "CCIR - Invite to Interview (Ali Muhammad) · 2025-06-30"
+        },
+        {
+          "sourceId": "email-window:0dca7874d155bc4121705f921ffec7618243ec104cb40126b941cb41bf6bdf02",
+          "rel": 3,
+          "title": "Invitation from an unknown sender: CCIR - Academic Interview with Mr Rajasekaran (Ali Muhammad) @ Sun Jun 15, 2025 7:30a"
+        },
+        {
+          "sourceId": "email-window:53029644522020799c6f1daa9a53891418fe99c7b88923328061fb69ec850943",
+          "rel": 2,
+          "title": "CCIR Academy - Thank You for Your Application · 2025-06-09"
+        },
+        {
+          "sourceId": "email-window:a417dcdff25a9c9b9f2ad56127e3da5052a8e9aa38a31b8908e46401352077b6",
+          "rel": 1,
+          "title": "Potential Mentor for the 1-on-1 Research Mentorship Program · 2025-07-24"
+        },
+        {
+          "sourceId": "email-window:92285fabd1ff131b2f69950f96158b6ba894602ce858287c54aad906e1179bd4",
+          "rel": 1,
+          "title": "Potential Mentor for the 1-on-1 Research Mentorship Program · 2025-08-05"
+        },
+        {
+          "sourceId": "email-window:927904cfe02dce031a5b00a79021e66aa788d75eb903bdac6bd87e994647692d",
+          "rel": 1,
+          "title": "CCIR Writing Workshop Invitation with Dr Ben Urwand – 20 July 2026 · RSVP: CCIR Exclusive Writing Workshop with Harvard "
+        }
+      ]
+    },
+    {
+      "query": "what did Nasser say on launchpad",
+      "kind": "probe",
+      "note": "Nasser's actual words: his comments in The Efficient City (3) and his posts quoted in Launchpad digests (2); bare \"sent you a message\" notifications carry no text and are left unjudged",
+      "judgments": [
+        {
+          "sourceId": "email-window:17c98857c84834e502dea915ea51829263c0c30961c0abc71e12ba0017e496e3",
+          "rel": 3,
+          "title": "Nasser A. commented in The Efficient City · 2022-10-06"
+        },
+        {
+          "sourceId": "email-window:39c2a243ac6d08fb63f9cb33b0bbf62bfe8c21056e2ee999b32a110338063237",
+          "rel": 3,
+          "title": "Nasser A. commented in The Efficient City · 2022-10-06"
+        },
+        {
+          "sourceId": "email-window:6474a8e5b00e7c0095695211f602fe6430ba772e694e659279f2e5a98e7d522c",
+          "rel": 3,
+          "title": "Nasser A. commented in The Efficient City · 2022-10-06"
+        },
+        {
+          "sourceId": "email-window:f1ce40e8bf0fefc4b0f0c87b917a4aca984e78b2d07dbd706c8b01a5ee0507b6",
+          "rel": 3,
+          "title": "Nasser A. commented in The Efficient City · 2022-11-04"
+        },
+        {
+          "sourceId": "email-window:52b5585290f86f95e5582f1797faf6b27285951d3bd2e02b16aa42a4b71d7992",
+          "rel": 3,
+          "title": "Nasser A. commented in The Efficient City · 2022-11-19"
+        },
+        {
+          "sourceId": "email-window:797d8c32972a05d95066d30b4a8b8164c811b734d8d580ad4c86001b0e4483fd",
+          "rel": 2,
+          "title": "Daily Discussions Digest · 2022-09-11"
+        },
+        {
+          "sourceId": "email-window:75b582b5f8f4f08d56d75e33e1ed57d0934a04779f5b125ce41817d49a05ee67",
+          "rel": 2,
+          "title": "Daily Discussions Digest · 2022-09-13"
+        },
+        {
+          "sourceId": "email-window:2be3c2ddd268a3f97b6653dd7e09111b019016add23a913d9cc725e329b064c9",
+          "rel": 2,
+          "title": "Daily Discussions Digest · 2022-10-04"
+        },
+        {
+          "sourceId": "email-window:82765c8481e97ef21c95ede2350e544fb1b30116fd608a23fb074f3b3e05eb41",
+          "rel": 2,
+          "title": "Daily Discussions Digest · 2022-10-05"
+        },
+        {
+          "sourceId": "email-window:87b783124cb780d371a0230c60eb212ce4dbe75336d88a85046e0297362cc65d",
+          "rel": 2,
+          "title": "Daily Discussions Digest · 2022-10-06"
+        },
+        {
+          "sourceId": "email-window:d0f496b6d97d79f6ae2d85751d16fd174606a1411b4855a9ddc82e5d6de9257a",
+          "rel": 2,
+          "title": "Daily Discussions Digest · 2024-02-20"
+        },
+        {
+          "sourceId": "email-window:dad415cc3a32bf453e09be5f98cdb7c3af170652637b191f8e9bf4f09e80bdbe",
+          "rel": 2,
+          "title": "Daily Discussions Digest · 2024-02-20"
+        }
+      ]
+    },
+    {
+      "query": "michigan I-20",
+      "kind": "probe",
+      "note": "University of Michigan I-20 document requests and the withdrawal notice; general international-student mail is marginal",
+      "judgments": [
+        {
+          "sourceId": "email-window:6c049e873c36f94ade3e166d63ecb1969719ad1d3dc7360107db1b7f39e9b17c",
+          "rel": 3,
+          "title": "U-M Admissions: I-20/DS-2019 Required Documents for Student Visa · Go Blue: Required Documents for Your Student Visa"
+        },
+        {
+          "sourceId": "email-window:37431e952ce01ab0ec04a1b8e31810d7774d6ff419d653ab8e333addca4b580f",
+          "rel": 3,
+          "title": "UMich Admissions: Missing I-20 Documents for Student Visa · [ACTION NEEDED] Submit Required Documents for Your Student V"
+        },
+        {
+          "sourceId": "email-window:401432d5c2e7e43810c25fe7c8f56ca236c5db2a6cdd45a0ec4b363dfa1428c5",
+          "rel": 3,
+          "title": "UMich Admissions: Missing I-20 Documents for Ali · [ACTION NEEDED] Submit Required Documents for Your Student Visa"
+        },
+        {
+          "sourceId": "email-window:845192b66e61ac540cd5e6edbcdfcd7e87bfc957dfe616310320d79c50b495bd",
+          "rel": 3,
+          "title": "UMich Admissions: Missing I-20 Documents for Ali's Student Visa · [ACTION NEEDED] Submit Required Documents for Your Stu"
+        },
+        {
+          "sourceId": "email-window:1d19efc762b6f1045304773c30de18575ae7242a03682047c663f6d3f8d8c80a",
+          "rel": 3,
+          "title": "UMich Admissions: Missing I-20 Documents for F-1 Visa · [ACTION NEEDED] Submit Required Documents for Your Student Visa"
+        },
+        {
+          "sourceId": "email-window:015fabf1e78463948430fd000300fa074c155e3812a7bdeeee3991f82880254a",
+          "rel": 3,
+          "title": "Missing I-20 Documents Requested by UMich Admissions · Documents Required for I-20"
+        },
+        {
+          "sourceId": "email-window:26f2659021f434a28b16b5554cff34e7033c21254c693606497c98a158a2f269",
+          "rel": 3,
+          "title": "Reminder: Missing I-20 Documents for Ali Muhammad · Documents Required for I-20"
+        },
+        {
+          "sourceId": "email-window:373e72b26e11b82d57350d19dd71ed9c02435c6cc445fc9d4c697d4e5f51cd82",
+          "rel": 3,
+          "title": "Repeated reminders to Ali Muhammad to submit I-20 documents · Documents Required for I-20"
+        },
+        {
+          "sourceId": "email-window:9a7710b9b81f3db087f404f3b3281c3fe7d3ab303d552dc283293fa08c91952e",
+          "rel": 3,
+          "title": "Repeated follow-ups on missing I-20 documents for Ali Muhammad · Documents Required for I-20"
+        },
+        {
+          "sourceId": "email-window:b4e927b4c816a10a2406ac0b57f110c6b511eebf8a3d91f3a7361170d032edae",
+          "rel": 3,
+          "title": "U-Mich OUA notice to withdraw application due to I-20 inaction · I-20 for University of Michigan"
+        },
+        {
+          "sourceId": "email-window:46a9e42b9be0c4802d83cc436c710b159f1d6f07a297e8077ee9e503163dbddd",
+          "rel": 3,
+          "title": "U-M OUA Reminder: I-20 Document Submission for Fall 2026 F-1 Students · Documents Needed for I-20 Preparation"
+        },
+        {
+          "sourceId": "email-window:6d3f5cbb2998d90511acacdca600ac6117f4deca18d3c6db4cecae3b7534167f",
+          "rel": 1,
+          "title": "U-Michigan Admission: Enrollment Next Steps & International Student Info · [NEXT STEPS] Here Is Your Next Step To Go Blu"
+        },
+        {
+          "sourceId": "email-window:749a92347a1e12406cb5afaa6e9c067d07ac5b70c52fd58203bc3f5d92728200",
+          "rel": 1,
+          "title": "UM International Center Newsletter: Visa Updates, Orientation & Housing for New Students · International Center Newslett"
+        },
+        {
+          "sourceId": "email-window:7bfd3a7e1ea74db49b187847a4673c94d4e0ea5604c5bdb6da293bab4ccc9254",
+          "rel": 1,
+          "title": "U-M International Center Welcome Newsletter for New International Students · International Center Newsletter for New Int"
+        }
+      ]
+    },
+    {
+      "query": "waterlo",
+      "kind": "probe",
+      "note": "truncated \"Waterloo\": the University of Waterloo admission story",
+      "judgments": [
+        {
+          "sourceId": "email-window:7cccc47a28e422273bb0fa910e47dcd2234b07c11ad41e3286d0a0efb3229451",
+          "rel": 3,
+          "title": "University of Waterloo admission confirmed and email activation · It’s official! Welcome to the University of Waterloo"
+        },
+        {
+          "sourceId": "email-window:841e5fb2bbaf9d12f70b56db06d0e0c759c315ed8a50c36c948f66f12402503a",
+          "rel": 3,
+          "title": "Waterloo admission welcome email for Ali Muhammad – Computer Engineering Co-op · Welcome to the Waterloo family!"
+        },
+        {
+          "sourceId": "email-window:c90683447f8f11a4831b54eae5c9c902a47b037258a8dccc61b111da87338924",
+          "rel": 2,
+          "title": "University of Waterloo application confirmation email · ✅ We’ve received your application"
+        },
+        {
+          "sourceId": "email-window:84a51a31737a3aea184b77c829aeb5d249a84d4de8c5981020b8b212efecc8c0",
+          "rel": 2,
+          "title": "Waterloo offer acceptance deadline reminder · Don’t forget to accept your offer to Waterloo by June 1!"
+        },
+        {
+          "sourceId": "email-window:2ce9524035c5ccffa3e5f0cdcc38d4452f2cbc604bb07d61e1aca26b24f293c4",
+          "rel": 2,
+          "title": "Waterloo Engineering admission next steps: Quest, stream request, residence · Important next steps for your Waterloo Eng"
+        },
+        {
+          "sourceId": "email-window:968b3555b19c2d60388712281cf22a228c4c559b46bb1a583d33891ebe96f9b2",
+          "rel": 2,
+          "title": "SAFA-4423: Entrance Bursary deadline exception request denied · SAFA-4423 Request for exception to need-based financial "
+        },
+        {
+          "sourceId": "01a12ce3-e4b5-77d9-901d-967827ba2986",
+          "rel": 2,
+          "title": "Email to UWaterloo for bursary"
+        },
+        {
+          "sourceId": "web:875b2774d59bef147c9822839be6780d290f75fefface45b29ca2e9e28c5ba77",
+          "rel": 2,
+          "title": "University of Waterloo - University of Waterloo - Home"
+        },
+        {
+          "sourceId": "email-window:44623c8430f784dba46d6605a8a669e657ecb83cc3fc3d6ac2a879ebd7d90c84",
+          "rel": 2,
+          "title": "UWaterloo Engineering AIF Incomplete – Deadline Jan 30, 2025 · ACTION: Required Admission Information Form (AIF) Incompl"
+        },
+        {
+          "sourceId": "email-window:1f795e7ec7d6da2c93439b757dc4a0ec2e8ea87e57e7f36985d7448b6896bfd1",
+          "rel": 2,
+          "title": "Waterloo Application: Outstanding Checklist Items for Co-op CSE · Action: You have outstanding checklist items"
+        },
+        {
+          "sourceId": "email-window:9183f823175fe2df10fe11bcc707985431e9d011b0df1e4991d92722453167b4",
+          "rel": 1,
+          "title": "Waterloo admission offer acceptance reminder to Ali · 📣 It's official, Ali! Here's why you should accept your offer to "
+        },
+        {
+          "sourceId": "email-window:5bb33e1d0f785c0827400609c5efbc06b467f7698fce8024a419c847049bc8d1",
+          "rel": 1,
+          "title": "University of Waterloo International Student Webinar Invite – April 8, 2026 · 🌏 Join us for the Life at Waterloo as an "
+        },
+        {
+          "sourceId": "email-window:72d2b65422862e2b194502d692b03c89eed676e9229bfb739cd2c62898334c98",
+          "rel": 1,
+          "title": "Waterloo co-op recruitment email to Ali · ⭐ Success starts at Waterloo, Ali!"
+        },
+        {
+          "sourceId": "01a12ce3-ecc8-7328-8a2b-97f69bec5d05",
+          "rel": 1,
+          "title": "shortlist waterlooworks cycle 1"
+        }
+      ]
+    },
+    {
+      "query": "university of waterloo bursary",
+      "kind": "probe",
+      "note": "the entrance bursary exception request note and the SAFA-4423 reply",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-e4b5-77d9-901d-967827ba2986",
+          "rel": 3,
+          "title": "Email to UWaterloo for bursary"
+        },
+        {
+          "sourceId": "email-window:968b3555b19c2d60388712281cf22a228c4c559b46bb1a583d33891ebe96f9b2",
+          "rel": 3,
+          "title": "SAFA-4423: Entrance Bursary deadline exception request denied · SAFA-4423 Request for exception to need-based financial "
+        },
+        {
+          "sourceId": "email-window:a45bea6e47769b29f36b6c0b361038b1ec5df856e539d328b8e3a0927200fdfc",
+          "rel": 1,
+          "title": "University of Waterloo OSAP application reminder for Fall 2026 · How does OSAP work?"
+        }
+      ]
+    },
+    {
+      "query": "frankenstein essay",
+      "kind": "probe",
+      "note": "the Frankenstein vs. A Doll's House essay notes first, then study notes on the novel",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-e669-7282-9152-6520254be2da",
+          "rel": 3,
+          "title": "Frankenstein vs. A Doll's House -- Organized"
+        },
+        {
+          "sourceId": "01a12ce3-e676-73f7-8f39-cfc14fd42801",
+          "rel": 3,
+          "title": "Frankenstein vs. A Doll's House -- Rough"
+        },
+        {
+          "sourceId": "01a12ce3-e649-766c-bc2e-a21ef958c002",
+          "rel": 2,
+          "title": "Frankenstein - Themes, Motifs, Symbols"
+        },
+        {
+          "sourceId": "01a12ce3-f07a-7348-9bc1-1c5c78d62345",
+          "rel": 2,
+          "title": "Frankenstein: SparkNotes Literature Guide"
+        },
+        {
+          "sourceId": "01a12ce3-e63b-71d8-a767-032397c91d10",
+          "rel": 1,
+          "title": "Frankenstein - The Creature"
+        },
+        {
+          "sourceId": "01a12ce3-e65c-716d-bbc0-2787b8da7786",
+          "rel": 1,
+          "title": "Frankenstein Victor Frankenstein"
+        },
+        {
+          "sourceId": "01a12ce3-e556-75cf-89d7-ae770b4fa352",
+          "rel": 1,
+          "title": "Frankenstein - Authorial Context - Mary Shelley (1797–1851)"
+        },
+        {
+          "sourceId": "01a12ce3-f05d-777b-b7d7-d4799ea7bc1f",
+          "rel": 1,
+          "title": "Frankenstein"
+        }
+      ]
+    },
+    {
+      "query": "deadline",
+      "kind": "probe",
+      "note": "bare keyword: current deadlines the user faces (as of Oct 2026), older application deadlines lower",
+      "judgments": [
+        {
+          "sourceId": "discord-window:380bac016140554eb01a3d57a1e97bca379db5ba14fd9edf08b64da68876765e",
+          "rel": 3,
+          "title": "Onboarding deadline extended and performance design guide added · #announcements"
+        },
+        {
+          "sourceId": "01a12ce3-ed98-7536-8a8a-bb98b170a419",
+          "rel": 3,
+          "title": "Winter 2027 - 100 postings"
+        },
+        {
+          "sourceId": "01a12ce3-ece9-7625-9d8c-dae89e72308b",
+          "rel": 2,
+          "title": "longlist"
+        },
+        {
+          "sourceId": "01a12ce3-ed00-7221-a56f-d377d96503db",
+          "rel": 2,
+          "title": "longlist_purge"
+        },
+        {
+          "sourceId": "email-window:3d11436aabfac4f1a8f5c39ea1a6bd068bf138582ecc14c7e41da929c8ddd160",
+          "rel": 2,
+          "title": "Hack the North Volunteer Application Deadline Reminder · 📢 Volunteer Applications Close SOON"
+        },
+        {
+          "sourceId": "email-window:d233d931d8562cef35168f22d38d5dee46359e930ef1564817010ed3ce7b5b70",
+          "rel": 2,
+          "title": "NSRA Part 2 Deadline Reminder – June 22, 2026 · Deadline June 22: Complete the New Student Residence Application Part 2"
+        },
+        {
+          "sourceId": "email-window:968b3555b19c2d60388712281cf22a228c4c559b46bb1a583d33891ebe96f9b2",
+          "rel": 2,
+          "title": "SAFA-4423: Entrance Bursary deadline exception request denied · SAFA-4423 Request for exception to need-based financial "
+        },
+        {
+          "sourceId": "email-window:84a51a31737a3aea184b77c829aeb5d249a84d4de8c5981020b8b212efecc8c0",
+          "rel": 2,
+          "title": "Waterloo offer acceptance deadline reminder · Don’t forget to accept your offer to Waterloo by June 1!"
+        },
+        {
+          "sourceId": "email-window:44623c8430f784dba46d6605a8a669e657ecb83cc3fc3d6ac2a879ebd7d90c84",
+          "rel": 2,
+          "title": "UWaterloo Engineering AIF Incomplete – Deadline Jan 30, 2025 · ACTION: Required Admission Information Form (AIF) Incompl"
+        },
+        {
+          "sourceId": "email-window:f1fd628095d2cc180d011fe4bb25720ba798bcfc9e36f18483a8989b9ba1e415",
+          "rel": 1,
+          "title": "Admissions Deadline This Thursday (Oct 1) · 2026-09-30"
+        },
+        {
+          "sourceId": "email-window:17808dfc8a102a6c6932df3af5bd51238e68cc06b1ba83fd6afd4821dd697daa",
+          "rel": 1,
+          "title": "U of T Engineering January Applicant Newsletter – Deadlines & Events · January Applicant Newsletter"
+        }
+      ]
+    },
+    {
+      "query": "UWHPC",
+      "kind": "probe",
+      "note": "UWHPC onboarding challenge: submission chat, deadline announcement, the user's repo",
+      "judgments": [
+        {
+          "sourceId": "email-window:3738a294f6bc318232644603eab2cf0768db284e5defb7786d962482e8894c00",
+          "rel": 3,
+          "title": "UWHPC Onboarding Submission Chat · 2026-10-08"
+        },
+        {
+          "sourceId": "email-window:2f32e597876d7c67cc90c7b2ca3ea71531313e9d1a3b761949155230adf500c9",
+          "rel": 3,
+          "title": "Invitation from an unknown sender: Ali Muhammad and UWHPC @ Sun Oct 11, 2026 12:30am - 12:45am (GMT+5) <email> · 2026-10"
+        },
+        {
+          "sourceId": "discord-window:380bac016140554eb01a3d57a1e97bca379db5ba14fd9edf08b64da68876765e",
+          "rel": 3,
+          "title": "Onboarding deadline extended and performance design guide added · #announcements"
+        },
+        {
+          "sourceId": "web:ac70932945ad38c62b9b7300554c6f0faefd2d3580cc71dd79aa0406d001edcc",
+          "rel": 2,
+          "title": "zeiteigen/onboarding-template"
+        },
+        {
+          "sourceId": "web:8df9a7e6739fbcef5f61089a6489fbec198b0cdc0eceaab1ca3a0258a3ef4a1c",
+          "rel": 2,
+          "title": "Your Repositories"
+        },
+        {
+          "sourceId": "discord-window:730bfcebcdb6248f5a19620f82acb4ce7e26aae6e7d72f03e15ddaf51a82c4ba",
+          "rel": 2,
+          "title": "Calo Zheng's onboarding challenge: stencil program optimisations · #onboarding-challenge › Calo Zheng - 1A SE"
+        },
+        {
+          "sourceId": "discord-window:5a8619128c33c4f457225b8eec5a8ce45dc58fe262fee917f10c30efc73dc02f",
+          "rel": 2,
+          "title": "Alyan's code review feedback on Megan Lee's onboarding challenge · #onboarding-challenge › Megan Lee - 2B CE"
+        },
+        {
+          "sourceId": "web:ebf55e6085472409fcc1686431b6753dc85591771ef836f467ce40fe61ffe3c2",
+          "rel": 1,
+          "title": "onboarding-template/src at main · zeiteigen/onboarding-template"
+        },
+        {
+          "sourceId": "web:7097104394487c83a484c356d12199d842102c6e8bdcfc6b1b90c1db89bc6ebe",
+          "rel": 1,
+          "title": "onboarding-template/src/submission.hpp at main · zeiteigen/onboarding-template"
+        },
+        {
+          "sourceId": "discord-window:56df9de0c8c1d723e9a7c4548edac7e68c4345cdc2a11776ccfb2b803ef8b1ab",
+          "rel": 1,
+          "title": "SPI Peripheral Code Review for Ruwan Kadam · #onboarding-posts › Ruwan Kadam - 1B NE"
+        }
+      ]
+    },
+    {
+      "query": "Lumiere interview",
+      "kind": "email",
+      "note": "Lumiere Research Scholar Program interview invitations and reminders",
+      "judgments": [
+        {
+          "sourceId": "email-window:765c27c9efee62ba8045806e3e1a816254d0d69df1c4a69b1c8b54f843af8d4d",
+          "rel": 3,
+          "title": "Lumiere Research Scholar Program – Interview Invitation · 2025-05-21"
+        },
+        {
+          "sourceId": "email-window:34c9c44839597f54ca81bd4936b94b09d0c936cdae509aa444f0e469b964479c",
+          "rel": 3,
+          "title": "Lumiere Research Scholar Program – Interview Invitation Reminder · 2025-05-23"
+        },
+        {
+          "sourceId": "email-window:f0a5d60628e4ddb72e14aecb14911b41e36536e58e5ade8ec49d140024f288ad",
+          "rel": 3,
+          "title": "Lumiere Research Scholar Program Interview - Final Reminder · 2025-05-26"
+        },
+        {
+          "sourceId": "email-window:bdfdb097576400a7996785a6ae8580c87c47731378a5426310e56537d2c3913e",
+          "rel": 3,
+          "title": "Invitation from an unknown sender: Ali Muhammad 's Lumiere Interview @ Tue Jun 10, 2025 11am - 11:15am (GMT+5:30) <email"
+        },
+        {
+          "sourceId": "email-window:a3626bb052b687fd7bd0c246fd79db8e20f0f2b41d8250ee1213d8a02b100b8b",
+          "rel": 3,
+          "title": "Reminder: Lumiere Research Scholar Program - Interview at 10:30am (Pakistan, Maldives Time) on Tuesday, June 10, 2025 · "
+        },
+        {
+          "sourceId": "email-window:bf43340a78e444da7ab2f1037969b7658d918a3e17112588346842cbe5f78504",
+          "rel": 3,
+          "title": "Reminder: Lumiere Research Scholar Program - Interview at 10:30am (Pakistan, Maldives Time) on Tuesday, June 10, 2025 · "
+        },
+        {
+          "sourceId": "email-window:2b1d3fb7e722a1386508035a7e7b9e467e61527dd848dc43aff74d1f103e89e5",
+          "rel": 2,
+          "title": "Checking in about your student's Lumiere interview · 2025-05-23"
+        },
+        {
+          "sourceId": "email-window:e01efdc1ae6ed8586085524e74b68f5de88d99415787aa2cd8ed5c943266c19d",
+          "rel": 2,
+          "title": "[Action Required] Lumiere Research Scholars Admission Decision · 2025-06-12"
+        },
+        {
+          "sourceId": "email-window:7d8f0c87ade918b2cdf2c594f3823997c3f8f3d22a9176a57f6e0a33c149d5e7",
+          "rel": 1,
+          "title": "Application Receipt – Lumiere Research Scholar Program · 2025-05-20"
+        },
+        {
+          "sourceId": "email-window:3c7da19dc48df9d3844c3af8a7a574f134a2388787d6c10adc39782336d929bc",
+          "rel": 1,
+          "title": "Lumiere Research Scholar Program – Deposit payment reminder · 2025-06-15"
+        }
+      ]
+    },
+    {
+      "query": "Hack the North volunteer",
+      "kind": "email",
+      "note": "the rejection-with-volunteer-offer and the volunteer deadline reminder",
+      "judgments": [
+        {
+          "sourceId": "email-window:7f99ea6b4549f4a29f2717c4e1bac54dc1e8cc88e83a2e72f8a620f951eed002",
+          "rel": 3,
+          "title": "Hack the North 2026 Application Rejection & Volunteer Offer · Your Hack the North 2026 Application Status"
+        },
+        {
+          "sourceId": "email-window:3d11436aabfac4f1a8f5c39ea1a6bd068bf138582ecc14c7e41da929c8ddd160",
+          "rel": 3,
+          "title": "Hack the North Volunteer Application Deadline Reminder · 📢 Volunteer Applications Close SOON"
+        },
+        {
+          "sourceId": "email-window:5d990c1215560bafed555247c6675ec96c6b64e1ba1385ddc5688067d6500fdf",
+          "rel": 2,
+          "title": "Hack the North 2026 application confirmation email · Thanks for applying! 🙌"
+        }
+      ]
+    },
+    {
+      "query": "University of Toronto LOCI",
+      "kind": "obsidian+email",
+      "note": "letter of continued interest for UofT EE: the note and the sent email",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-e903-73b6-ba43-e64c0312f36e",
+          "rel": 3,
+          "title": "LOCI for UofT EE"
+        },
+        {
+          "sourceId": "email-window:fb8b5acbce3dd62b6bb68720a6760624bc5ea9267c73d6e098eb293aa6ac3fc0",
+          "rel": 3,
+          "title": "UofT EE Waitlist Status & Expedited Decision Request · Letter of Continued Interest for Electrical Engineering - Applica"
+        },
+        {
+          "sourceId": "01a12ce3-e4aa-730f-bad7-5af6849d7189",
+          "rel": 2,
+          "title": "Email to UofT for update"
+        },
+        {
+          "sourceId": "email-window:7f4ba587cd934cce4253b32ac12ef713e662e96a451ef00b017ac1c974934a13",
+          "rel": 2,
+          "title": "U of T Engineering application decision notification received · U of T Engineering - application decision available"
+        },
+        {
+          "sourceId": "email-window:a6c96a7abf6db80e37018375be1b9d34ddd7308a5b15c7ce3729d3520d39a93d",
+          "rel": 1,
+          "title": "U of T Application Received – Ali's Applicant Portal Setup · We've received your application"
+        },
+        {
+          "sourceId": "email-window:016673e369fca7bd2f532d232f38d34cdf7e8bfaa5ae922e432231549ec701ba",
+          "rel": 1,
+          "title": "U of T Engineering Application Confirmation & Next Steps · Thank you for your application!"
+        }
+      ]
+    },
+    {
+      "query": "TD co-op application",
+      "kind": "email",
+      "note": "TD job application confirmations; co-op planning notes are marginal",
+      "judgments": [
+        {
+          "sourceId": "email-window:b994b35229fde4ba89791eed46dfc69f31747dd392ea6e58fff15d9d4c890bfa",
+          "rel": 3,
+          "title": "TD Careers: Thank you for your job application! / Carrières à la TD : Merci pour votre candidature! – Mobile Software En"
+        },
+        {
+          "sourceId": "email-window:5ac23044e4c0d680810fb25784463a9cdb013ff674b3f2b48831138b48ad9f8c",
+          "rel": 3,
+          "title": "TD Careers: Thank you for your job application! / Carrières à la TD : Merci pour votre candidature! – Software Engineer "
+        },
+        {
+          "sourceId": "email-window:30cbab2ca70a025ac40cf35a7f8da9d56597314548729f855056125ce182e3fc",
+          "rel": 2,
+          "title": "Verify your candidate account · 2026-10-01"
+        },
+        {
+          "sourceId": "01a12ce3-ed8b-7704-a4ea-ab8786669131",
+          "rel": 1,
+          "title": "What I'm interested in for co-op"
+        },
+        {
+          "sourceId": "01a12ce3-ed98-7536-8a8a-bb98b170a419",
+          "rel": 1,
+          "title": "Winter 2027 - 100 postings"
+        },
+        {
+          "sourceId": "01a12ce3-ecc8-7328-8a2b-97f69bec5d05",
+          "rel": 1,
+          "title": "shortlist waterlooworks cycle 1"
+        }
+      ]
+    },
+    {
+      "query": "waterlooworks shortlist",
+      "kind": "obsidian",
+      "note": "the WaterlooWorks shortlist note, then the longlist notes",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-ecc8-7328-8a2b-97f69bec5d05",
+          "rel": 3,
+          "title": "shortlist waterlooworks cycle 1"
+        },
+        {
+          "sourceId": "01a12ce3-ecda-701b-9a52-c6db1d024324",
+          "rel": 2,
+          "title": "longlist waterlooworks cycle1 chatgpt"
+        },
+        {
+          "sourceId": "01a12ce3-ece9-7625-9d8c-dae89e72308b",
+          "rel": 2,
+          "title": "longlist"
+        },
+        {
+          "sourceId": "01a12ce3-ed00-7221-a56f-d377d96503db",
+          "rel": 2,
+          "title": "longlist_purge"
+        },
+        {
+          "sourceId": "01a12ce3-ecf5-74f1-bda5-627c30e5763f",
+          "rel": 2,
+          "title": "longlist_worklog"
+        },
+        {
+          "sourceId": "01a12ce3-ed98-7536-8a8a-bb98b170a419",
+          "rel": 2,
+          "title": "Winter 2027 - 100 postings"
+        },
+        {
+          "sourceId": "01a12ce3-ed8b-7704-a4ea-ab8786669131",
+          "rel": 1,
+          "title": "What I'm interested in for co-op"
+        },
+        {
+          "sourceId": "history:e778591ae66b7e43369623e96fb855e249fa73894d2bfdaf92de324ca057a2b5",
+          "rel": 1,
+          "title": "waterlooworks.uwaterloo.ca"
+        }
+      ]
+    },
+    {
+      "query": "install Claude desktop on linux",
+      "kind": "browser+search+chatgpt",
+      "note": "the Linux docs page, downloads, searches, and the AUR package review chat",
+      "judgments": [
+        {
+          "sourceId": "web:31347e0e446ad4952c274c5fb5ca5b6f56e0d6367af7b7f2908e8ca555e67914",
+          "rel": 3,
+          "title": "Claude Desktop on Linux (beta) - Claude Code Docs"
+        },
+        {
+          "sourceId": "history:9bbe9e8655d218ea04faab91f505fa343498adf4de73c5282e602ec883568aa6",
+          "rel": 2,
+          "title": "code.claude.com/docs/en/desktop-linux"
+        },
+        {
+          "sourceId": "chatgpt-window:74cdf8e58ce8f5215f177ba88ddb8f13f0cd85745f4f141f358151e42146e8fb",
+          "rel": 2,
+          "title": "Security Review of claude-desktop AUR Package · Verify AUR Package Safety"
+        },
+        {
+          "sourceId": "web:bc7e377e190fa83394ed7aa9e7e140323d00cdbf60f11089b765d08890c81fe1",
+          "rel": 2,
+          "title": "Download Claude | Claude by Anthropic"
+        },
+        {
+          "sourceId": "search:google:9b385c8acf18ea42a1f08739",
+          "rel": 2,
+          "title": "claude desktop omarchy (Google search)"
+        },
+        {
+          "sourceId": "search:google:abc5ac745d337316e17047ac",
+          "rel": 2,
+          "title": "claude desktop (Google search)"
+        },
+        {
+          "sourceId": "search:google:cc46c7c883ac97a3dbb95d93",
+          "rel": 1,
+          "title": "claude code vs claude desktop (Google search)"
+        }
+      ]
+    },
+    {
+      "query": "ECE 150 grade calculator project",
+      "kind": "browser",
+      "note": "the Project 1 grade calculator course page",
+      "judgments": [
+        {
+          "sourceId": "web:a247596bdad219cfa5c7719df8a849b40da29453ca26bb9bea78dbe47da0e24f",
+          "rel": 3,
+          "title": "Project 1 - Grade calculator - ECE 150 - Fall 2026"
+        },
+        {
+          "sourceId": "history:b3ae26b6980714e3f31a19d6fab6ffbb7879a6d98527dfad830622eb10d67819",
+          "rel": 2,
+          "title": "Project 1 - Grade calculator - ECE 150 - Fall 2026"
+        },
+        {
+          "sourceId": "web:a46a2eb05ba56599d74cbfedcb20b96ab2104f8e3385ec68c777c330665a9145",
+          "rel": 2,
+          "title": "Homepage - ECE 150 - Fall 2026"
+        },
+        {
+          "sourceId": "history:bd9c86a613538a9d320e66ddffc5fda5faf8cc62648b8a74a64bbfb6ae7ab656",
+          "rel": 1,
+          "title": "Homepage - ECE 150 - Fall 2026"
+        }
+      ]
+    },
+    {
+      "query": "Purdue admission offer",
+      "kind": "email",
+      "note": "the Purdue admission and engineering welcome emails",
+      "judgments": [
+        {
+          "sourceId": "email-window:840e30dff2090568321e4cc78bedcfc6b0b3a777a27fc457b11dd5e8b3c2f7cc",
+          "rel": 3,
+          "title": "Purdue University Admissions Offer for Ali · Congratulations, Boilermaker!"
+        },
+        {
+          "sourceId": "email-window:0799f5e4aba392a7c3c7d0be828f8d9c53ce3e673e4778a4e56ed47b372924c8",
+          "rel": 3,
+          "title": "Purdue Engineering Admission Welcome Email to Ali · Congrats! You're admitted to Purdue Engineering! 🎉"
+        },
+        {
+          "sourceId": "email-window:189e5260d8cb427e4d2c5a5d35479a995a610dd16d841bd70aa41626373bef96",
+          "rel": 2,
+          "title": "Purdue University Admission Decision Notification Email · Your Purdue Admission Decision"
+        },
+        {
+          "sourceId": "email-window:9bfe664fd1eecda6d90874c8c2a7f48813664b764014edbfce17dc0083b45ce3",
+          "rel": 2,
+          "title": "Purdue University Admission Decision Notification Email · Your Purdue Admission Decision"
+        },
+        {
+          "sourceId": "email-window:fe1f93d4337c0b3a8502519b59f3022aef730d2514f343df314ad3409959d335",
+          "rel": 2,
+          "title": "Purdue University Admission Decision Notification Email · Your Purdue Admission Decision"
+        },
+        {
+          "sourceId": "email-window:c0309b7a0169423106dae818ef863cb29c9b5407a7d09324970ff2f2537a0a5a",
+          "rel": 2,
+          "title": "Purdue Admissions: Key Deadlines for Incoming Student Ali · Stay on Track: Upcoming Purdue Deadlines"
+        },
+        {
+          "sourceId": "email-window:df899ce62649c7b74f820e208330b55b641c284f8c211216ce4fb11a2b0d6f15",
+          "rel": 1,
+          "title": "Purdue Early Start Summer Program Invitation for Ali · Make your summer count, Boilermaker!"
+        },
+        {
+          "sourceId": "email-window:3018dc379f7baccee9313459600b622bed98b3a1c5c6976ca846ee697078d2f8",
+          "rel": 1,
+          "title": "Purdue enrollment decision survey request · Tell us about your enrollment decision"
+        },
+        {
+          "sourceId": "email-window:5f02c605d76d967f2ca8c8e2a5f8070af745ccba384b3627ad865f21704b47a8",
+          "rel": 1,
+          "title": "Purdue University Application Confirmation – Engineering (First-Year) · Thank you for applying!"
+        }
+      ]
+    },
+    {
+      "query": "Arsen Abdulali",
+      "kind": "person",
+      "note": "CCIR mentor: scheduling and session emails",
+      "judgments": [
+        {
+          "sourceId": "email-window:a38c2de6dd9de5ea20c13aa528790d156e553b3db1fccfea178b891080723a63",
+          "rel": 3,
+          "title": "CCIR Mentorship Scheduling: Dr Abdulali & Ali Muhammad · [Action Required] CCIR 1-on-1 Research Mentorship with Dr Arsen"
+        },
+        {
+          "sourceId": "email-window:27e9451bbec52d39cd3e378c5143375df032583dab71b10d44ced7e27ca5ef2a",
+          "rel": 3,
+          "title": "CCIR Mentorship Scheduling: Abdulali & Ali Muhammad · [Action Required] CCIR 1-on-1 Research Mentorship with Dr Arsen Ab"
+        },
+        {
+          "sourceId": "email-window:2db4a95d120232f815579ec35ee418e6366f4d4d8fe61361e57a0958e9a7cb38",
+          "rel": 2,
+          "title": "[URGENT] CCIR 1-on-1 Research Mentorship with Dr Arsen Abdulali (Ali Muhammad) · 2025-08-14"
+        },
+        {
+          "sourceId": "email-window:320ecd7faef690c6b3c036aa4073687da20825759cca97c2096c1fab3ddfee70",
+          "rel": 2,
+          "title": "[Action Required] CCIR 1-on-1 Research Mentorship with Dr Arsen Abdulali (Ali Muhammad) · 2025-09-12"
+        },
+        {
+          "sourceId": "email-window:20ebbd14fe64513f5faa5bf82703d8143f0857477e739e9db20da5a3701690c7",
+          "rel": 2,
+          "title": "[Action Required] CCIR 1-on-1 Research Mentorship with Dr Arsen Abdulali (Ali Muhammad) · 2025-09-19"
+        },
+        {
+          "sourceId": "email-window:0a3218b0e5725898b6b0808417c006a9993caa5cb96022064a50568892eab37c",
+          "rel": 2,
+          "title": "[Action Required] CCIR 1-on-1 Research Mentorship with Dr Arsen Abdulali (Ali Muhammad) · 2025-09-21"
+        },
+        {
+          "sourceId": "email-window:0e17d2df7413c9a481402370e7cd9239472013d78b96edac2ee48fffd8ef899f",
+          "rel": 2,
+          "title": "[Action Required] CCIR 1-on-1 Research Mentorship with Dr Arsen Abdulali (Ali Muhammad) · 2025-09-27"
+        },
+        {
+          "sourceId": "email-window:d611d1139872b205df15cf2508cb69d0df37c64ecad5a9d82c35134dd14fa7f0",
+          "rel": 2,
+          "title": "[Action Required] CCIR 1-on-1 Research Mentorship with Dr Arsen Abdulali (Ali Muhammad) · 2025-09-03"
+        },
+        {
+          "sourceId": "email-window:953043a81acc30056b1bb85bfb2b08b543fd1a8d9e6fa5a9efe9c565e9599cb3",
+          "rel": 2,
+          "title": "[Action Required] CCIR 1-on-1 Research Mentorship with Dr Arsen Abdulali (Ali Muhammad) · 2025-08-31"
+        },
+        {
+          "sourceId": "email-window:dd956ea338b0683d83d38be86346a1735ff98dad1ea3e0e7b44b9a98155cd00f",
+          "rel": 2,
+          "title": "CCIR 1-on-1 Mentorship Rescheduled to Wednesday · Reminder: CCIR 1-on-1 Mentorship with Dr Abdulali (Muhammad)"
+        },
+        {
+          "sourceId": "email-window:4f042a9575874f8c21c3e178f5b3de6ae6926d0ea8b0e66a4f058f2e8009bb4e",
+          "rel": 2,
+          "title": "CCIR 1-on-1 Mentorship Session Rescheduled and Completed · Reminder: CCIR 1-on-1 Mentorship with Dr Abdulali (Muhammad)"
+        },
+        {
+          "sourceId": "email-window:0e36fc55161ecf619213602b465ef3caf42680922a92c461928b0c80948f4cba",
+          "rel": 2,
+          "title": "CCIR Mentorship Scheduling: Dr Abdulali & Ali Muhammad Session Coordination · [Action Required] CCIR 1-on-1 Research Men"
+        },
+        {
+          "sourceId": "email-window:2a1dc857e80972497ee21db098236b0da0133f0151872a0cc1800b191735a47c",
+          "rel": 2,
+          "title": "Invitation: CCIR 1-on-1 Mentorship with Dr Abdulali (Muhammad) @ Sun Aug 17, 2025 5am - 6am (EDT) <email> · 2025-08-16"
+        },
+        {
+          "sourceId": "email-window:93396f9a9edfeddf63f5b80bdae7f48c2510800cff54b2e3529b7af489a5559c",
+          "rel": 2,
+          "title": "Invitation: CCIR 1-on-1 Mentorship with Dr Abdulali (Muhammad) @ Sun Aug 24, 2025 5am - 6am (EDT) <email> · 2025-08-23"
+        },
+        {
+          "sourceId": "email-window:f3fc4c11e8af83082e9f8262d9ec503897bcf76669aa10dde3df71f091ef9df6",
+          "rel": 1,
+          "title": "Postponing a meeting and rescheduling for Wednesday · Urgent: Delay / Postpone Today Meeting."
+        }
+      ]
+    },
+    {
+      "query": "dependency theory",
+      "kind": "obsidian",
+      "note": "global politics notes on dependency theory",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-e46d-746d-aca9-7b62a2843e0a",
+          "rel": 3,
+          "title": "Dependency Theory"
+        },
+        {
+          "sourceId": "01a12ce3-e463-77d0-8683-308adb7f7ff1",
+          "rel": 3,
+          "title": "Dependency Theory vs. World Systems Theory"
+        },
+        {
+          "sourceId": "01a12ce3-ebf7-70a6-8214-18a3d4d4bf7d",
+          "rel": 2,
+          "title": "world systems theory"
+        },
+        {
+          "sourceId": "01a12ce3-e934-7621-bb70-7f6dd22072e3",
+          "rel": 1,
+          "title": "Modernization theory"
+        },
+        {
+          "sourceId": "01a12ce3-f06c-77ee-b055-48577eca6d72",
+          "rel": 1,
+          "title": "Copy of Li Tianze '25 - Global Politics Study Guide.docx"
+        },
+        {
+          "sourceId": "01a12ce3-f046-700c-821f-f0fcf24320bf",
+          "rel": 1,
+          "title": "EXAM_PREP_NOTES.docx"
+        }
+      ]
+    },
+    {
+      "query": "Kepler's laws",
+      "kind": "obsidian",
+      "note": "physics notes on Kepler's laws and their diagrams",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-e820-7014-82bc-a6975f2ed9bb",
+          "rel": 3,
+          "title": "Kepler's laws of planetary motion"
+        },
+        {
+          "sourceId": "01a12ce3-e836-743b-aebb-63951450cc52",
+          "rel": 2,
+          "title": "Kepler’s second law of planetary motion"
+        },
+        {
+          "sourceId": "01a12ce3-e82c-7084-82b7-23f9744aef62",
+          "rel": 2,
+          "title": "Kepler’s first law of planetary motion"
+        },
+        {
+          "sourceId": "01a12ce3-e841-706f-8b83-9db1424a7962",
+          "rel": 2,
+          "title": "Kepler’s third law of planetary motion"
+        },
+        {
+          "sourceId": "01a12ce3-ede9-73fd-b114-175c2cbe0819",
+          "rel": 2,
+          "title": "Pasted image <id>.png"
+        },
+        {
+          "sourceId": "01a12ce3-edd4-77dc-9bd2-5e1c0952ffc6",
+          "rel": 1,
+          "title": "Pasted image <id>.png"
+        }
+      ]
+    },
+    {
+      "query": "global politics paper 2 marking",
+      "kind": "obsidian",
+      "note": "IB Global Politics paper 2 essay guidance and specimen papers",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-efb7-733d-945c-2b59cde7f83d",
+          "rel": 3,
+          "title": "ESSAY"
+        },
+        {
+          "sourceId": "01a12ce3-f180-715c-9721-175ee5fa18a1",
+          "rel": 2,
+          "title": "Global Politics - Specimen Papers 2026 - English.pdf"
+        },
+        {
+          "sourceId": "01a12ce3-e4cb-70dd-8628-26b2fba8dd41",
+          "rel": 2,
+          "title": "Examine the claim that intra-state conflicts impact marginalized groups more significantly than inter-state conflicts."
+        },
+        {
+          "sourceId": "01a12ce3-f18e-7092-a0f8-322f74f57a09",
+          "rel": 1,
+          "title": "paper-1-marking-criteria-2021.pdf"
+        },
+        {
+          "sourceId": "01a12ce3-f254-7313-848c-ec6844596d26",
+          "rel": 1,
+          "title": "Global Politics - Course Companion - Mooij, Dhesi, Nusseibeh - Oxford 2024.pdf"
+        },
+        {
+          "sourceId": "01a12ce3-f2f7-7785-9b83-a08ba2486ddd",
+          "rel": 1,
+          "title": "Global Politics - Course Companion - Mooij, Dhesi, Nusseibeh - Oxford 2024.pdf"
+        }
+      ]
+    },
+    {
+      "query": "John Locke essay competition",
+      "kind": "email",
+      "note": "the John Locke Institute essay prize: prompts, registration, the user's verification code",
+      "judgments": [
+        {
+          "sourceId": "email-window:4f149a28312efe768cc3b2d98bbf599ad4b2e3bf4f5ce73ae2331d4f3409282f",
+          "rel": 3,
+          "title": "John Locke Institute essay competition prompt email · Is it ever wrong to do the right thing for the wrong reasons?"
+        },
+        {
+          "sourceId": "email-window:72caef35e0fe7a51d862cfd20971c3fb99fab3ec8418271d0f369126b370f99b",
+          "rel": 3,
+          "title": "John Locke Essay Prize registration email · If people cannot write well, they cannot think well."
+        },
+        {
+          "sourceId": "email-window:ce9c7f914bd4f3ac98a7227b7b2695b50949030d51be6c742d4f72d3899cadee",
+          "rel": 3,
+          "title": "Verification Code - JLI Essay Competition · 2025-04-06"
+        },
+        {
+          "sourceId": "email-window:e7ac744a8c3b54f6bcb61afcda7699971d197b73089e0985c7c4bd61427240c3",
+          "rel": 2,
+          "title": "Oxford awaits. Scholarship for Global Essay Prize Registrants · 2025-07-03"
+        },
+        {
+          "sourceId": "email-window:7892ab32a8ce3af887e448a621cb913c77e282d213283a15af87fd5ba14d9d1c",
+          "rel": 1,
+          "title": "John Locke Institute Summer School applications open · From Essay Prize to Summer School — Applications Now Open"
+        },
+        {
+          "sourceId": "email-window:b04cd3e9b245344074b4f59791bdb52a98b5b9baf33d1f671de9da23a001161b",
+          "rel": 1,
+          "title": "John Locke Institute is coming to China! · 2025-04-24"
+        }
+      ]
+    },
+    {
+      "query": "Junior Academy team formation",
+      "kind": "email",
+      "note": "NYAS Junior Academy team formation announcements and reminders",
+      "judgments": [
+        {
+          "sourceId": "email-window:806911750b40ae921b770f32209111cb6d572411843915956998c0f9e2e5d37a",
+          "rel": 3,
+          "title": "Team Formation for Fall 2022 Challenges! · 2022-09-29"
+        },
+        {
+          "sourceId": "email-window:78cd3e6e0db4f415fb3b2c58596a480e3ada20f742cd2dbcb210f5ff86cc4986",
+          "rel": 3,
+          "title": "The Junior Academy: Spring 2024 Team Formation is open! · 2024-02-20"
+        },
+        {
+          "sourceId": "email-window:bb6c1ff720f5a5a46438986165a605902d41e9cc733f68a783a061d0db8408a2",
+          "rel": 2,
+          "title": "The Junior Academy: Spring 2024 Team Formation is completed! · 2024-03-04"
+        },
+        {
+          "sourceId": "email-window:8ae6536a10c829614cf4cf24a5cd6f766f1040fce2033ca6506b5e8f8c84ca66",
+          "rel": 2,
+          "title": "The Junior Academy: Fall 2024 Team Formation is completed! · 2024-10-08"
+        },
+        {
+          "sourceId": "email-window:a111e89b1c5a7b98cfdb5bb38568d7a13f677fbce71e2d7ac8ecfc773e0b566f",
+          "rel": 2,
+          "title": "REMINDER: Team Formation Ends Soon · 2022-10-04"
+        },
+        {
+          "sourceId": "email-window:6f5fda9fb164d8eae94a42cb3229c5adb1ece7c214586064e4332460c4b01f4a",
+          "rel": 2,
+          "title": "FINAL Junior Academy Reminder: Team Formation ends TODAY! · 2024-02-29"
+        },
+        {
+          "sourceId": "email-window:0279e3d252159440bda79ae2727565a9eb159c31e6a537886177b4e564fad429",
+          "rel": 2,
+          "title": "Reminder! Junior Academy Reminder: Team Formation ends March 6th · 2025-03-04"
+        },
+        {
+          "sourceId": "email-window:f953a40961a9f02696512f16368cee9c262f50a8d4c7f8bf04347032c3cb8615",
+          "rel": 2,
+          "title": "Reminder! Junior Academy Reminder: Team Formation ends October 3rd · 2024-10-01"
+        },
+        {
+          "sourceId": "email-window:fa0bad76e905c9876a8798eabc1f4d2ffce81190737d219b93d433b06a997d26",
+          "rel": 2,
+          "title": "Junior Academy Reminder: Team Formation ends Feb 29th! Form your teams TODAY! · 2024-02-27"
+        },
+        {
+          "sourceId": "email-window:bccee0ea2a630fc9999a37ec7752f8894db2b13950a1b175dd2813ca0084f2e4",
+          "rel": 2,
+          "title": "FINAL Junior Academy Reminder: Team Formation ends TODAY! · 2025-03-06"
+        },
+        {
+          "sourceId": "email-window:b55cace975f99dbc510a09963e6f2932cb38413431639bcf5d7415d0db982643",
+          "rel": 2,
+          "title": "FINAL Junior Academy Reminder: Team Formation ends TODAY! · 2024-10-03"
+        }
+      ]
+    },
+    {
+      "query": "Tiny Tapeout competition",
+      "kind": "discord",
+      "note": "the RISC-V Tiny Tapeout peripheral competition announcement",
+      "judgments": [
+        {
+          "sourceId": "discord-window:b91b9fa9f06c53607ea753aa8e0231d6fea3fdffee9d1ded85b8c164995a7d33",
+          "rel": 3,
+          "title": "RISC-V Tiny Tapeout Peripheral Competition Launch · #general-public"
+        },
+        {
+          "sourceId": "discord-window:3df64388e836cf31caee16af5cc89f6a7532e2b990c8128f7e75fb7ac33603fb",
+          "rel": 1,
+          "title": "Etched AI ASIC Startup Visiting Waterloo – Fireside Chat & UW ASIC Meetup · #announcements-public"
+        }
+      ]
+    },
+    {
+      "query": "Etched fireside chat",
+      "kind": "discord",
+      "note": "the UW ASIC announcement of Etched's visit",
+      "judgments": [
+        {
+          "sourceId": "discord-window:3df64388e836cf31caee16af5cc89f6a7532e2b990c8128f7e75fb7ac33603fb",
+          "rel": 3,
+          "title": "Etched AI ASIC Startup Visiting Waterloo – Fireside Chat & UW ASIC Meetup · #announcements-public"
+        }
+      ]
+    },
+    {
+      "query": "stencil optimisation code review",
+      "kind": "discord",
+      "note": "Calo Zheng's stencil onboarding submission review; other onboarding reviews marginal",
+      "judgments": [
+        {
+          "sourceId": "discord-window:730bfcebcdb6248f5a19620f82acb4ce7e26aae6e7d72f03e15ddaf51a82c4ba",
+          "rel": 3,
+          "title": "Calo Zheng's onboarding challenge: stencil program optimisations · #onboarding-challenge › Calo Zheng - 1A SE"
+        },
+        {
+          "sourceId": "discord-window:5a8619128c33c4f457225b8eec5a8ce45dc58fe262fee917f10c30efc73dc02f",
+          "rel": 1,
+          "title": "Alyan's code review feedback on Megan Lee's onboarding challenge · #onboarding-challenge › Megan Lee - 2B CE"
+        }
+      ]
+    },
+    {
+      "query": "WatMCP",
+      "kind": "obsidian",
+      "note": "the WatMCP project announcement note",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-ed31-77c6-ab20-06a34102831c",
+          "rel": 3,
+          "title": "WatMCP LinkedIn announcement"
+        }
+      ]
+    },
+    {
+      "query": "my resume",
+      "kind": "obsidian+email",
+      "note": "the user's resume documents and the email sending it",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-f26a-7693-9d20-0aca999b0695",
+          "rel": 3,
+          "title": "My Resume"
+        },
+        {
+          "sourceId": "01a12ce3-f295-762a-8ef6-a053cac80ece",
+          "rel": 3,
+          "title": "My Resume"
+        },
+        {
+          "sourceId": "email-window:afd6f5b2335e5bc0f42ac28e67e942ddf486cf099318a9d70b89ed7ea286417e",
+          "rel": 3,
+          "title": "Resume · 2026-09-26"
+        },
+        {
+          "sourceId": "01a12ce3-efa1-75a6-a31d-e1e31eba611e",
+          "rel": 2,
+          "title": "resume-1.png"
+        },
+        {
+          "sourceId": "01a12ce3-ecf5-74f1-bda5-627c30e5763f",
+          "rel": 1,
+          "title": "longlist_worklog"
+        }
+      ]
+    },
+    {
+      "query": "Qwen 27B",
+      "kind": "browser+search",
+      "note": "the Qwen 4 27B article and the search for it",
+      "judgments": [
+        {
+          "sourceId": "web:839b9513ec4408c79f14c7bc68efa734cb46ed8df01bf88a895953de3d9cfac6",
+          "rel": 3,
+          "title": "Qwen 4 27B: confirmed, unconfirmed, and what runs today"
+        },
+        {
+          "sourceId": "search:google:09d21f7dfee43f110f8f3e93",
+          "rel": 3,
+          "title": "qwen 4 27b (Google search)"
+        },
+        {
+          "sourceId": "history:833684daa691effce62ef5bcd44e2f27cd2e986b3b1557ca8e732f7d51ae9a8a",
+          "rel": 2,
+          "title": "Qwen 4 27B: confirmed, unconfirmed, and what runs today"
+        },
+        {
+          "sourceId": "web:280929e755ec2ab5a9a32a341e4b96da8701bbd0d04570d5c49de19902723dcc",
+          "rel": 1,
+          "title": "🟢 llama-swap"
+        }
+      ]
+    },
+    {
+      "query": "Cornell decision",
+      "kind": "email",
+      "note": "Cornell regular-decision release notices",
+      "judgments": [
+        {
+          "sourceId": "email-window:432c6fdcdb3046b19002e92d5969f596da46c79aa1bfdfd60c4c84709649b8e1",
+          "rel": 3,
+          "title": "Cornell Regular Decision Notification – Decision Release Date · Correction: Cornell Regular Decision Notification"
+        },
+        {
+          "sourceId": "email-window:04d5d38c6b299e406d66375ff19e4c819f043c5ad3de04aa6a475a569c7794bd",
+          "rel": 3,
+          "title": "Cornell Regular Decision Notification – Results March 26 · Coming Soon: Cornell Regular Decision Notification"
+        },
+        {
+          "sourceId": "email-window:95f63e2a7191e2cc60b4fc481965b70b82471c324a4fa61c816fa5dd2422ca75",
+          "rel": 1,
+          "title": "Cornell University Application Confirmation – College of Engineering · Thank you for applying to Cornell University!"
+        },
+        {
+          "sourceId": "email-window:d75c084efff3c4cd92979cc022579937984a6939e7a6587ba857e4f5ac52df1d",
+          "rel": 1,
+          "title": "Common App submission confirmation to Cornell University · Application submitted to Cornell University"
+        }
+      ]
+    },
+    {
+      "query": "UIUC housing contract",
+      "kind": "email",
+      "note": "University of Illinois housing contract and deadline reminders",
+      "judgments": [
+        {
+          "sourceId": "email-window:1ef9279165492d759077f77630c7f66fc7b1125f78017c8c3dc610d74b216385",
+          "rel": 3,
+          "title": "University Housing contract signing deadline reminder · Sign up for housing before deadlines pass!"
+        },
+        {
+          "sourceId": "email-window:0b3031833e2356de1c30d3f81e3f78cb88de416797ca54a3490d6b8159944655",
+          "rel": 3,
+          "title": "UIUC Housing Deadline Reminder – May 8 Priority Deadline · Don't miss housing deadlines at Illinois!"
+        },
+        {
+          "sourceId": "email-window:e49f087a2d71c8e201d5b53c837cc4bbe519d98bb09b9b006c3b2bbf8953cdd1",
+          "rel": 1,
+          "title": "UIUC March 2026 Admitted Student Updates & Deadlines · Illinois Bound: March Updates for Admitted Students"
+        },
+        {
+          "sourceId": "email-window:ba07d31bf0b8103f76731e36267f96d0f1d44bb93e08e0914cede9142331d6a2",
+          "rel": 1,
+          "title": "UIUC April 2026 Admitted Student Update Email · April Updates for Admitted Students"
+        }
+      ]
+    },
+    {
+      "query": "Green Redesign milestone",
+      "kind": "email",
+      "note": "NYAS Junior Academy Green Redesign challenge milestone emails (Fall 2022)",
+      "judgments": [
+        {
+          "sourceId": "email-window:e6db577b311bdd55ef17d7fe73e3ce537a2da047676c11c1981ddfaedd60fa6d",
+          "rel": 3,
+          "title": "Milestone 3 Due November 4th for The Green Redesign in The Junior Academy · 2022-11-03"
+        },
+        {
+          "sourceId": "email-window:58054b5f3e75156d18fdd006c924354dda452738f8b4f226acd2548f6e5e6133",
+          "rel": 3,
+          "title": "Milestone 3 - Deadline Extended! Due November 6 for The Green Redesign in The Junior Academy · 2022-11-04"
+        },
+        {
+          "sourceId": "email-window:7b790312054ac4def89162c91b1541e492a0e223e9d21bc0cfc326d3b3ceaa8c",
+          "rel": 3,
+          "title": "Milestone 2 Reminder - “The Green Redesign” Innovation Challenge, New York Academy of Sciences · 2022-10-14"
+        },
+        {
+          "sourceId": "email-window:dc6a935b4af5151c03848793058271e5dcd87aaf0a783f574628c5840e5b66e2",
+          "rel": 3,
+          "title": "Milestone 2 - Deadline Extended! Due October 23 for The Green Redesign in The Junior Academy · 2022-10-21"
+        },
+        {
+          "sourceId": "email-window:f291676e7a7a4c102c40686c2d3a491add0bdacadab3d6893c61a4117a2c97e0",
+          "rel": 3,
+          "title": "Milestone 4 Solution Presentation Due November 20th for The Green Redesign in The Junior Academy · 2022-11-11"
+        },
+        {
+          "sourceId": "email-window:2941390ce002604e26a5de0f6df1b71a2947a2a92ae18fd88380cf1e785337de",
+          "rel": 3,
+          "title": "Milestone 4 Solution Presentation Due November 20th for The Green Redesign in The Junior Academy · 2022-11-18"
+        },
+        {
+          "sourceId": "email-window:87b783124cb780d371a0230c60eb212ce4dbe75336d88a85046e0297362cc65d",
+          "rel": 1,
+          "title": "Daily Discussions Digest · 2022-10-06"
+        },
+        {
+          "sourceId": "email-window:2c97318a7605d3df183528da790b1a6b488976c2e4530dc619323e0655c51722",
+          "rel": 1,
+          "title": "Milestone 4: Final Solution Due November 19th! The Junior Academy · 2023-11-08"
+        }
+      ]
+    },
+    {
+      "query": "Muse Spark model",
+      "kind": "browser+search",
+      "note": "Meta's Muse Spark announcement and related searches",
+      "judgments": [
+        {
+          "sourceId": "web:a6e8a25dabcf031aef60e653138a38f7764290467888e070e5706af90e7b0d24",
+          "rel": 3,
+          "title": "Introducing Muse Spark 1.1 | Meta AI Research"
+        },
+        {
+          "sourceId": "search:google:2a28889ceef991e0d3cd5b5d",
+          "rel": 2,
+          "title": "muse spark open source when (Google search)"
+        },
+        {
+          "sourceId": "search:google:3bb2686a757915c996a0effe",
+          "rel": 2,
+          "title": "meta muse spark 1.2 huggingface (Google search)"
+        },
+        {
+          "sourceId": "web:7758c02a15e383930365eec29ec6665c26a186432d9cd464ff4ee010f8e3708e",
+          "rel": 1,
+          "title": "Muse Wonder: A Frontier Model For Personal & Professional AI Agents"
+        },
+        {
+          "sourceId": "search:google:8bcaef523a9bbc5fafe91622",
+          "rel": 1,
+          "title": "muse wonder (Google search)"
+        }
+      ]
+    },
+    {
+      "query": "attention is all you need transformer",
+      "kind": "obsidian",
+      "note": "the transformer paper and the user's attention notes",
+      "judgments": [
+        {
+          "sourceId": "01a12ce3-f230-74f8-abcb-bf79fe1dedc2",
+          "rel": 3,
+          "title": "Attention is all you need.pdf"
+        },
+        {
+          "sourceId": "01a12ce3-ed64-77b5-8204-88fa505528c7",
+          "rel": 1,
+          "title": "Cross Attention on engram-like"
+        },
+        {
+          "sourceId": "01a12ce3-ed5a-7272-afad-9ca410b19601",
+          "rel": 1,
+          "title": "encoder-like attention for documents"
+        },
+        {
+          "sourceId": "01a12ce3-ed6d-7568-a7ae-54f90a4c5cd5",
+          "rel": 1,
+          "title": "GPT-2"
+        }
+      ]
+    },
+    {
+      "query": "SAT score report",
+      "kind": "email",
+      "note": "SAT score sending and receipt confirmations",
+      "judgments": [
+        {
+          "sourceId": "email-window:049f21de4a641d023bf97a374723ae95a548a9102d0a34db2e7e729a69d6a1ab",
+          "rel": 3,
+          "title": "SAT Score Report Order Confirmation – UofT & Waterloo · Order Confirmation: Additional SAT Score Reports"
+        },
+        {
+          "sourceId": "email-window:341dffd12ba35b5a1d79bddb3d4d566524a4744459c9e5f16a7f66ca4168e885",
+          "rel": 2,
+          "title": "SAT Score Portal Discrepancy Resolved - UofT Engineering · Portal Discrepancy: SAT Score Receipt Clarification - ID: <id"
+        },
+        {
+          "sourceId": "email-window:400acde4cb6c9137e833e44311cf5075716cd10b0bcbe1bc9ec077fdf03001be",
+          "rel": 2,
+          "title": "HKUST Admissions: SAT Score Submission Confirmation (App. <id>) · HKUST Admissions: Request for Additional Documents (Ap"
+        },
+        {
+          "sourceId": "email-window:e2070bcdab6637ef2336dd2166b4b7fa4f9c3c3cce34572ffcf6d2ee38f71f78",
+          "rel": 2,
+          "title": "UT Austin Reminder: Submit Official SAT/ACT Scores by Dec 10 · Action Required: Submit Your Official SAT or ACT Scores"
+        },
+        {
+          "sourceId": "email-window:1cde41836aaef58d0eb8652c178b3205260191ff453234ab230cbaeefbb4cfb0",
+          "rel": 2,
+          "title": "U of T Engineering Admissions Auto-Reply: SAT Score Receipt Clarification · Portal Discrepancy: SAT Score Receipt Clarif"
+        }
+      ]
+    },
+    {
+      "query": "is the claude-desktop AUR package safe",
+      "kind": "chatgpt",
+      "note": "natural-language question answered by the ChatGPT security review",
+      "judgments": [
+        {
+          "sourceId": "chatgpt-window:74cdf8e58ce8f5215f177ba88ddb8f13f0cd85745f4f141f358151e42146e8fb",
+          "rel": 3,
+          "title": "Security Review of claude-desktop AUR Package · Verify AUR Package Safety"
+        },
+        {
+          "sourceId": "web:31347e0e446ad4952c274c5fb5ca5b6f56e0d6367af7b7f2908e8ca555e67914",
+          "rel": 1,
+          "title": "Claude Desktop on Linux (beta) - Claude Code Docs"
+        },
+        {
+          "sourceId": "search:google:9b385c8acf18ea42a1f08739",
+          "rel": 1,
+          "title": "claude desktop omarchy (Google search)"
+        }
+      ]
+    },
+    {
+      "query": "CCIR research symposium",
+      "kind": "email",
+      "note": "CCIR Student Research Symposium calls, deadline, and live announcement",
+      "judgments": [
+        {
+          "sourceId": "email-window:a6e39f3390a88a6f4362650e5c8834ca6e635801e70809648637516828ddac4d",
+          "rel": 3,
+          "title": "CCIR Student Research Symposium 2026 – Call for Submissions · Call for Submissions: Present your Research at the Univers"
+        },
+        {
+          "sourceId": "email-window:019b5ca656c5818a7dce27efa2118d8eca11c1b28eebc0a26d2d78cff866635f",
+          "rel": 3,
+          "title": "CCIR Student Research Symposium 2026 Deadline Reminder · Deadline Today: Present your Research at the University of Camb"
+        },
+        {
+          "sourceId": "email-window:c99d7f30eba94d41545bc3d58586388b34704a0a093bc33d3e6d963315c205db",
+          "rel": 3,
+          "title": "CCIR Student Research Symposium Live Announcement · LIVE Now: CCIR Student Research Symposium"
+        },
+        {
+          "sourceId": "email-window:2476ee8a963af8ebc4a0a312c29fe3608ebffac46de82b1b32f8ff68ddd0f6b5",
+          "rel": 2,
+          "title": "CCIR Winter Symposium 2025 Announcement with JNOS Publishing Partnership · Submit Your Research to CCIR Winter Symposium"
+        },
+        {
+          "sourceId": "email-window:07454d6acb32d179f1496bf2b2fb794772451e36a99d0bff72a6c28aae0584e3",
+          "rel": 1,
+          "title": "CCIR Final Admissions Update: New Labs, Symposiums & Tuition Change · Final Admissions Update + New Changes coming to CC"
+        },
+        {
+          "sourceId": "email-window:cd4d4d03269c6aa0cf8e85374c307e158db769092c45ef290b641e9c1e531c81",
+          "rel": 1,
+          "title": "Open to All CCIR Students: Publish Your Research at JNOS · 2026-10-11"
+        }
+      ]
+    },
+    {
+      "query": "deal or no deal simulation",
+      "kind": "browser",
+      "note": "the user's deal-no-deal GitHub repository",
+      "judgments": [
+        {
+          "sourceId": "web:738d3be7c12c932bf8912e17f7a28b043b6d2d9238f21cdc91182c0c1c11ac0c",
+          "rel": 3,
+          "title": "zeiteigen/deal-no-deal: A simulation and analysis of deal or no deal using using various utility functions to model how "
+        },
+        {
+          "sourceId": "web:c6c4c0b6c832a298c831f96fe6daf77323600b52198db34e0c601aaeacba7ca4",
+          "rel": 1,
+          "title": "zeiteigen (Ali Shahzad)"
+        },
+        {
+          "sourceId": "web:8df9a7e6739fbcef5f61089a6489fbec198b0cdc0eceaab1ca3a0258a3ef4a1c",
+          "rel": 1,
+          "title": "Your Repositories"
+        }
+      ]
+    },
+    {
+      "query": "llama-swap models",
+      "kind": "browser",
+      "note": "the local llama-swap model dashboard pages",
+      "judgments": [
+        {
+          "sourceId": "web:81e18d1254a8d3604372adc922b4ed33a4c36136a66d98a384391c613fe19401",
+          "rel": 3,
+          "title": "🟢 llama-swap"
+        },
+        {
+          "sourceId": "web:280929e755ec2ab5a9a32a341e4b96da8701bbd0d04570d5c49de19902723dcc",
+          "rel": 3,
+          "title": "🟢 llama-swap"
+        },
+        {
+          "sourceId": "web:38773dec9a5496019ca1c377f4fa5fef327c426e3cb8f7d47bd710465ea92860",
+          "rel": 2,
+          "title": "🟢 llama-swap"
+        }
+      ]
+    },
+    {
+      "query": "Megan Lee onboarding review",
+      "kind": "discord",
+      "note": "Alyan's review of Megan Lee's UWHPC onboarding submission",
+      "judgments": [
+        {
+          "sourceId": "discord-window:5a8619128c33c4f457225b8eec5a8ce45dc58fe262fee917f10c30efc73dc02f",
+          "rel": 3,
+          "title": "Alyan's code review feedback on Megan Lee's onboarding challenge · #onboarding-challenge › Megan Lee - 2B CE"
+        },
+        {
+          "sourceId": "discord-window:730bfcebcdb6248f5a19620f82acb4ce7e26aae6e7d72f03e15ddaf51a82c4ba",
+          "rel": 1,
+          "title": "Calo Zheng's onboarding challenge: stencil program optimisations · #onboarding-challenge › Calo Zheng - 1A SE"
+        }
+      ]
+    },
+    {
+      "query": "IEEE distinguished lecture",
+      "kind": "discord",
+      "note": "the IEEE SSCS distinguished lectures announcement",
+      "judgments": [
+        {
+          "sourceId": "discord-window:39e79d4c4909a870df0e0284192e5a62ff767122f06027eb618e2af8cf7b90e9",
+          "rel": 3,
+          "title": "IEEE SSCS Distinguished Lectures: Dr. Alvin Loke (Intel) – March 24–25 · #announcements-public"
+        },
+        {
+          "sourceId": "discord-window:0d80cb42f1224723fe4a03ddf90cba589380a7221cf4aa5a818b030684975dc9",
+          "rel": 1,
+          "title": "Altera Exclusive Session at EngSoc Career Fair for UW ASIC Members · #announcements-public"
+        }
+      ]
+    }
+  ]
+}

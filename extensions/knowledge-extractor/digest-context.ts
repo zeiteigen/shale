@@ -8,10 +8,13 @@ import type { DigestContext, ExtractionChunk } from './types';
 export interface DigestSource { source_id: string; title: string; type: string; uri: string; origin: string; created_at: number; updated_at: number }
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
-const MAX_REGISTRY = 15, MAX_EPISODES = 5, MAX_PARTICIPANTS = 12;
+const MAX_REGISTRY = 15, MAX_EPISODES = 5, MAX_PARTICIPANTS = 12, MAX_LINKED = 10;
 
-/** Who and where, from the connector's own graph: participants (marking the user) and venues. */
-function connectorContext(sdk: ShaleSDK, sourceId: string) {
+/**
+ * Who and where, from the connector's own graph: participants (marking the user, with the position of their first
+ * message when the connector recorded one) and venues.
+ */
+export function connectorContext(sdk: ShaleSDK, sourceId: string) {
   // Connectors attach participants and venues to the source's event as ROLE:* claims, or directly to the source.
   const rows = sdk.database.query<{ id: number; type: string; name: string }, [string, string]>(`SELECT DISTINCT e.id,e.type,
       coalesce(e.display_name,e.name) AS name FROM (
@@ -24,11 +27,16 @@ function connectorContext(sdk: ShaleSDK, sourceId: string) {
     FROM graph_claims c JOIN entities s ON s.id=c.object_id WHERE c.predicate='PART_OF' AND s.type='Server'
     AND c.subject_id IN (${conversations.map(() => '?').join(',')})`).all(...conversations) : [];
   const self = sdk.database.query<{ id: number }, [string]>('SELECT id FROM entities WHERE stable_id=?').get(SELF_STABLE_ID)?.id;
+  const positions = new Map(sdk.database.query<{ id: number; position: number | null }, [string]>(`SELECT c.object_id AS id,
+      min(json_extract(c.qualifiers,'$.position')) AS position FROM source_entities se JOIN graph_claims c ON c.subject_id=se.entity_id
+    WHERE se.source_id=? AND c.predicate='ROLE:participant' AND c.object_id IS NOT NULL GROUP BY c.object_id`).all(sourceId)
+    .map(row => [row.id, row.position]));
   const people = rows.filter(row => row.type === 'Person' || row.type === 'Bot').slice(0, MAX_PARTICIPANTS)
     .map(row => ({ ...row, canonical: canonicalOf(sdk.database, row.id) }));
   return {
     people: people.map(person => ({ id: person.canonical, label: person.canonical === self ? `${person.name} (the user)` : person.name,
-      self: person.canonical === self })),
+      self: person.canonical === self, position: positions.get(person.id) ?? undefined })),
+    self,
     venues: [...rows.filter(row => row.type === 'Conversation').map(row => `channel ${row.name}`), ...servers.map(row => `server ${row.name}`)],
   };
 }
@@ -54,7 +62,8 @@ function episodeShortlist(sdk: ShaleSDK, texts: string[], entityIds: number[], a
   return [...found.values()];
 }
 
-export function digestContext(sdk: ShaleSDK, source: DigestSource, chunks: ExtractionChunk[]): DigestContext {
+/** `linked`: registry entities the gazetteer found in the window; listed before the lexical shortlist so the model reuses them. */
+export function digestContext(sdk: ShaleSDK, source: DigestSource, chunks: ExtractionChunk[], linked: number[] = []): DigestContext {
   ensureStorySchema(sdk.database);
   const text = chunks.map(chunk => chunk.text_content).join('\n');
   const { urls, emails } = textReferences(text);
@@ -72,6 +81,12 @@ export function digestContext(sdk: ShaleSDK, source: DigestSource, chunks: Extra
     const row = sdk.database.query<{ name: string; type: string }, [number]>(
       'SELECT coalesce(display_name,name) AS name,type FROM entities WHERE id=?').get(person.id);
     if (row && isRegistryType(row.type)) registry.set(person.id, { id: person.id, name: row.name, type: row.type, description: describe(sdk.database, person.id) });
+  }
+  for (const id of linked) {
+    if (registry.size >= MAX_REGISTRY + MAX_LINKED || registry.has(id)) continue;
+    const row = sdk.database.query<{ name: string; type: string }, [number]>(
+      'SELECT coalesce(display_name,name) AS name,type FROM entities WHERE id=? AND canonical_id IS NULL').get(id);
+    if (row && isRegistryType(row.type) && row.type !== 'Episode') registry.set(id, { id, name: row.name, type: row.type, description: describe(sdk.database, id) });
   }
   for (const entry of shortlist(sdk.database, { keys, texts: [source.title, text], limit: MAX_REGISTRY, excludeTypes: ['Episode'],
     exclude: [...registry.keys()] })) {

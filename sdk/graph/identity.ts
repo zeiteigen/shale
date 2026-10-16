@@ -4,7 +4,9 @@ import type { GraphIngestor } from '../graph';
 import { ensureStorySchema } from '../../lib/graph/story-schema';
 import { AFFILIATION_KEY_KINDS, fullNameKey, identityKeys, type IdentityKey } from '../../lib/graph/identity-keys';
 import { sameFamily, typeFamily } from '../../lib/graph/ontology';
-import { canonicalOf, connectorKeys, describe, entitiesWithKeys, indexEntity, keysOf, writeKeys } from './registry';
+import { jaccard, stripEmail } from '../../lib/graph/linkage';
+import { lshPairs, shingles, signature } from '../../lib/graph/minhash';
+import { canonicalOf, connectorKeys, describe, entitiesWithKeys, indexEntity, isRegistryType, keysOf, writeKeys } from './registry';
 
 /**
  * Cross-source identity. Every decision is recorded: merges in graph_identity_changes (reversible with
@@ -14,8 +16,14 @@ import { canonicalOf, connectorKeys, describe, entitiesWithKeys, indexEntity, ke
  * one existing thing of the same type (see EXACT_NAME_TYPES), or the model's registry match corroborated by a
  * name key, merges automatically. Partial name or acronym collisions, and model matches without key support,
  * wait for model adjudication; people are never merged by name alone.
+ *
+ * Merges are constrained clustering, not greedy pairwise unions: a merge is refused when any member of one
+ * group is cannot-linked to any member of the other (see `cannotLink`), so A~B and B~C never pull in a C
+ * that was told apart from A.
  */
 export const SELF_STABLE_ID = 'self';
+/** Why a merge may proceed: a shared identity key, a judgement (exact name, model, linkage), or the user's own accounts. */
+type MergeBasis = 'key' | 'judgement' | 'self';
 export type MentionDecision = { canonicalId: number; outcome: 'merged' | 'queued' | 'new' | 'existing'; basis: string[] };
 export interface MentionInput {
   entityId: number; type: string; names: string[]; match?: number | null; urls?: string[]; emails?: string[];
@@ -51,10 +59,11 @@ export class IdentityResolver {
     return this.db.query<{ type: string }, [number]>('SELECT type FROM entities WHERE id=?').get(entityId)?.type ?? '';
   }
 
-  private merge(from: number, into: number, reason: string): boolean {
+  private merge(from: number, into: number, reason: string, basis: MergeBasis = 'judgement'): boolean {
     const source = canonicalOf(this.db, from), target = canonicalOf(this.db, into);
     if (source === target) return false;
     if (!sameFamily(this.type(source), this.type(target))) return false;
+    if (basis !== 'self' && this.cannotLink(source, target, basis === 'key' ? 'hard' : 'all')) return false;
     // Keep the self identity and older canonicals as the surviving record.
     const [loser, winner] = this.db.query("SELECT 1 FROM entities WHERE id=? AND stable_id=?").get(source, SELF_STABLE_ID)
       ? [target, source] : [source, target];
@@ -87,6 +96,35 @@ export class IdentityResolver {
       UNION ALL SELECT entity_id,canonical_id FROM graph_identity_changes WHERE undone_at IS NOT NULL
         AND entity_id IN (${list}) AND canonical_id IN (${list})`).all(...ids, ...ids, ...ids, ...ids);
     return pairs.some(pair => root.get(pair.a) !== root.get(pair.b));
+  }
+
+  /**
+   * Why two identity groups must stay apart, or null. Hard constraints hold even against a shared identity
+   * key: a merge someone undid, and two parties of one event (a sender and a recipient, two people in one
+   * conversation). Judgements also respect distinct accounts of one authority (Discord user ids; emails are
+   * not used, since one person has several) and recorded "different" verdicts between any members.
+   */
+  cannotLink(a: number, b: number, strength: 'hard' | 'all' = 'all'): string | null {
+    const left = this.group(a), right = this.group(b);
+    if (left.includes(right[0]!)) return null;
+    const l = left.map(() => '?').join(','), r = right.map(() => '?').join(',');
+    if (this.db.query<{ n: number }, number[]>(`SELECT 1 AS n FROM graph_identity_changes WHERE undone_at IS NOT NULL
+      AND ((entity_id IN (${l}) AND canonical_id IN (${r})) OR (entity_id IN (${r}) AND canonical_id IN (${l}))) LIMIT 1`)
+      .get(...left, ...right, ...right, ...left)) return 'undone merge';
+    const event = this.db.query<{ id: number }, number[]>(`SELECT x.subject_id AS id FROM graph_claims x JOIN graph_claims y ON y.subject_id=x.subject_id
+      WHERE x.object_id IN (${l}) AND y.object_id IN (${r}) AND x.predicate GLOB 'ROLE:*' AND y.predicate GLOB 'ROLE:*'
+      AND x.status IN ('accepted','proposed') AND y.status IN ('accepted','proposed') LIMIT 1`).get(...left, ...right);
+    if (event) return `co-participants of event ${event.id}`;
+    if (strength === 'hard') return null;
+    const accounts = (ids: number[]) => new Set(this.db.query<{ alias: string }, number[]>(
+      `SELECT alias FROM graph_aliases WHERE scope='key:discord-user' AND entity_id IN (${ids.map(() => '?').join(',')})`).all(...ids).map(row => row.alias));
+    const mine = accounts(left), theirs = accounts(right);
+    if (mine.size && theirs.size && ![...mine].some(account => theirs.has(account))) return 'distinct discord accounts';
+    if (this.db.query<{ n: number }, number[]>(`SELECT 1 AS n FROM graph_resolution_queue WHERE state='different'
+      AND coalesce(reason,'') NOT IN ('superseded by merge','already the same entity','different kinds of thing')
+      AND ((mention_id IN (${l}) AND candidate_id IN (${r})) OR (mention_id IN (${r}) AND candidate_id IN (${l}))) LIMIT 1`)
+      .get(...left, ...right, ...right, ...left)) return 'judged different';
+    return null;
   }
 
   /**
@@ -176,7 +214,7 @@ export class IdentityResolver {
       let exact: number | null = null;
       if (strong) {
         const basis = strong[1].filter(key => identityBearing(family, key)).map(key => `${key.kind}:${key.value}`);
-        if (this.merge(mention, strong[0], `Shared identity key ${basis.join(', ')}`))
+        if (this.merge(mention, strong[0], `Shared identity key ${basis.join(', ')}`, 'key'))
           decision = { canonicalId: canonicalOf(this.db, mention), outcome: 'merged', basis };
       } else if ((exact = this.exactNameMatch(mention, input.type, input.names)) !== null) {
         const key = input.names.map(fullNameKey).find(value => value && this.names(exact!).some(name => fullNameKey(name) === value));
@@ -215,7 +253,7 @@ export class IdentityResolver {
       for (const [other, matched] of entitiesWithKeys(this.db, keys, row.id)) {
         if (!sameFamily(this.type(other), row.type)) continue;
         const strong = matched.filter(key => identityBearing(family, key));
-        if (strong.length && this.merge(row.id, other, `Shared identity key ${strong.map(key => `${key.kind}:${key.value}`).join(', ')}`)) {
+        if (strong.length && this.merge(row.id, other, `Shared identity key ${strong.map(key => `${key.kind}:${key.value}`).join(', ')}`, 'key')) {
           merged++;
           break;
         }
@@ -248,7 +286,7 @@ export class IdentityResolver {
       writeKeys(this.db, self, keys);
       for (const [other, matched] of entitiesWithKeys(this.db, keys, self))
         if (sameFamily(this.type(other), 'Person') && matched.some(key => identityBearing('Person', key) || key.kind === 'handle'))
-          this.merge(other, self, `Account of the user (${matched.map(key => `${key.kind}:${key.value}`).join(', ')})`);
+          this.merge(other, self, `Account of the user (${matched.map(key => `${key.kind}:${key.value}`).join(', ')})`, 'self');
       indexEntity(this.db, self);
       return self;
     })();
@@ -290,6 +328,13 @@ export class IdentityResolver {
       this.db.query(`UPDATE graph_resolution_queue SET state=?,confidence=?,decided_at=?,reason=? WHERE mention_id=? AND candidate_id=?`)
         .run(verdict, confidence, Date.now(), reason.slice(0, 500), mention, candidate);
       if (verdict !== 'same') return;
+      const conflict = this.cannotLink(mention, candidate);
+      if (conflict) {
+        // The verdict stands as a label; the union it implies would join groups that were told apart.
+        this.db.query('UPDATE graph_resolution_queue SET reason=? WHERE mention_id=? AND candidate_id=?')
+          .run(`${reason.slice(0, 400)} [merge refused: ${conflict}]`, mention, candidate);
+        return;
+      }
       if (confidence >= 0.85) this.merge(mention, candidate, `${by} (${confidence.toFixed(2)}): ${reason}`.slice(0, 500));
       else if (confidence >= 0.6) this.link(canonicalOf(this.db, mention), 'COREFERS_TO', canonicalOf(this.db, candidate), confidence,
         'proposed', 'adjudication');
@@ -326,6 +371,55 @@ export class IdentityResolver {
         this.queue(later, first, 'duplicate-sweep');
         queued++;
       }
+    }
+    return queued;
+  }
+
+  /**
+   * Near-duplicate names that share no exact key ("James Redekop" / "James Redekopp", "Lumiere Education" /
+   * "Lumiere Education Group"): MinHash-LSH over character 3-grams of canonical registry names, verified by
+   * exact 3-gram Jaccard. Pairs of one family not yet considered are queued for linkage and adjudication,
+   * most similar first, at most `limit` per run.
+   */
+  sweepNearDuplicates(limit = 100, options: { threshold?: number; maxEntities?: number } = {}): number {
+    if (limit <= 0) return 0;
+    const threshold = options.threshold ?? 0.5;
+    const rows = this.db.query<{ id: number; type: string; name: string }, [number]>(`SELECT e.id,e.type,coalesce(e.display_name,e.name) AS name
+      FROM entities e WHERE e.canonical_id IS NULL AND e.type NOT IN ('Episode','WebPage')
+      AND NOT EXISTS(SELECT 1 FROM graph_entity_retirements r WHERE r.entity_id=e.id)
+      AND NOT EXISTS(SELECT 1 FROM graph_events g WHERE g.entity_id=e.id) ORDER BY e.id DESC LIMIT ?`).all(options.maxEntities ?? 20_000)
+      .filter(row => isRegistryType(row.type));
+    const grams = new Map<number, Set<string>>(), families = new Map<string, Array<{ key: number; signature: Uint32Array }>>();
+    const family = new Map<number, string>();
+    // One representative per folded name: identical names are the exact-key sweep's business, and copies
+    // would turn every bucket into a clique.
+    const seen = new Set<string>();
+    for (const row of rows.reverse()) {
+      const folded = `${typeFamily(row.type)}\u0000${fullNameKey(stripEmail(row.name)) ?? ''}`;
+      if (seen.has(folded)) continue;
+      seen.add(folded);
+      const set = shingles(stripEmail(row.name));
+      if (set.size < 4) continue;
+      grams.set(row.id, set);
+      family.set(row.id, typeFamily(row.type));
+      const list = families.get(typeFamily(row.type)) ?? [];
+      list.push({ key: row.id, signature: signature(set) });
+      families.set(typeFamily(row.type), list);
+    }
+    const candidates: Array<{ a: number; b: number; similarity: number }> = [];
+    for (const items of families.values()) for (const [x, y] of lshPairs(items)) {
+      const similarity = jaccard(grams.get(x)!, grams.get(y)!);
+      if (similarity >= threshold) candidates.push({ a: Math.min(x, y), b: Math.max(x, y), similarity });
+    }
+    candidates.sort((p, q) => q.similarity - p.similarity);
+    const considered = this.db.query('SELECT 1 FROM graph_resolution_queue WHERE (mention_id=?1 AND candidate_id=?2) OR (mention_id=?2 AND candidate_id=?1)');
+    let queued = 0;
+    for (const { a, b, similarity } of candidates) {
+      if (queued >= limit) break;
+      if (family.get(a) !== family.get(b) || considered.get(a, b) || this.cannotLink(a, b)) continue;
+      this.db.query(`INSERT INTO graph_resolution_queue(mention_id,candidate_id,basis,created_at) VALUES(?,?,?,?)
+        ON CONFLICT(mention_id,candidate_id) DO NOTHING`).run(b, a, `minhash:${similarity.toFixed(2)}`, Date.now());
+      queued++;
     }
     return queued;
   }

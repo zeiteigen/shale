@@ -1,0 +1,107 @@
+{
+  "description": "Golden threads for scripts/graph-eval.ts: sources a careful human would put in one pursuit. Email members match the connector's thread uri (derived from message ids, not LLM titles); other members match stable uris or raw 'Subject:' lines in chunk text.",
+  "threads": [
+    {
+      "name": "CCIR 1-on-1 research mentorship (2025)",
+      "description": "Applied to Cambridge Centre for International Research, interviewed, was admitted, onboarded, and met weekly with Dr Arsen Abdulali.",
+      "members": [
+        { "label": "application received", "origin": "email", "uri": "email://inbox/thread/2bc4def2f3d5d3f0*" },
+        { "label": "invite to interview", "origin": "email", "uri": "email://inbox/thread/82f221d02fc6b3b1*" },
+        { "label": "academic interview invite", "origin": "email", "uri": "email://inbox/thread/11d4f52de16c4833*" },
+        { "label": "official admission", "origin": "email", "uri": "email://inbox/thread/8b33e37ecc15eaf4*" },
+        { "label": "onboarding", "origin": "email", "uri": "email://inbox/thread/d531cf17c1372f19*" },
+        { "label": "mentor scheduling (Abdulali)", "origin": "email", "uri": "email://inbox/thread/c496445a89448884*" },
+        { "label": "research progress check-in", "origin": "email", "uri": "email://inbox/thread/525c84c9148f2584*" }
+      ]
+    },
+    {
+      "name": "Lumiere Research Scholar Program (2025)",
+      "description": "Application receipt, interview, admission decision, deposit, then mentor intro call and tuition.",
+      "members": [
+        { "label": "application receipt", "origin": "email", "uri": "email://inbox/thread/d8dd1fad424f2354*" },
+        { "label": "interview invitation", "origin": "email", "uri": "email://inbox/thread/4802d42de420c921*" },
+        { "label": "admission decision", "origin": "email", "uri": "email://inbox/thread/af5fc37ef7af494e*" },
+        { "label": "deposit confirmation", "origin": "email", "uri": "email://inbox/thread/b125ee808c1903df*" },
+        { "label": "mentor intro call + tuition", "origin": "email", "uri": "email://inbox/thread/dfcd4c870207f5d4*" }
+      ]
+    },
+    {
+      "name": "UWHPC onboarding challenge (2026)",
+      "description": "Deadline announced on the UWHPC Discord, the user's fork of the onboarding template on GitHub, and the interview invite after submission.",
+      "members": [
+        { "label": "discord deadline announcement", "origin": "discord", "uri": "discord://channel/1478822500778381382*" },
+        { "label": "github onboarding-template", "origin": "browser", "uri": "https://github.com/zeiteigen/onboarding-template*" },
+        { "label": "submission chat invite email", "origin": "email", "uri": "email://inbox/thread/fe08ade0b9b2c5f0*" }
+      ]
+    },
+    {
+      "name": "NYAS Junior Academy on Launchpad (Fall 2022)",
+      "description": "Accepted to the Junior Academy, invited to Launchpad, formed a team for the Green Redesign challenge and messaged teammates.",
+      "members": [
+        { "label": "acceptance", "origin": "email", "uri": "email://inbox/thread/12149f6b0798d4ab*" },
+        { "label": "launchpad invitation", "origin": "email", "uri": "email://inbox/thread/4d2a6a988490c60e*" },
+        { "label": "green redesign team posts", "origin": "email", "text": "*Subject: * in *for the Green Re*sign*" },
+        { "label": "teammate messages (Nasser A.)", "origin": "email", "text": "*Subject: Nasser A. sent you a message on Launchpad*" }
+      ]
+    },
+    {
+      "name": "University of Toronto EE application (2025-26)",
+      "description": "Application, missing-document reminders, a letter of continued interest drafted in Obsidian and sent, and the decision.",
+      "members": [
+        { "label": "application received", "origin": "email", "uri": "email://inbox/thread/dc1c54d2548ab766*" },
+        { "label": "missing documents", "origin": "email", "uri": "email://inbox/thread/494e46106c8ed72f*" },
+        { "label": "LOCI note", "origin": "obsidian", "uri": "*/LOCI for UofT EE.md" },
+        { "label": "update request note", "origin": "obsidian", "uri": "*/Email to UofT for update.md" },
+        { "label": "LOCI / waitlist email", "origin": "email", "uri": "email://inbox/thread/19473dbbf7b04c82*" },
+        { "label": "decision", "origin": "email", "uri": "email://inbox/thread/a11e4619db29a45c*" }
+      ]
+    },
+    {
+      "name": "UWaterloo entrance bursary exception (2026)",
+      "description": "The request for an exception to the need-based aid deadline, drafted in Obsidian, and the SAFA-4423 ticket that denied it.",
+      "members": [
+        { "label": "bursary request note", "origin": "obsidian", "uri": "*/Email to UWaterloo for bursary*" },
+        { "label": "SAFA-4423 response", "origin": "email", "uri": "email://inbox/thread/82c27f5a9e7f1067*" }
+      ]
+    },
+    {
+      "name": "University of Michigan admission and I-20 (2025-26)",
+      "description": "Common App submission, admission to Michigan Engineering, then repeated I-20 document requests ending in a withdrawal notice.",
+      "members": [
+        { "label": "application submitted", "origin": "email", "uri": "email://inbox/thread/e278f79bed98e0ab*" },
+        { "label": "engineering admission", "origin": "email", "uri": "email://inbox/thread/0ec03d180c62ad7e*" },
+        { "label": "I-20 document reminders", "origin": "email", "uri": "email://inbox/thread/012e84297eb7054c*" },
+        { "label": "withdrawal notice", "origin": "email", "uri": "email://inbox/thread/d036159c29da6788*" }
+      ]
+    },
+    {
+      "name": "Winter 2027 co-op search",
+      "description": "Interests and posting longlists kept in Obsidian, WaterlooWorks visits, and TD intern/co-op applications.",
+      "members": [
+        { "label": "co-op interests note", "origin": "obsidian", "uri": "*/What I'm interested in for co-op*" },
+        { "label": "waterlooworks shortlist note", "origin": "obsidian", "uri": "*/shortlist waterlooworks*" },
+        { "label": "waterlooworks visit", "origin": "browser", "uri": "*waterlooworks.uwaterloo.ca*" },
+        { "label": "TD co-op application", "origin": "email", "text": "*Subject: TD Careers: Thank you for your job application*" }
+      ]
+    },
+    {
+      "name": "Hack the North 2026",
+      "description": "Applied, was not accepted as a hacker but offered to volunteer, then the volunteer deadline reminder.",
+      "members": [
+        { "label": "application confirmation", "origin": "email", "uri": "email://inbox/thread/5107b3b5ca950a86*" },
+        { "label": "decision + volunteer offer", "origin": "email", "uri": "email://inbox/thread/f605bde444573108*" },
+        { "label": "volunteer deadline", "origin": "email", "uri": "email://inbox/thread/6e43f8125b4f4aff*" }
+      ]
+    },
+    {
+      "name": "Installing Claude Desktop on Linux",
+      "description": "Searched for Claude Desktop on Omarchy, read the Linux docs and download page, and had ChatGPT review the AUR package.",
+      "members": [
+        { "label": "google searches", "origin": "search", "uri": "search://google/claude%20desktop*" },
+        { "label": "linux docs page", "origin": "browser", "uri": "https://code.claude.com/docs/en/desktop-linux*" },
+        { "label": "download page", "origin": "browser", "uri": "https://claude.com/download*" },
+        { "label": "AUR package review", "origin": "chatgpt", "uri": "chatgpt://conversation/6acd8890-77b0-83e9*" }
+      ]
+    }
+  ]
+}

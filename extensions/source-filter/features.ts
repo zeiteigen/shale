@@ -11,6 +11,8 @@ export interface SourceFeatures {
   text: string; lines: string[]; payloadLines: string[]; failureLines: string[];
   boilerplateRatio: number; repetitionRatio: number; linkRatio: number; urls: number;
   promotionCues: number; hasObservedText: boolean; fullyRetained: boolean;
+  /** Other live sources from the same origin and producer whose SimHash is within 3 bits (set by the run). */
+  nearDuplicates?: number;
 }
 
 /** Analyse observed excerpts once; never count the generated overview as another copy of the body. */

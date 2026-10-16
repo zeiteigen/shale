@@ -7,6 +7,8 @@
   "maxContentChars": 24000,
   "runBudgetSeconds": 180,
   "removeConfidence": 0.9,
+  "nearDuplicateMinCopies": 3,
+  "nearDuplicateDistance": 3,
   "llmModel": null,
   "origins": ["browser", "email", "discord", "instagram", "chatgpt", "claude", "gemini", "search", "youtube"],
   "protectedSourceIds": [],

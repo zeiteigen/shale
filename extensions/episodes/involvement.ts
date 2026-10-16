@@ -163,7 +163,8 @@ export function auditEpisode(sdk: ShaleSDK, assigner: Assigner, episode: number,
     let pruned = 0;
     // Without a defining source left there is nothing to measure members against; leave the episode whole.
     for (const row of defining.length ? rows : []) {
-      if (keep.has(row.claimId) || protectedMember(row)) continue;
+      // Members the clustering placed are re-judged by it each run (with hysteresis), not by the greedy score.
+      if (keep.has(row.claimId) || protectedMember(row) || row.basis.startsWith('cluster ')) continue;
       const digest = digestFor(sdk, row.sourceId);
       if (!digest) continue;
       let activity = null;

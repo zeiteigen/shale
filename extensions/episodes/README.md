@@ -69,6 +69,26 @@ Before deciding new sources, each run folds open episodes with the same title (w
 - **Merge:** after same-title folding, differently titled open episodes overlapping in time are reviewed when they share two involved entities, or one organization, project, course, or opportunity. Entity aliases merged into a canonical identity count together. A merge still requires model confidence of at least 0.8. A declined pair is reconsidered after its members or summaries change.
 - **Dormancy:** episodes idle for `dormantDays` become dormant until a new member arrives.
 
+## Global clustering (`clusteringMode`, `narrativeMode`; default `shadow`)
+
+[`lib/graph/cluster.ts`](../../lib/graph/cluster.ts) clusters every digested source at once instead of one at a time:
+
+- **Affinity:** Σ over shared canonical signals of idf × type weight × exp(−|Δt|/`clusterTauDays`). Signals that travel together (a sender's organisation, address, and footer links) count once, and a pair linked by a single piece of evidence counts half.
+- **Constraints:** one email thread or chat conversation, one URL, and Obsidian wikilinks (hub notes excepted) are must-links, as are each episode's protected members (manual, model-confirmed, closed). Manual detachments and undone episode merges are cannot-links.
+- **Clustering:** constrained Leiden with the Constant Potts Model (resolution `clusterResolution`), then splits at gaps longer than `dormantDays`. A cluster is a pursuit only when the user took part in a source whose digest names an activity. Observer-only clusters attach as context to the nearest pursuit when affinity suffices. Clusters keep existing episode ids through Hungarian matching on member overlap.
+- **Narrative:** [`lib/graph/episode-narrative.ts`](../../lib/graph/episode-narrative.ts) derives the kind and stage from per-kind state machines over lexicon cues. It also sets roles and closes an episode when a closing stage (rejected, delivered, completed, …) is the latest member's. The title is the most specific shared entity plus a kind word, unique among open episodes. The summary is a LexRank extract of member digests.
+
+**Shadow** records the clustering's verdict per source (`graph_shadow_decisions`, kind `episode`, subject `source:<id>`), its view of each model merge (`merge:<a>:<b>`), and the deterministic narrative (kind `summary`, subject `episode:<id>`). The model's verdicts are recorded beside them.
+
+**Active** clustering replaces the model review and the model duplicate merge:
+- it writes only diffs (merge, attach, move, create) with basis `cluster …` and actor `episodes-cluster`;
+- a member moves only when its affinity gain exceeds `clusterHysteresis`, never out of a one-member episode;
+- a fresh attachment needs at least two independent shared signals;
+- episodes merge only with direct affinity of at least `clusterMergeAffinity`;
+- at most `maxClusterChangesPerRun` changes are made per run.
+
+Cluster-placed members are re-judged by the clustering, not by the score audit. Active narrative replaces the model rewrite but keeps the current title unless that title came from members that have left. With `llmNarrativePolish`, the model still rewrites multi-source episodes.
+
 ## Corrections and access
 
 - **Corrections:** `merge_episodes`, `split_episode`, and `detach_from_episode` are audited and pass the access write guard. Merges group identities without copying memberships or involvement claims; `unmerge_entities` separates them again and preserves each original episode's dates and status. Consolidation refreshes generated narratives afterward.

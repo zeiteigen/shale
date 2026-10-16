@@ -6,6 +6,8 @@ import { SourceProtections, protectionReason } from './protection';
 import { ChangedSourceError, removeSource } from './removal';
 import { reviewSource } from './review';
 import { classify } from './rules';
+import { sourceFeatures } from './features';
+import { NearDuplicates } from './near-duplicates';
 import { readSource, selectSources } from './selection';
 import { policyKey, readSettings } from './settings';
 import { keep, type FilterSource, type FilterStats, type RunOptions, type StoredDecision } from './types';
@@ -28,6 +30,12 @@ export async function run(sdkOverride?: ShaleSDK, options: RunOptions = {}): Pro
   const heartbeat = setInterval(() => { try { lease.renew(); } catch (error) { leaseError = error; } }, 30_000);
   try {
     const decisions = new FilterDecisions(sdk.database), protections = new SourceProtections(sdk);
+    const duplicates = new NearDuplicates(sdk.database);
+    const verdictFor = (source: FilterSource) => {
+      const features = sourceFeatures(source);
+      if (settings.nearDuplicateMinCopies > 0) features.nearDuplicates = duplicates.observe(source, features, settings.nearDuplicateDistance);
+      return classify(source, features, { nearDuplicateMinCopies: settings.nearDuplicateMinCopies });
+    };
     const key = policyKey(settings, sdk), deadline = Date.now() + settings.runBudgetSeconds * 1000;
     const dryRun = options.dryRun === true || settings.dryRun;
     decisions.reconcile();
@@ -76,7 +84,7 @@ export async function run(sdkOverride?: ShaleSDK, options: RunOptions = {}): Pro
       const cached = decisions.get(source.id), protectedReason = protectionReason(source, settings, protections.curated());
       const stored: StoredDecision = cached?.contentKey === source.contentKey && cached.policyKey === key ? cached : {
         sourceId: source.id, contentKey: source.contentKey, policyKey: key, sourceVersion: source.version,
-        verdict: classify(source), attempts: 0, retryAt: 0, appliedAt: null,
+        verdict: verdictFor(source), attempts: 0, retryAt: 0, appliedAt: null,
       };
       stored.sourceVersion = source.version;
       if (protectedReason) stored.verdict = keep(protectedReason);

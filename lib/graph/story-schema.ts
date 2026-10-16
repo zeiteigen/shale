@@ -15,6 +15,7 @@ const ready = new WeakSet<Database>();
  *   connector context such as the channel and server); their document frequency weighs episode evidence.
  * - graph_resolution_queue: mention→candidate pairs awaiting a model identity decision.
  * - graph_episodes: metadata for Episode entities; membership is PART_OF_EPISODE claims.
+ * - graph_shadow_decisions: deterministic verdicts recorded beside the model's, for promotion by agreement.
  */
 export function ensureStorySchema(db: Database) {
   if (ready.has(db)) return;
@@ -59,6 +60,14 @@ export function ensureStorySchema(db: Database) {
       entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
       source_id TEXT NOT NULL,
       PRIMARY KEY(entity_id,source_id)
+    ) STRICT;
+    -- Deterministic replacements of model decisions, recorded beside the model's verdict until promoted.
+    CREATE TABLE IF NOT EXISTS graph_shadow_decisions (
+      kind TEXT NOT NULL, subject_key TEXT NOT NULL, method TEXT NOT NULL,
+      verdict_json TEXT NOT NULL CHECK(json_valid(verdict_json)),
+      llm_verdict_json TEXT CHECK(llm_verdict_json IS NULL OR json_valid(llm_verdict_json)),
+      at INTEGER NOT NULL,
+      PRIMARY KEY(kind, subject_key, method)
     ) STRICT;
     -- Merged identity groups are walked through canonical_id everywhere; without this SQLite scans entities each time.
     CREATE INDEX IF NOT EXISTS entities_canonical ON entities(canonical_id) WHERE canonical_id IS NOT NULL;

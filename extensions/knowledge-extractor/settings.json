@@ -3,5 +3,13 @@
   "maxSourcesPerRun": 12,
   "maxContentChars": 12000,
   "namespace": "knowledge",
-  "llmModel": null
+  "llmModel": null,
+  "deterministicMode": "shadow",
+  "predicateSchema": "active",
+  "skipLlmWhenCovered": false,
+  "templateMode": "shadow",
+  "templateMinMembers": 5,
+  "templateMinAlignment": 0.8,
+  "maxTemplateLabelsPerRun": 2,
+  "maxTemplateInductionsPerRun": 40
 }

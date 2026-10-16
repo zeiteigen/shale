@@ -96,7 +96,8 @@ export async function prepareWindow(sdk: ShaleSDK, connector: ChatConnector, win
   }
   const transcript = chunks.map(chunk => chunk.text_content).join("\n");
   const synthesis = await summarizeWindow(sdk, window.conversation, messages, transcript,
-    { enabled: settings.summarize !== false, model: settings.llmModel,
+    { enabled: settings.summarize !== false, model: settings.llmModel, subject: window.windowId,
+      mode: settings.summaryMode === "extractive" ? "extractive" : "llm",
       signal:connector.policy?.deadline ? AbortSignal.timeout(Math.max(1,connector.policy.deadline-Date.now())) : undefined });
   const memory = prepareSourceMemory(chunks, { title: synthesis.title, summary: synthesis.summary });
   const data: PreparedChatWindow = {

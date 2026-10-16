@@ -41,6 +41,16 @@ const SYNONYMS: Record<string, CanonicalType> = {
   concept: 'Concept', topic: 'Concept', skill: 'Concept', idea: 'Concept', field: 'Concept', subject: 'Concept',
   course: 'Course', class: 'Course',
   episode: 'Episode',
+  // Head nouns that end proper names ("Lumiere Research Scholar Program", "Hack the North Hackathon"): mention typing
+  // reads the last word of a name through this table, so these must not fall through to Concept.
+  college: 'Organization', institute: 'Organization', foundation: 'Organization', society: 'Organization', academy: 'Organization',
+  association: 'Organization', inc: 'Organization', llc: 'Organization', ltd: 'Organization', corp: 'Organization',
+  corporation: 'Organization', department: 'Organization', laboratory: 'Organization', labs: 'Organization', museum: 'Organization',
+  hospital: 'Organization', council: 'Organization', committee: 'Organization', federation: 'Organization',
+  fellowship: 'Opportunity', olympiad: 'Opportunity', bootcamp: 'Opportunity', residency: 'Opportunity', grant: 'Opportunity',
+  award: 'Opportunity', prize: 'Opportunity', contest: 'Opportunity',
+  webinar: 'Event', seminar: 'Event', summit: 'Event', symposium: 'Event', expo: 'Event', fair: 'Event', ceremony: 'Event',
+  orientation: 'Event', session: 'Event', lecture: 'Event',
 };
 
 /** Map a free-text model type onto the ontology; unknown labels become Concept rather than new types. */

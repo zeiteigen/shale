@@ -7,6 +7,9 @@ import type { EpisodesSettings } from './settings.types';
 import { reconsiderContext } from './reconsider';
 import { mergeSameTitled } from './consolidate';
 import { auditOpenEpisodes, refreshInvolvement, wouldDefine } from './involvement';
+import { memberRole, type EpisodeKind } from '../../lib/graph/episode-narrative';
+import { recordShadowLLM, shadowMode } from '../../lib/graph/shadow';
+import { computeClustering, reconcile, recordClusterShadow } from './clustering';
 
 /**
  * Assign digested sources to episodes, oldest first so stories grow in order.
@@ -32,6 +35,8 @@ const REVIEW_BATCH = 6;
 const INVOLVEMENT_DERIVED = 'involvement-derived-v1';
 export const DEFAULTS: Required<Omit<EpisodesSettings, 'llmModel'>> = {
   enabled: true, maxSourcesPerRun: 200, attachScore: 4, reviewScore: 2, recencyDays: 45, maxAdjudicationsPerRun: 12, dormantDays: 45,
+  clusteringMode: 'shadow', narrativeMode: 'shadow', llmNarrativePolish: false, clusterResolution: 1.5, clusterTauDays: 60,
+  clusterHysteresis: 1, clusterMergeAffinity: 2.5, maxClusterChangesPerRun: 40,
 };
 
 /** Entities that characterise a source: what the digest resolved, plus where it happened and what it links to. */
@@ -152,10 +157,10 @@ export function candidates(sdk: ShaleSDK, digest: Digest, activity: Activity | n
 export const participating = (digest: Pick<Digest, 'involvement'>) => digest.involvement === 'participant' || digest.involvement === 'author';
 const PURSUIT_TYPES = new Set(['Organization', 'Project', 'Course', 'Opportunity']);
 
+/** Trigger, context (bystanders), outcome (a terminal stage of the kind's state machine), or progress. */
 function role(digest: Digest, activity: Activity | null, isNew: boolean): MemberRole {
-  if (isNew) return 'trigger';
-  if (!participating(digest)) return 'context';
-  return /offer|accept|reject|declin|complet|finish|result|decision|hired|admitted|interview/i.test(activity?.stage ?? '') ? 'outcome' : 'progress';
+  return memberRole((activity?.kind ?? 'other') as EpisodeKind, { sourceId: digest.source_id, title: digest.title, summary: digest.summary,
+    at: digest.occurred_from ?? digest.occurred_to, involvement: digest.involvement, activity }, isNew);
 }
 
 const step = (digest: Digest, activity: Activity | null) =>
@@ -306,6 +311,9 @@ export async function review(sdk: ShaleSDK, assigner: Assigner, items: Pending[]
         .get(pending.digest.source_id)?.episode_state;
       if (state !== 'review') continue;
       const { confidence } = verdict;
+      // Shadow comparison with the clustering's verdict for the same source (a no-op when none was recorded).
+      recordShadowLLM(sdk.database, 'episode', `source:${pending.digest.source_id}`, { episode: choice && confidence >= 0.5 ? choice.id : null,
+        newEpisode: verdict.newEpisode, confidence });
       if (choice && confidence >= 0.5)
         assigner.attach(choice.id, pending, confidence >= 0.8 ? 'accepted' : 'proposed', confidence, `model review ${confidence.toFixed(2)}`);
       else if (verdict.newEpisode && pending.activity && participating(pending.digest)) assigner.start(pending);
@@ -339,9 +347,20 @@ export async function assign(sdk: ShaleSDK, settings: typeof DEFAULTS, model?: s
     processed++;
     if (pending) { assigner.mark(digest.source_id, 'review'); reviews.push(pending); }
   }
-  let reviewed = 0;
+  let reviewed = 0, clustered: ReturnType<typeof reconcile> | null = null;
+  const mode = shadowMode(settings.clusteringMode);
   try {
-    reviewed = reviews.length ? await review(sdk, assigner, reviews, model) : 0;
+    if (mode === 'active') {
+      // The clustering replaces the model's middle-band review: one global, constrained decision per run.
+      clustered = reconcile(sdk, assigner, settings, reviews);
+    } else {
+      // Shadow: record the clustering's view first, so the model's verdicts below land on the same rows.
+      if (mode === 'shadow' && (processed || reviews.length)) {
+        try { recordClusterShadow(sdk, computeClustering(sdk, settings)); }
+        catch (error) { sdk.logger.warn(`Episode clustering shadow failed: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+      reviewed = reviews.length ? await review(sdk, assigner, reviews, model) : 0;
+    }
   } finally {
     // Anything the model did not answer is retried next run.
     for (const pending of reviews) sdk.database.query("UPDATE graph_source_digests SET episode_state='pending' WHERE source_id=? AND episode_state='review'")
@@ -349,5 +368,5 @@ export async function assign(sdk: ShaleSDK, settings: typeof DEFAULTS, model?: s
   }
   // A new defining member can raise the support an entity needs; members that relied on a dropped hook return to pending.
   pruned += auditOpenEpisodes(sdk, assigner, assigner.touched);
-  return { processed, reviewed, merged, pruned };
+  return { processed, reviewed, merged: merged + (clustered?.merged ?? 0), pruned, ...(clustered ? { clustered } : {}) };
 }

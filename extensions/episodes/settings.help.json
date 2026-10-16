@@ -8,6 +8,14 @@
     "recencyDays": {"type": "number", "description": "Time scale of the recency weight: a source this many days after an episode's last activity counts about 60% as much.", "default": 45, "range": {"min": 1, "max": 3650}},
     "maxAdjudicationsPerRun": {"type": "number", "description": "Uncertain assignments the model reviews per run (six sources per request).", "default": 12, "range": {"min": 0, "max": 200}},
     "dormantDays": {"type": "number", "description": "Days without activity before an episode is marked dormant.", "default": 45, "range": {"min": 1, "max": 3650}},
+    "clusteringMode": {"type": "string", "description": "Global constrained clustering of digested sources (Leiden/CPM over shared rare entities, threads, wikilinks). off: not run; shadow: recorded beside the model's review for comparison (graph_shadow_decisions); active: replaces the model's middle-band review and duplicate merging.", "default": "shadow", "possibleValues": ["off", "shadow", "active"]},
+    "narrativeMode": {"type": "string", "description": "Deterministic episode narrative (kind/stage state machine, top-entity title, extractive summary). off: model only; shadow: recorded beside the model's rewrite; active: replaces the model's rewrite (see llmNarrativePolish).", "default": "shadow", "possibleValues": ["off", "shadow", "active"]},
+    "llmNarrativePolish": {"type": "boolean", "description": "With narrativeMode active, still let the model rewrite multi-source narratives (the deterministic one is the fallback).", "default": false, "possibleValues": [true, false]},
+    "clusterResolution": {"type": "number", "description": "CPM resolution: affinity (shared-entity rarity, time-decayed) needed per pair of sources for groups to join. Higher splits more.", "default": 1.5, "range": {"min": 0.1, "max": 50}},
+    "clusterTauDays": {"type": "number", "description": "Time scale of the clustering's temporal kernel: sources this many days apart count about 37% as much.", "default": 60, "range": {"min": 1, "max": 3650}},
+    "clusterHysteresis": {"type": "number", "description": "Extra mean affinity a member must have to another episode before active clustering moves it there.", "default": 1, "range": {"min": 0, "max": 50}},
+    "clusterMergeAffinity": {"type": "number", "description": "Active clustering merges two episodes only when each member of the smaller one has, on average, at least this affinity to its closest member of the other (direct evidence, not a chain through the cluster).", "default": 2.5, "range": {"min": 0, "max": 50}},
+    "maxClusterChangesPerRun": {"type": "number", "description": "Most membership changes (attach, move, merge, create) active clustering makes per run.", "default": 40, "range": {"min": 0, "max": 1000}},
     "llmModel": {"type": "string", "description": "Optional chat model override for episode review and consolidation.", "default": null}
   }
 }

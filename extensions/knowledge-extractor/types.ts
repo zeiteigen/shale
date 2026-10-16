@@ -10,11 +10,19 @@ export interface ExtractedEntity {
   urls?:string[];
   /** The id of a listed registry entity this is the same thing as. */
   match?:number|null;
+  /** A registry entity linked deterministically (gazetteer): committed as that entity, without a new mention entity. */
+  entityId?:number;
+  /** Graph `method` for records this entity produces; absent means the model ('llm'). */
+  method?:string;
+  /** Exact quotes where a deterministic pass found the entity: evidence for its MENTIONS_ENTITY claim. */
+  mentions?:Array<{chunkIndex:number;quote:string}>;
 }
 export type Involvement = 'none'|'observer'|'participant'|'author';
 export interface DigestActivity {label:string;kind:string;stage?:string;episode?:number|'new'|null;confidence?:number}
 export interface ExtractedClaim extends Omit<ClaimInput,'id'|'subject'|'object'|'evidence'|'dependsOn'|'status'|'method'|'namespace'> {
   subject:string;object?:string;evidence:Array<{chunkIndex:number;quote:string}>;
+  /** Graph `method`; absent means the model ('llm'). Never read from model output. */
+  method?:string;
 }
 export interface ExtractedEvent {
   key:string;name:string;kind:string;context?:string;occurredFrom?:number;occurredTo?:number;
@@ -44,4 +52,16 @@ export interface ExtractionCheckpoint {
   /** First window of a revision: carries the digest fields. */
   first?: boolean;
   digest?: DigestContext;
+  /** Source creation time: the anchor for relative and yearless dates when validating timestamps. */
+  anchor?: number;
+  /** graph_shadow_decisions subject of this window's deterministic verdict; the commit attaches the model's beside it. */
+  shadowSubject?: string;
+  /** No model call was made: entities, dates, involvement, and an extractive summary came from the deterministic pass. */
+  deterministicOnly?: boolean;
+  /** The user's involvement settled by connector participants; overrides the model's reading. */
+  involvement?: Involvement;
+  /** Digested from email templates (templates.ts) without a model call: records carry method 'template'. */
+  templateIds?: string[];
+  /** graph_shadow_decisions subject (kind 'template') of a template digest computed in shadow mode; the commit attaches the model's. */
+  templateShadow?: string;
 }

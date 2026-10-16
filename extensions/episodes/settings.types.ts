@@ -6,5 +6,13 @@ export interface EpisodesSettings {
   recencyDays: number;
   maxAdjudicationsPerRun: number;
   dormantDays: number;
+  clusteringMode: 'off' | 'shadow' | 'active';
+  narrativeMode: 'off' | 'shadow' | 'active';
+  llmNarrativePolish: boolean;
+  clusterResolution: number;
+  clusterTauDays: number;
+  clusterHysteresis: number;
+  clusterMergeAffinity: number;
+  maxClusterChangesPerRun: number;
   llmModel: string | null;
 }

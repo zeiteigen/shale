@@ -46,14 +46,15 @@ function configTierSql(policy: AccessPolicy, columns: SourceColumns, params: SQL
 
 /**
  * Effective tier: a manual label wins. Otherwise the most restrictive of the configured floor,
- * the automatic tier (LLM refines heuristics), and any hard heuristic finding. Records no
+ * the automatic tier (LLM refines heuristics; a distilled label stands in for an LLM label it
+ * skipped and is never below the heuristic), and any hard heuristic finding. Records no
  * classifier has judged yet (for their current content) count as secret.
  */
 function effectiveTierSql(kind: string, idSql: string, hashSql: string, floorSql: string) {
   const label = (origin: string, extra = "") =>
     `(SELECT tier FROM main.graph_access_labels WHERE kind='${kind}' AND record_id=${idSql} AND origin='${origin}'${extra})`;
   const current = ` AND content_hash=${hashSql}`;
-  return `COALESCE(${label("manual")}, MAX(${floorSql}, COALESCE(${label("llm", current)}, ${label("heuristic", current)}, ${SECRET}),
+  return `COALESCE(${label("manual")}, MAX(${floorSql}, COALESCE(${label("llm", current)}, ${label("distilled", current)}, ${label("heuristic", current)}, ${SECRET}),
     COALESCE(${label("heuristic", `${current} AND hard=1`)}, 0)))`;
 }
 
@@ -103,7 +104,8 @@ export function materializeVisibility(db: Database, profile: ResolvedProfile, po
       WHERE kind='source' AND record_id=r.source_id AND origin='${origin}'${extra})`;
     const judged = `l.content_hash=(${REVISION_CONTENT_HASH_SQL})`;
     const revisionTier = `COALESCE(${sourceLabel("manual")},MAX(${revisionFloor},
-      CASE WHEN ${judged} THEN COALESCE(${sourceLabel("llm", ` AND content_hash=${revisionHash}`)},l.tier) ELSE ${SECRET} END,
+      CASE WHEN ${judged} THEN COALESCE(${sourceLabel("llm", ` AND content_hash=${revisionHash}`)},
+        ${sourceLabel("distilled", ` AND content_hash=${revisionHash}`)},l.tier) ELSE ${SECRET} END,
       CASE WHEN ${judged} AND l.hard=1 THEN l.tier ELSE 0 END,
       COALESCE(${sourceLabel("heuristic", ` AND content_hash=${revisionHash} AND hard=1`)},0)))`;
     const revisionFilter = sourceConditionsSql(profile, revisionColumns, revisionTier, revisionParams);
